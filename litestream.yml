@@ -1,0 +1,8 @@
+# Continuous replication of the SQLite DB to a private GCS bucket.
+# LITESTREAM_BUCKET is injected by Cloud Run (set in scripts/deploy.sh).
+dbs:
+  - path: /data/scarab.db
+    replicas:
+      - type: gcs
+        bucket: ${LITESTREAM_BUCKET}
+        path: scarab
