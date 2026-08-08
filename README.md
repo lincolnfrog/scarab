@@ -8,7 +8,7 @@ Start here: **`DESIGN.md`** (architecture, data model, decisions, roadmap),
 **`PRIVACY.md`** (the zero-knowledge architecture and its limits),
 `CLAUDE.md` (hard rules + design tokens; mockup link inside).
 
-# Disclaimers
+## Disclaimers
 This is a personal project. The views, code, and opinions expressed here are my
 own and do not represent those of my current of past employers.
 
