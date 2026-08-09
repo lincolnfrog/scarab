@@ -10,7 +10,7 @@ Start here: **`DESIGN.md`** (architecture, data model, decisions, roadmap),
 
 ## Disclaimers
 This is a personal project. The views, code, and opinions expressed here are my
-own and do not represent those of my current of past employers.
+own and do not represent those of my current or past employers.
 
 **Nothing in this tool should be considered financial advice**. It is provided
 purely for informational purposes. The authors of this code make no guarantee
