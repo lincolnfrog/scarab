@@ -138,6 +138,14 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
         return svc.createLoan(db, b)
       case 'DELETE /loans/*':
         return svc.deleteLoan(db, Number(seg[1]))
+      case 'GET /tax': {
+        const tax = await import('../engine/tax')
+        return tax.getTax(db, todayIso())
+      }
+      case 'PUT /tax/*': {
+        const tax = await import('../engine/tax')
+        return tax.putTaxSettings(db, b)
+      }
       case 'POST /simulate': {
         const { simulate } = await import('../engine/simulate')
         const p = b as import('../engine/simulate').SimParams

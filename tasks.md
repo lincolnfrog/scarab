@@ -14,39 +14,54 @@ design-heavy).
 
 ## Active: 1 — Tax intelligence layer
 
+**Shipped 2026-08-27** (`engine/tax.ts`, `server/api5.ts`, `src/screens/Taxes.tsx`):
+real 2026 federal brackets + LT stacking + NIIT, CA brackets + MHST, no-tax and
+flat states bundled, custom-rate fallback for the rest. Follow-ups now live at
+the bottom of this section.
+
 We track tax lots, ST/LT splits, RSU vests, and basis resolution more
 rigorously than most consumer tools, then do nothing with it. Turn that data
 into answers. All computation derived from trades/vests/prices at read time —
 no stored tax numbers.
 
-- [ ] **Tax settings.** Filing status + rates (federal ST/LT, state,
+- [x] **Tax settings.** Filing status + rates (federal ST/LT, state,
       withholding rate on RSU vests). Decide: user-entered marginal rates vs
       real bracket math (open question — see review). Storage:
       `goal_settings`-style JSON blob or a proper `tax_settings` table
       (append-only migration either way).
-- [ ] **`engine/tax.ts`.** Year-to-date realized picture from the ledger:
+- [x] **`engine/tax.ts`.** Year-to-date realized picture from the ledger:
       realized ST/LT gains via the lots engine, RSU ordinary income from
       vest-day values, dividends/interest if present. Pure `(db, args)`
       service functions like everything else.
-- [ ] **Withholding gap.** Estimated tax on YTD + projected full-year comp
+- [x] **Withholding gap.** Estimated tax on YTD + projected full-year comp
       vs. what's actually withheld (RSU flat supplemental rate is the classic
       April surprise). Surface as one number with the assumption spelled out.
-- [ ] **Harvesting advisor.** Per-lot unrealized loss report: which specific
+- [x] **Harvesting advisor.** Per-lot unrealized loss report: which specific
       lots are harvestable, ST/LT character of the loss, what selling them
       offsets. Wash-sale awareness: flag lots with purchases (incl. vests)
       within ±30 days, and warn on proposed sells that would trip one.
-- [ ] **After-tax proceeds everywhere.** Hover on any lot in Invest shows net
+- [x] **After-tax proceeds everywhere.** Hover on any lot in Invest shows net
       after estimated tax, not gross. Reuse `grossSaleForNet` family in
       `shared/series.ts`; extend for ST/LT split.
-- [ ] **Estimated quarterlies.** Safe-harbor check (110% prior-year /
+- [x] **Estimated quarterlies.** Safe-harbor check (110% prior-year /
       90% current-year) + due-date awareness.
-- [ ] **Tax screen or Invest section.** Follow the mockup design language
+- [x] **Tax screen or Invest section.** Follow the mockup design language
       (tokens in CLAUDE.md). One headline number: projected tax bill / refund
       gap for the current year.
-- [ ] **Tests.** Lot-edge cases (wash-sale window boundaries, vest-then-sell,
+- [x] **Tests.** Lot-edge cases (wash-sale window boundaries, vest-then-sell,
       specific-lot harvests), parity (better-sqlite3 vs sql.js), determinism.
-- [ ] **Disclaimer copy.** This is estimation, not advice; say so in the UI
+- [x] **Disclaimer copy.** This is estimation, not advice; say so in the UI
       where the numbers appear (matches README stance).
+
+Follow-ups (not blocking):
+
+- [ ] State estimated-payment schedules (CA weights 30/40/0/30) — federal-only today.
+- [ ] Bundle brackets for more progressive states (NY, NJ, OR, MN, HI…) — custom
+      marginal rate is the fallback today.
+- [ ] Project remaining-year vests into the income picture (needs a vest
+      schedule; unvested_positions has no dates).
+- [ ] Qualified vs ordinary dividend split (all treated as ordinary today).
+- [ ] 2026 CA brackets when the FTB publishes them (currently 2025; HoH estimated).
 
 ## Backlog: 2 — Weekly digest & proactivity
 

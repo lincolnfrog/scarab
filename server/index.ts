@@ -5,6 +5,7 @@ import { api } from './api'
 import { api2 } from './api2'
 import { api3 } from './api3'
 import { api4 } from './api4'
+import { api5 } from './api5'
 import { db, schemaVersion } from './db'
 import { detectTransfers } from './import'
 import { runRepairs } from './repairs'
@@ -31,6 +32,7 @@ app.route('/api', api)
 app.route('/api', api2)
 app.route('/api', api3)
 app.route('/api', api4)
+app.route('/api', api5)
 
 // Built client, with SPA fallback for client-side routes. Hashed assets are
 // immutable; the HTML shell must never be cached or deploys leave users on

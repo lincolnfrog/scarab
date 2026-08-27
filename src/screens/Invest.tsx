@@ -66,6 +66,7 @@ export default function Invest() {
   const [vesting, setVesting] = useState<{ row: Unvested; qty: string; date: string; total: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const autoRefreshed = useRef(false)
+  const [taxMarginal, setTaxMarginal] = useState<{ stMicro: number; ltMicro: number } | null>(null)
   const [chartSymbol, setChartSymbol] = useState<string | null>(null)
   const [charts, setCharts] = useState<Record<string, ChartData>>({})
 
@@ -78,6 +79,9 @@ export default function Invest() {
     setAccounts(a)
     setPortfolio(p)
     setUnvested(u)
+    get<{ marginal: { stMicro: number; ltMicro: number } }>('/api/tax')
+      .then((t) => setTaxMarginal(t.marginal))
+      .catch(() => setTaxMarginal(null))
     const firstLots = a.find((x) => x.tracking === 'lots')?.id ?? 0
     setTrade((t) => ({ ...t, investAccountId: t.investAccountId || firstLots }))
     setUnvestedForm((f) => ({ ...f, investAccountId: f.investAccountId || firstLots }))
@@ -549,7 +553,21 @@ export default function Invest() {
                   if (open)
                     rows.push(
                       ...p.lots.map((l, li) => (
-                        <tr key={`${p.symbol}-lot-${l.trade_id ?? li}`} className="lotrow">
+                        <tr
+                          key={`${p.symbol}-lot-${l.trade_id ?? li}`}
+                          className="lotrow"
+                          title={(() => {
+                            if (!p.price_cents || !taxMarginal) return undefined
+                            const value = Math.round((l.qty_micro * p.price_cents) / 1_000_000)
+                            const gain = value - l.cost_cents
+                            const lt = Date.now() - Date.parse(l.opened_on) > 365 * 86400000
+                            const rate = lt ? taxMarginal.ltMicro : taxMarginal.stMicro
+                            const tax = Math.round((gain * rate) / 1_000_000)
+                            return gain >= 0
+                              ? `Sold today (${lt ? 'long' : 'short'}-term): gain ${formatCents(gain)} → est. tax ${formatCents(tax)} → after-tax proceeds ${formatCents(value - tax)}`
+                              : `Sold today (${lt ? 'long' : 'short'}-term): loss ${formatCents(-gain)} → est. tax saved ${formatCents(-tax)} — see Taxes for wash-sale checks`
+                          })()}
+                        >
                           <td className="muted" style={{ paddingLeft: 44 }}>lot · {l.opened_on}</td>
                           <td className="r num muted">{formatQtyMicro(l.qty_micro)}</td>
                           <td className="r num muted">{formatCents(perShare(l.cost_cents, l.qty_micro))}/sh</td>
@@ -617,8 +635,24 @@ export default function Invest() {
               </div>
               <div className="sub2 topline">
                 Unrealized gain across holdings:{' '}
-                <b className="inkstrong">{formatCents(portfolio.totals.unrealized, { sign: true })}</b>. Estimated
-                tax owed arrives with the rate settings page (open question from the design doc).
+                <b className="inkstrong">{formatCents(portfolio.totals.unrealized, { sign: true })}</b>.
+                {taxMarginal && (
+                  <>
+                    {' '}Est. tax on realized gains so far:{' '}
+                    <b className="inkstrong">
+                      {formatCents(
+                        Math.round(
+                          (Math.max(0, portfolio.totals.ytd_st) * taxMarginal.stMicro +
+                            Math.max(0, portfolio.totals.ytd_lt) * taxMarginal.ltMicro) /
+                            1_000_000,
+                        ),
+                      )}
+                    </b>
+                    .
+                  </>
+                )}{' '}
+                The Taxes screen has the full picture — withholding gap, harvesting, quarterlies. Hover a lot
+                for its after-tax sale value.
               </div>
             </div>
           </div>

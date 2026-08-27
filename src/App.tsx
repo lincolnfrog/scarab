@@ -5,6 +5,7 @@ import Invest from './screens/Invest'
 import RealEstate from './screens/RealEstate'
 import Goal from './screens/Goal'
 import Future from './screens/Future'
+import Taxes from './screens/Taxes'
 import Vault from './screens/Vault'
 import { exitLocalMode, localMode } from './local'
 
@@ -14,6 +15,7 @@ const SCREENS = [
   { id: 're', label: 'Real estate', phase: '', blurb: '', icon: 'M3 11l9-7 9 7M5 10v10h14V10' },
   { id: 'cash', label: 'Cash & budget', phase: '', blurb: '', icon: 'M7 10l-4 4 4 4M3 14h13M17 4l4 4-4 4M21 8H8' },
   { id: 'goal', label: 'Dream Home', phase: '', blurb: '', icon: 'M5 21V4M5 4h13l-3 4 3 4H5' },
+  { id: 'tax', label: 'Taxes', phase: '', blurb: '', icon: 'M19 5L5 19M6.5 4.5a2 2 0 100 4 2 2 0 000-4zM17.5 15.5a2 2 0 100 4 2 2 0 000-4z' },
   { id: 'future', label: 'Future', phase: '', blurb: '', icon: 'M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2' },
   { id: 'vault', label: 'Data & Vault', phase: '', blurb: '', icon: 'M12 3l7 4v5c0 4.6-3 7.7-7 9-4-1.3-7-4.4-7-9V7z M9 12l2 2 4-4' },
 ] as const
@@ -94,6 +96,7 @@ export default function App() {
           {active === 'invest' && <Invest />}
           {active === 're' && <RealEstate />}
           {active === 'goal' && <Goal />}
+          {active === 'tax' && <Taxes />}
           {active === 'future' && <Future />}
           {active === 'vault' && <Vault />}
 
