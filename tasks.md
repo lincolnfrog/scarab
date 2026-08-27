@@ -1,0 +1,90 @@
+# Scarab — tasks
+
+Product backlog, distilled from the 2026-08-27 product review. Framing from
+that review: Scarab is an excellent *instrument panel* (what is true?) and the
+leap to indispensable is becoming a *copilot* (what should we do?). Everything
+below follows the house invariants: facts in the ledger, everything else
+derived; integer cents; tax/analysis math lives in `engine/` (isomorphic) so
+it works identically in household and zero-knowledge modes.
+
+Ordering rationale: tax layer first (largest concrete dollar value, builds on
+the lot engine — our strongest asset), digest second (changes the daily
+relationship with the tool), decision engine third (biggest win, most
+design-heavy).
+
+## Active: 1 — Tax intelligence layer
+
+We track tax lots, ST/LT splits, RSU vests, and basis resolution more
+rigorously than most consumer tools, then do nothing with it. Turn that data
+into answers. All computation derived from trades/vests/prices at read time —
+no stored tax numbers.
+
+- [ ] **Tax settings.** Filing status + rates (federal ST/LT, state,
+      withholding rate on RSU vests). Decide: user-entered marginal rates vs
+      real bracket math (open question — see review). Storage:
+      `goal_settings`-style JSON blob or a proper `tax_settings` table
+      (append-only migration either way).
+- [ ] **`engine/tax.ts`.** Year-to-date realized picture from the ledger:
+      realized ST/LT gains via the lots engine, RSU ordinary income from
+      vest-day values, dividends/interest if present. Pure `(db, args)`
+      service functions like everything else.
+- [ ] **Withholding gap.** Estimated tax on YTD + projected full-year comp
+      vs. what's actually withheld (RSU flat supplemental rate is the classic
+      April surprise). Surface as one number with the assumption spelled out.
+- [ ] **Harvesting advisor.** Per-lot unrealized loss report: which specific
+      lots are harvestable, ST/LT character of the loss, what selling them
+      offsets. Wash-sale awareness: flag lots with purchases (incl. vests)
+      within ±30 days, and warn on proposed sells that would trip one.
+- [ ] **After-tax proceeds everywhere.** Hover on any lot in Invest shows net
+      after estimated tax, not gross. Reuse `grossSaleForNet` family in
+      `shared/series.ts`; extend for ST/LT split.
+- [ ] **Estimated quarterlies.** Safe-harbor check (110% prior-year /
+      90% current-year) + due-date awareness.
+- [ ] **Tax screen or Invest section.** Follow the mockup design language
+      (tokens in CLAUDE.md). One headline number: projected tax bill / refund
+      gap for the current year.
+- [ ] **Tests.** Lot-edge cases (wash-sale window boundaries, vest-then-sell,
+      specific-lot harvests), parity (better-sqlite3 vs sql.js), determinism.
+- [ ] **Disclaimer copy.** This is estimation, not advice; say so in the UI
+      where the numbers appear (matches README stance).
+
+## Backlog: 2 — Weekly digest & proactivity
+
+The app scales to zero and only knows things when visited. Cloud Scheduler +
+OIDC through IAP (already planned for prices) gives it a heartbeat.
+Household-mode only at first; ZK mode gets a client-side "since you were
+last here" panel instead.
+
+- [ ] Recurring-transaction detection (merchant + cadence + amount tolerance)
+      on top of the existing categorizer/merchant extraction.
+- [ ] Weekly digest: net-worth delta and what drove it, new uncategorized
+      rows, new recurring merchants ("subscription creep"), allocation drift
+      past threshold, mortgage-rate trigger vs saved loan options.
+- [ ] "Safe to spend this month" on Cash, derived from recurring detection +
+      budget plan.
+
+## Backlog: 3 — Decision engine (Future v2)
+
+From one knob-set to named, saved, side-by-side scenarios.
+
+- [ ] Scenario objects (named knob-sets, persisted like goal_settings),
+      compared side by side: retire 55 vs 60, buy in '27 vs '29,
+      carry vs payoff (feed Dream Home's local math into the sim).
+- [ ] Historical bootstrap sampling alongside lognormal draws
+      (sequence-of-returns risk made visible).
+- [ ] Headline "crossing date": the month the plan reaches independence.
+- [ ] Price-a-decision anywhere: "this $80k remodel is $310k at 65 and moves
+      success 91% → 88%."
+
+## Backlog: smaller, high leverage
+
+- [ ] Performance attribution on Invest: TWR/IRR per account and total, vs a
+      hold-SPY benchmark (trades + daily prices already suffice).
+- [ ] Life-event annotations on the net-worth chart (dated facts deserve a
+      memory: "bought the car", "changed jobs").
+- [ ] Continuity export: "if something happens to me" document generated from
+      the ledger (accounts, institutions, recovery-key locations). Pairs with
+      the two-member vault roadmap item.
+- [ ] Trust chain (DESIGN.md roadmap #5) treated as a headline feature of
+      scarab.one, not a chore: reproducible builds + attestations are the
+      differentiator.
