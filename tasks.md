@@ -8,8 +8,7 @@ derived; integer cents; tax/analysis math lives in `engine/` (isomorphic) so
 it works identically in household and zero-knowledge modes.
 
 Ordering rationale: tax layer first (largest concrete dollar value, builds on
-the lot engine — our strongest asset), digest second (changes the daily
-relationship with the tool), decision engine third (biggest win, most
+the lot engine — our strongest asset), digest second (shipped), decision engine third (biggest win, most
 design-heavy).
 
 ## Active: 1 — Tax intelligence layer
@@ -63,20 +62,35 @@ Follow-ups (not blocking):
 - [ ] Qualified vs ordinary dividend split (all treated as ordinary today).
 - [ ] 2026 CA brackets when the FTB publishes them (currently 2025; HoH estimated).
 
-## Backlog: 2 — Weekly digest & proactivity
+## 2 — Digest & proactivity
 
-The app scales to zero and only knows things when visited. Cloud Scheduler +
-OIDC through IAP (already planned for prices) gives it a heartbeat.
-Household-mode only at first; ZK mode gets a client-side "since you were
-last here" panel instead.
+**Shipped 2026-08-27** (`engine/recurring.ts`, `engine/digest.ts`,
+`server/api6.ts`, `server/rates.ts`, `src/DigestCard.tsx`,
+`src/RecurringCard.tsx`) — as an in-app "Since you were last here" panel,
+which works in BOTH modes (per-person high-water mark in app_meta rides the
+snapshot, so local/ZK gets the identical digest).
 
-- [ ] Recurring-transaction detection (merchant + cadence + amount tolerance)
-      on top of the existing categorizer/merchant extraction.
-- [ ] Weekly digest: net-worth delta and what drove it, new uncategorized
-      rows, new recurring merchants ("subscription creep"), allocation drift
-      past threshold, mortgage-rate trigger vs saved loan options.
-- [ ] "Safe to spend this month" on Cash, derived from recurring detection +
-      budget plan.
+- [x] Recurring-transaction detection: merchant groups via extractMerchant,
+      cadence bands (weekly→yearly) gated on gap consistency, same-day charge
+      collapsing, lapse + price-creep flags. Nothing stored — always derived.
+- [x] Digest on Dashboard: net-worth delta + top drivers vs baseline month,
+      new/uncategorized arrivals (by created_at), new recurring merchants,
+      price creep, possible cancellations, allocation drift ≥3pp, budget
+      overruns, 30-yr mortgage-rate trigger vs best saved loan option
+      (Freddie PMMS via FRED fredgraph.csv — freddiemac.com 403s datacenter
+      IPs). "Caught up" resets the mark; same-day re-surfacing only on
+      genuinely new arrivals.
+- [x] "Safe to spend this month" on Cash: budget − spent − recurring bills
+      still expected this month (no double counting once a bill posts), with
+      the Recurring & subscriptions table.
+
+Follow-ups (not blocking):
+
+- [ ] Email delivery of the same digest (Cloud Scheduler + OIDC through IAP +
+      an email provider key). The digest computation is already a pure
+      (db, email, today) function — the job only needs to render and send.
+- [ ] Semi-monthly payroll (1st/15th) currently reads as biweekly — treat as
+      its own cadence if it matters for safe-to-spend income.
 
 ## Backlog: 3 — Decision engine (Future v2)
 

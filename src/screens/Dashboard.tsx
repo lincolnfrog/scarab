@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { formatCents } from '../../shared/money'
 import { get } from '../api'
 import { Donut, fmtMonth, LineChart } from '../viz'
+import DigestCard from '../DigestCard'
 
 type Point = {
   month: string
@@ -50,6 +51,7 @@ export default function Dashboard() {
 
   return (
     <div className="grid12">
+      <DigestCard />
       <div className="card c8">
         <h2>Household net worth</h2>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>

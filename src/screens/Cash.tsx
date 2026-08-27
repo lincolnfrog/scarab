@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types'
 import { get, patch, post, put } from '../api'
 import { Bullets, fmtMonth, fmtShort, GroupedBars, HBars } from '../viz'
+import RecurringCard from '../RecurringCard'
 
 export default function Cash() {
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -352,6 +353,8 @@ export default function Cash() {
               accounts are excluded.
             </div>
           </div>
+
+          <RecurringCard />
 
           {/* ---------- transactions ---------- */}
           <div className="card c12">

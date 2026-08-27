@@ -138,6 +138,18 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
         return svc.createLoan(db, b)
       case 'DELETE /loans/*':
         return svc.deleteLoan(db, Number(seg[1]))
+      case 'GET /digest': {
+        const dg = await import('../engine/digest')
+        return { ...dg.getDigest(db, 'local', todayIso()), errors: [] }
+      }
+      case 'POST /digest/*': {
+        const dg = await import('../engine/digest')
+        return dg.ackDigest(db, 'local')
+      }
+      case 'GET /recurring': {
+        const rc = await import('../engine/recurring')
+        return rc.getRecurring(db, todayIso())
+      }
       case 'GET /tax': {
         const tax = await import('../engine/tax')
         return tax.getTax(db, todayIso())

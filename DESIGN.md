@@ -156,6 +156,7 @@ at the edge).
 | alternative.me | Fear & Greed | `/fng/?limit=0` full history since 2018. |
 | BlockHorizon | (candidate) | 125+ BTC metrics; free tier is site-only; API "upon request" — needs a key before integration. |
 | ETF flows | (absent) | no keyless source exists (Farside/SoSoValue/Coinglass all key-gated). |
+| FRED fredgraph.csv | 30-yr PMMS mortgage average (digest rate trigger) | freddiemac.com's own CSV 403s datacenter IPs; FRED serves the same series keyless. Response is gzip — Node fetch handles it. |
 | SimpleFIN | (planned, household mode) | $1.50/mo, read-only tokens via MX. Fundamentally in tension with ZK mode — see PRIVACY.md. |
 
 ## 6. Operations
