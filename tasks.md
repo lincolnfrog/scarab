@@ -8,8 +8,9 @@ derived; integer cents; tax/analysis math lives in `engine/` (isomorphic) so
 it works identically in household and zero-knowledge modes.
 
 Ordering rationale: tax layer first (largest concrete dollar value, builds on
-the lot engine — our strongest asset), digest second (shipped), decision engine third (biggest win, most
-design-heavy).
+the lot engine — our strongest asset), digest second, decision engine third
+(biggest win, most design-heavy). All three shipped; what's left is follow-ups
+and the smaller backlog below.
 
 ## Active: 1 — Tax intelligence layer
 
@@ -92,18 +93,47 @@ Follow-ups (not blocking):
 - [ ] Semi-monthly payroll (1st/15th) currently reads as biweekly — treat as
       its own cadence if it matters for safe-to-spend income.
 
-## Backlog: 3 — Decision engine (Future v2)
+## 3 — Decision engine (Future v2)
 
-From one knob-set to named, saved, side-by-side scenarios.
+**Shipped 2026-09-03** (`engine/scenarios.ts`, `engine/history.ts`,
+`engine/simulate.ts`, `server/api7.ts`, `src/screens/Future.tsx`; migration
+#11 `scenarios`). Design decisions taken: a proper `scenarios` table rather
+than a goal_settings blob; overlay chart (all medians, bands for the selected
+one) + side-by-side table rather than small multiples; crossing date = the
+earliest retirement year with ≥ threshold odds (default 90%, adjustable),
+re-running the sim per candidate year; historical returns bundled as a
+constant (Damodaran nominal ÷ CPI-U, 1928–2025) and block-bootstrapped in
+10-year runs, re-centred to the scenario's mean/σ so the comparison with
+lognormal isolates sequence risk rather than asset mix.
 
-- [ ] Scenario objects (named knob-sets, persisted like goal_settings),
-      compared side by side: retire 55 vs 60, buy in '27 vs '29,
-      carry vs payoff (feed Dream Home's local math into the sim).
-- [ ] Historical bootstrap sampling alongside lognormal draws
-      (sequence-of-returns risk made visible).
-- [ ] Headline "crossing date": the month the plan reaches independence.
-- [ ] Price-a-decision anywhere: "this $80k remodel is $310k at 65 and moves
-      success 91% → 88%."
+- [x] Scenario objects (named knob-sets, persisted in `scenarios`), compared
+      side by side: retire 55 vs 60, buy in '27 vs '29. Balance sheet and
+      dream-home terms are resolved from the ledger at read time, never stored.
+      Baseline is explicit; every other scenario reports deltas against it.
+- [x] Historical bootstrap sampling alongside lognormal draws (global toggle so
+      all scenarios stay on the same footing; same seed either way).
+- [x] Headline "crossing date": earliest retirement year clearing the odds
+      threshold — yearly resolution, since the sim steps yearly.
+- [x] Price-a-decision: any dated cash flow (one-off or yearly until a year)
+      priced against a scenario — future value at retirement, odds before →
+      after, median-at-end delta — and saveable into the scenario as an event.
+- [x] Tests (17): events, recurring windows, historical determinism +
+      re-centring, crossing-year monotonicity, CRUD/validation/baseline
+      promotion, sql.js parity + snapshot round-trip.
+
+Follow-ups (not blocking):
+
+- [ ] Carry-vs-payoff as a first-class event: "pay off $X of mortgage in year
+      Y" should also drop the liability and its amortization, not just the
+      liquid side (events only touch liquid today).
+- [ ] "Price a decision" entry points on other screens (Dream Home, Real
+      estate) posting to `/api/scenarios/price` with the amount pre-filled.
+- [ ] Monthly stepping (crossing *month*), and an age axis — needs a birth year
+      setting.
+- [ ] Sliders for the mockup's "levers" card; the knobs are text inputs today.
+- [ ] Bond/cash sleeve in historical mode (the record is 100% US stocks,
+      re-centred; a blended record would let σ come from the mix rather than
+      the knob).
 
 ## Backlog: smaller, high leverage
 

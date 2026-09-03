@@ -1,8 +1,33 @@
+import { HISTORICAL_REAL_RETURNS_MICRO } from './history'
+
 /**
  * Monte Carlo over the household balance sheet. A projection tool: floats are
  * fine internally, results round to cents at the boundary. All dollar values
  * are real (today's) dollars — use real return assumptions.
  */
+
+/**
+ * A dated cash flow against the liquid portfolio: a remodel, a sabbatical, an
+ * inheritance, a mortgage payoff. Negative = money leaves the portfolio.
+ * `untilYear` repeats the amount every year through that year (inclusive).
+ */
+export type SimEvent = {
+  year: number
+  amountCents: number
+  untilYear?: number
+  label?: string
+}
+
+/**
+ * lognormal — yearly returns drawn from N(mean, σ) in log space (independent
+ *   years; the classic fan).
+ * historical — yearly returns replay contiguous runs of actual US stock real
+ *   returns 1928→ (circular block bootstrap, `blockYears` per run), re-centred
+ *   so the draw's arithmetic mean and σ equal the scenario's assumptions. Same
+ *   expected return, real sequences: the 1966 and 2000 starts are in there.
+ */
+export type DrawMode = 'lognormal' | 'historical'
+
 export type SimParams = {
   startYear: number
   endYear: number
@@ -23,6 +48,9 @@ export type SimParams = {
   }
   retireYear: number
   retireSpendCents: number // per year, from liquid
+  events?: SimEvent[]
+  draw?: DrawMode
+  blockYears?: number // historical mode: run length, default 10
   paths?: number
   seed?: number
 }
@@ -70,9 +98,42 @@ function remainingBalance(loanCents: number, rateMicro: number, termMonths: numb
   return Math.round((loanCents * (pow - powE)) / (pow - 1))
 }
 
+const HIST = HISTORICAL_REAL_RETURNS_MICRO.map((m) => m / 1_000_000)
+const HIST_MEAN = HIST.reduce((s, r) => s + r, 0) / HIST.length
+const HIST_SD = Math.sqrt(HIST.reduce((s, r) => s + (r - HIST_MEAN) ** 2, 0) / HIST.length)
+
+/**
+ * Growth factors for one path in historical mode: blocks of consecutive
+ * years starting at random points in the record (wrapping at the end), each
+ * year z-scored against the record and re-expressed at the scenario's
+ * mean/σ. Floored so a rescaled 1931 can't take more than the portfolio.
+ */
+function historicalFactors(rng: () => number, count: number, mean: number, vol: number, block: number): number[] {
+  const out: number[] = []
+  const H = HIST.length
+  while (out.length < count) {
+    const start = Math.floor(rng() * H)
+    for (let j = 0; j < block && out.length < count; j++) {
+      const z = (HIST[(start + j) % H]! - HIST_MEAN) / HIST_SD
+      out.push(Math.max(0.05, 1 + mean + z * vol))
+    }
+  }
+  return out
+}
+
+/** Cash flows hitting the liquid portfolio in a given year. */
+function eventsIn(events: SimEvent[] | undefined, year: number): number {
+  if (!events) return 0
+  let sum = 0
+  for (const e of events) if (year >= e.year && year <= (e.untilYear ?? e.year)) sum += e.amountCents
+  return sum
+}
+
 export function simulate(p: SimParams): SimResult {
   const paths = p.paths ?? 2000
   const rng = mulberry32(p.seed ?? 42)
+  const historical = p.draw === 'historical'
+  const block = Math.max(1, p.blockYears ?? 10)
   const years: number[] = []
   for (let y = p.startYear; y <= p.endYear; y++) years.push(y)
   const n = years.length
@@ -104,11 +165,12 @@ export function simulate(p: SimParams): SimResult {
     let newHome = 0
     let newLoan = 0
     let ok = true
+    const factors = historical ? historicalFactors(rng, n - 1, mean, vol, block) : null
 
     for (let i = 0; i < n; i++) {
       const year = years[i]!
       if (i > 0) {
-        liquid *= Math.exp(muLog + vol * nextNormal())
+        liquid *= factors ? factors[i - 1]! : Math.exp(muLog + vol * nextNormal())
         property *= propG
         newHome *= propG
         if (p.buy && year > p.buy.year)
@@ -121,6 +183,7 @@ export function simulate(p: SimParams): SimResult {
         newHome = p.buy.priceCents
         newLoan = loanCents
       }
+      liquid += eventsIn(p.events, year)
       if (liquid < 0 && year > p.retireYear) ok = false // ran out in retirement
       totalsByYear[i]![k] = liquid + property + newHome - liabilities - newLoan
     }
@@ -150,4 +213,48 @@ export function simulate(p: SimParams): SimResult {
   out.medianEndCents = out.p50[n - 1]!
   out.p10EndCents = out.p10[n - 1]!
   return out
+}
+
+/**
+ * The crossing date: the earliest retirement year at which the plan still
+ * succeeds with at least `thresholdPct` odds (everything else held fixed).
+ * null when no year before endYear clears the bar. A linear scan — each
+ * candidate is one cheap simulation with the same seed, so the answer is
+ * stable between renders.
+ */
+export function crossingYear(p: SimParams, thresholdPct = 90): number | null {
+  const paths = Math.min(p.paths ?? 2000, 1000)
+  for (let y = p.startYear + 1; y < p.endYear; y++) {
+    const r = simulate({ ...p, retireYear: y, paths })
+    if (r.successPct >= thresholdPct) return y
+  }
+  return null
+}
+
+export type DecisionPrice = {
+  successBeforePct: number
+  successAfterPct: number
+  medianEndBeforeCents: number
+  medianEndAfterCents: number
+  /** The event compounded to `atYear` at the scenario's mean real return — its opportunity cost. */
+  futureValueCents: number
+  atYear: number
+}
+
+/** What one dated cash flow does to a plan: the "this $80k remodel is $310k at 65" number. */
+export function priceDecision(p: SimParams, event: SimEvent, atYear = p.retireYear): DecisionPrice {
+  const before = simulate(p)
+  const after = simulate({ ...p, events: [...(p.events ?? []), event] })
+  const g = 1 + p.meanReturnMicro / 1_000_000
+  const last = event.untilYear ?? event.year
+  let fv = 0
+  for (let y = event.year; y <= last; y++) fv += event.amountCents * Math.pow(g, Math.max(0, atYear - y))
+  return {
+    successBeforePct: before.successPct,
+    successAfterPct: after.successPct,
+    medianEndBeforeCents: before.medianEndCents,
+    medianEndAfterCents: after.medianEndCents,
+    futureValueCents: Math.round(fv),
+    atYear,
+  }
 }

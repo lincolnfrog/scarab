@@ -158,6 +158,25 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
         const tax = await import('../engine/tax')
         return tax.putTaxSettings(db, b)
       }
+      case 'GET /scenarios': {
+        const sc = await import('../engine/scenarios')
+        return sc.listScenarios(db, todayIso())
+      }
+      case 'POST /scenarios':
+      case 'POST /scenarios/*': {
+        const sc = await import('../engine/scenarios')
+        if (seg[1] === 'compare') return sc.compareScenarios(db, todayIso(), b)
+        if (seg[1] === 'price') return sc.priceScenarioDecision(db, todayIso(), b)
+        return sc.createScenario(db, b, todayIso())
+      }
+      case 'PUT /scenarios/*': {
+        const sc = await import('../engine/scenarios')
+        return sc.updateScenario(db, Number(seg[1]), b, todayIso())
+      }
+      case 'DELETE /scenarios/*': {
+        const sc = await import('../engine/scenarios')
+        return sc.deleteScenario(db, Number(seg[1]))
+      }
       case 'POST /simulate': {
         const { simulate } = await import('../engine/simulate')
         const p = b as import('../engine/simulate').SimParams

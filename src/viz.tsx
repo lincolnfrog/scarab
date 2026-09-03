@@ -296,8 +296,8 @@ export function LineChart({
             const down = [...b.lo].reverse().map((v, i) => `L${x(b.lo.length - 1 - i)} ${y(v)}`).join('')
             return <path key={bi} d={`${up}${down}Z`} fill={b.fill} stroke="none" />
           })}
-          {series.map((s) => (
-            <g key={s.name}>
+          {series.map((s, si) => (
+            <g key={si}>
               {s.area && (
                 <path
                   d={`${path(s.values)}L${x(s.values.length - 1)} ${H - padB}L${x(0)} ${H - padB}Z`}
@@ -319,23 +319,27 @@ export function LineChart({
           {hover !== null && (
             <g>
               <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="var(--axis)" />
-              {series.map((s) => (
-                <circle key={s.name} cx={x(hover)} cy={y(s.values[hover]!)} r={4.5} fill={s.color} stroke="#0c1017" strokeWidth={2} />
-              ))}
+              {series.map((s, si) =>
+                s.values[hover] === undefined ? null : (
+                  <circle key={si} cx={x(hover)} cy={y(s.values[hover]!)} r={4.5} fill={s.color} stroke="#0c1017" strokeWidth={2} />
+                ),
+              )}
             </g>
           )}
         </svg>
       )}
       {hover !== null && (
-        <Tip x={Math.min(x(hover) + 14, W - 190)} y={Math.max(4, y(series[0]!.values[hover]!) - 44)}>
+        <Tip x={Math.min(x(hover) + 14, W - 190)} y={Math.max(4, y(series[0]!.values[hover] ?? lo) - 44)}>
           <div className="t">{tipLabel ? tipLabel(hover) : labels[hover]}</div>
-          {series.map((s) => (
-            <div className="r" key={s.name}>
-              <span className="sw" style={{ background: s.color }} />
-              <span className="nm">{s.name}</span>
-              <span className="vl">{formatCents(s.values[hover]!)}</span>
-            </div>
-          ))}
+          {series.map((s, si) =>
+            s.values[hover] === undefined ? null : (
+              <div className="r" key={si}>
+                <span className="sw" style={{ background: s.color }} />
+                <span className="nm">{s.name}</span>
+                <span className="vl">{formatCents(s.values[hover]!)}</span>
+              </div>
+            ),
+          )}
         </Tip>
       )}
     </div>

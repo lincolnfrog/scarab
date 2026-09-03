@@ -30,6 +30,7 @@ export const TABLES = [
   'unvested_positions',
   'goal_settings',
   'loan_options',
+  'scenarios',
   'vault_blobs',
 ] as const
 

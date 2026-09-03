@@ -283,6 +283,21 @@ export const migrations: string[] = [
      data        TEXT NOT NULL,
      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
    )`,
+
+  // 11 — the decision engine: named scenarios for the Future screen. A
+  // scenario is a knob-set (returns, savings, purchase year, retirement,
+  // one-off events) stored as JSON; the balance sheet it runs against is
+  // always resolved from the ledger at read time, never stored. Exactly one
+  // row is the baseline the others are measured against.
+  `CREATE TABLE scenarios (
+     id          INTEGER PRIMARY KEY,
+     name        TEXT NOT NULL,
+     params      TEXT NOT NULL,
+     is_baseline INTEGER NOT NULL DEFAULT 0,
+     sort        INTEGER NOT NULL DEFAULT 0,
+     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+   )`,
 ]
 
 export function migrate(db: DbLike): void {

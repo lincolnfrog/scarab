@@ -48,7 +48,13 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                rule application.
   lots.ts      FIFO/specific-lot/explicit-basis engine, ST/LT splits.
   networth.ts  Month-end series derived entirely from dated facts.
-  simulate.ts  Seeded Monte Carlo (mulberry32 + Box-Muller).
+  simulate.ts  Seeded Monte Carlo (mulberry32 + Box-Muller): lognormal or
+               historical block-bootstrap draws, dated events, crossing year,
+               price-a-decision.
+  history.ts   Annual US stock real total returns 1928→ (Damodaran nominal ÷
+               CPI-U). Append-only; refresh yearly.
+  scenarios.ts The decision engine: named knob-sets compared side by side
+               against the ledger; deltas vs the baseline.
   services.ts  Every API handler body as (db, args) functions. ApiError(status).
   snapshot.ts  Dump/load of all tables — THE interchange format (export files,
                vault payloads, local-mode hydration).
@@ -59,6 +65,8 @@ server/     Node-only shell.
   db.ts, migrations.ts  better-sqlite3 openDb + migrate.
   api.ts api2.ts api3.ts  Thin Hono wrappers over engine/services.
   api4.ts     Vault blob store + export/import endpoints.
+  api5–7.ts   Tax, digest/recurring, scenarios — each a thin wrapper over one
+              engine module.
   prices.ts charts.ts  Network fetchers (Yahoo, CoinGecko, bitcoin-data.com,
               alternative.me) — fetching stays server-side so engine/ is
               CORS-clean; results are written via services and cached in
@@ -157,6 +165,7 @@ at the edge).
 | BlockHorizon | (candidate) | 125+ BTC metrics; free tier is site-only; API "upon request" — needs a key before integration. |
 | ETF flows | (absent) | no keyless source exists (Farside/SoSoValue/Coinglass all key-gated). |
 | FRED fredgraph.csv | 30-yr PMMS mortgage average (digest rate trigger) | freddiemac.com's own CSV 403s datacenter IPs; FRED serves the same series keyless. Response is gzip — Node fetch handles it. |
+| Damodaran histretSP + Minneapolis Fed CPI | bundled historical real returns (`engine/history.ts`) | Static, hand-refreshed yearly; not fetched at runtime so ZK mode stays offline-clean. |
 | SimpleFIN | (planned, household mode) | $1.50/mo, read-only tokens via MX. Fundamentally in tension with ZK mode — see PRIVACY.md. |
 
 ## 6. Operations
