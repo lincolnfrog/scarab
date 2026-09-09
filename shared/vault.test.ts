@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { b64decode, b64encode, createVault, openVault } from './vault'
+import { b64decode, b64encode, createVault, openVault, openVaultKey, sealVault } from './vault'
 
 const text = (s: string) => new TextEncoder().encode(s)
 const utf8 = (b: Uint8Array) => new TextDecoder().decode(b)
@@ -35,6 +35,19 @@ describe('vault', () => {
     expect(a.blob.kdf.salt).not.toBe(b.blob.kdf.salt)
     expect(a.recoveryKeyB64).not.toBe(b.recoveryKeyB64)
     expect(a.blob.payload.ct).not.toContain('payload')
+  })
+
+  it('reseals under the same key: passphrase and recovery key both still open the new payload', async () => {
+    const { blob, recoveryKeyB64 } = await createVault('correct horse battery', text('v1'))
+    const { rawDataKey } = await openVaultKey(blob, { passphrase: 'correct horse battery' })
+    const next = await sealVault(blob, rawDataKey, text('v2 — edited in a zero-knowledge session'))
+    expect(next.kdf).toEqual(blob.kdf)
+    expect(next.wrappedKey).toEqual(blob.wrappedKey)
+    expect(next.payload.ct).not.toBe(blob.payload.ct)
+    expect(next.payload.iv).not.toBe(blob.payload.iv) // fresh nonce every seal
+    expect(utf8(await openVault(next, { passphrase: 'correct horse battery' }))).toContain('v2')
+    expect(utf8(await openVault(next, { recoveryKeyB64 }))).toContain('v2')
+    await expect(sealVault(blob, rawDataKey.slice(0, 16), text('x'))).rejects.toThrow(/32 bytes/)
   })
 
   it('refuses trivial passphrases and handles multi-megabyte payloads', async () => {

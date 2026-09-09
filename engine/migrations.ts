@@ -298,6 +298,19 @@ export const migrations: string[] = [
      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
    )`,
+
+  // 12 — the daily price basket (server/basket.ts): every listed US stock/ETF
+  // and the top crypto assets, quoted once a day and served whole so a
+  // zero-knowledge session can pick its own symbols without naming them.
+  // Shared infrastructure, not household data — deliberately NOT part of the
+  // snapshot (engine/snapshot.ts TABLES); the table exists in-tab but empty.
+  `CREATE TABLE basket_quotes (
+     symbol    TEXT NOT NULL,
+     kind      TEXT NOT NULL CHECK (kind IN ('stock','crypto')),
+     cents     INTEGER NOT NULL,
+     priced_on TEXT NOT NULL,
+     PRIMARY KEY (symbol, kind)
+   )`,
 ]
 
 export function migrate(db: DbLike): void {

@@ -1,6 +1,7 @@
 import type { DbLike } from '../engine/db'
 import { ApiError } from '../engine/services'
 import type { Dump } from '../engine/snapshot'
+import type { VaultHeader } from '../shared/vault'
 
 /**
  * Local mode: the entire app runs against a SQLite database living in this
@@ -12,16 +13,49 @@ import type { Dump } from '../engine/snapshot'
  * through the encrypted vault.
  */
 
-type LocalState = { db: (DbLike & { export(): Uint8Array }) | null }
-const state: LocalState = { db: null }
+/**
+ * What an unlocked vault leaves behind in the tab: the raw data key and the
+ * header it was wrapped with, so "save" reseals under the same key (the filed
+ * recovery key keeps working) and the passphrase is never asked for twice.
+ * Memory only — never persisted, gone on reload.
+ */
+export type VaultSession = { rawDataKey: Uint8Array; header: VaultHeader; version: number }
+
+type LocalState = {
+  db: (DbLike & { export(): Uint8Array }) | null
+  vault: VaultSession | null
+  dirty: boolean
+}
+const state: LocalState = { db: null, vault: null, dirty: false }
 
 export const localMode = {
   get active() {
     return state.db !== null
   },
+  /** Writes since the last vault save (or since entering). */
+  get dirty() {
+    return state.dirty
+  },
+  get vault() {
+    return state.vault
+  },
+  setVault(v: VaultSession | null) {
+    state.vault = v
+    window.dispatchEvent(new Event('scarab-mode'))
+  },
+  markSaved(version: number) {
+    state.dirty = false
+    if (state.vault) state.vault.version = version
+    window.dispatchEvent(new Event('scarab-mode'))
+  },
 }
 
-export async function enterLocalMode(dump: Dump): Promise<void> {
+/**
+ * Boot the in-tab engine. With a dump, the tab starts as that snapshot; with
+ * null it starts from an empty, freshly migrated database — a session that
+ * begins with no plaintext anywhere but this tab.
+ */
+export async function enterLocalMode(dump: Dump | null, vault: VaultSession | null = null): Promise<void> {
   const [{ openBrowserDb }, { migrate }, { loadDump }, wasmUrl] = await Promise.all([
     import('../engine/sqljs-db'),
     import('../engine/migrations'),
@@ -30,15 +64,37 @@ export async function enterLocalMode(dump: Dump): Promise<void> {
   ])
   const db = await openBrowserDb({ wasmUrl })
   migrate(db)
-  loadDump(db, dump)
+  if (dump) loadDump(db, dump)
   state.db = db
+  state.vault = vault
+  state.dirty = dump === null // an empty start has nothing saved yet
+  window.dispatchEvent(new Event('scarab-mode'))
+}
+
+/** Replace the tab's data in place — no reload, the session (and its key) survives. */
+export async function loadLocalDump(dump: Dump): Promise<void> {
+  if (!state.db) throw new Error('local mode is not active')
+  const { loadDump } = await import('../engine/snapshot')
+  loadDump(state.db, dump)
+  state.dirty = true
   window.dispatchEvent(new Event('scarab-mode'))
 }
 
 export function exitLocalMode(): void {
   state.db = null
+  state.vault = null
+  state.dirty = false
   window.location.reload()
 }
+
+// Leaving the page discards the tab's database; warn if there's unsaved work.
+if (typeof window !== 'undefined')
+  window.addEventListener('beforeunload', (e) => {
+    if (state.db && state.dirty) {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+  })
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
@@ -53,6 +109,10 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
   const b = (body ?? {}) as never
   const seg = path.split('/').filter(Boolean)
   const key = `${method} /${seg[0] ?? ''}${seg.length > 1 ? '/*' : ''}`
+  if (method !== 'GET' && !(method === 'POST' && seg[0] === 'scenarios' && (seg[1] === 'compare' || seg[1] === 'price'))) {
+    if (!state.dirty) window.dispatchEvent(new Event('scarab-mode'))
+    state.dirty = true
+  }
 
   try {
     switch (key) {
@@ -102,12 +162,13 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
         return svc.listTrades(db)
       case 'GET /portfolio':
         return svc.getPortfolio(db, todayIso())
-      case 'POST /prices/*':
-        return {
-          updated: 0,
-          backfilled: 0,
-          errors: ['price refresh is network-bound — exit local mode to refresh, prices here are as of your snapshot'],
-        }
+      case 'POST /prices/*': {
+        // The one price path that touches the network: the shared daily
+        // basket, identical for everyone. Which symbols matter is decided here.
+        const r = await fetch('/api/basket')
+        if (!r.ok) throw new Error(`price basket: ${r.status} ${r.statusText}`)
+        return svc.applyBasket(db, (await r.json()) as Parameters<typeof svc.applyBasket>[1])
+      }
       case 'GET /properties':
         return svc.listProperties(db)
       case 'POST /properties':

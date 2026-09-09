@@ -135,6 +135,40 @@ Follow-ups (not blocking):
       re-centred; a blended record would let σ come from the mix rather than
       the knob).
 
+## Zero-knowledge front door & price basket
+
+**Shipped 2026-09-09** (`src/FrontDoor.tsx`, `src/session.ts`, `server/basket.ts`,
+`server/api8.ts`, `engine/services.ts` applyBasket, `shared/vault.ts` sealVault;
+migration #12 `basket_quotes`). Verified end to end: start empty → add data in
+the tab → save → the only server write is `PUT /api/vault` with ciphertext →
+reload → unlock → data restored, with the server's user tables never touched.
+
+- [x] Boot-into-local-from-vault + start-empty front door (shown only when the
+      server holds no plaintext), unlock in-tab, household escape hatch.
+- [x] Reseal-on-save under the data key kept from unlock — no new recovery key
+      minted every save; passphrase asked once.
+- [x] Daily price basket: whole US-listed universe + top crypto, fetched once a
+      day (NASDAQ Trader + Yahoo spark/v7 + CoinGecko markets), served whole and
+      identical to every caller; local/ZK refresh picks its own symbols out.
+- [x] Tests: directory parsing, spark/v7/coingecko parsers, once-a-day build
+      guard, applyBasket, vault reseal round-trip.
+
+Follow-ups (not blocking):
+
+- [ ] **Anonymous add** for off-universe symbols: an identity-opaque, delayed,
+      chaffed request that widens the basket without linking a symbol to a
+      person. (Deferred by decision — the whole-universe basket already covers
+      ordinary US holdings.)
+- [ ] ZK daily-history charts: hashed symbol buckets so a client fetches 1-of-N
+      buckets instead of naming the ticker (Safe-Browsing style). Charts are
+      as-of-snapshot in local mode today.
+- [ ] Migrate household price refresh onto the basket path too (one code path);
+      today `POST /api/prices/refresh` still fetches held symbols per-symbol.
+- [ ] Persistent unlock (non-extractable CryptoKey in IndexedDB; then
+      WebAuthn-PRF passkey, vault v2) — DESIGN.md roadmap #2.
+- [ ] Live basket build couldn't run from the build sandbox (egress 403s to
+      nasdaqtrader.com / coingecko); verify a real build on the deployment.
+
 ## Backlog: smaller, high leverage
 
 - [ ] Performance attribution on Invest: TWR/IRR per account and total, vs a

@@ -91,11 +91,20 @@ export async function createVault(
   return { blob, recoveryKeyB64: b64encode(rawDataKey) }
 }
 
-/** Decrypt with either the passphrase or the recovery key. Throws on tamper/wrong secret. */
-export async function openVault(
+export type VaultSecret = { passphrase: string } | { recoveryKeyB64: string }
+
+/** The header a session keeps after unlocking: everything but the payload. */
+export type VaultHeader = Pick<VaultBlob, 'v' | 'kdf' | 'wrappedKey'>
+
+/**
+ * Unlock: recover the raw data key with either secret, then open the payload.
+ * Returns the key too, so a zero-knowledge session can keep it in memory and
+ * reseal later without re-deriving from the passphrase or minting a new key.
+ */
+export async function openVaultKey(
   blob: VaultBlob,
-  secret: { passphrase: string } | { recoveryKeyB64: string },
-): Promise<Uint8Array> {
+  secret: VaultSecret,
+): Promise<{ plaintext: Uint8Array; rawDataKey: Uint8Array }> {
   if (blob.v !== 1) throw new Error(`unsupported vault version ${blob.v}`)
   let rawDataKey: Uint8Array
   if ('recoveryKeyB64' in secret) {
@@ -110,10 +119,27 @@ export async function openVault(
   }
   const dataKey = await subtle().importKey('raw', rawDataKey as BufferSource, 'AES-GCM', false, ['decrypt'])
   try {
-    return await aesDecrypt(dataKey, blob.payload)
+    return { plaintext: await aesDecrypt(dataKey, blob.payload), rawDataKey }
   } catch {
     throw new Error('vault payload failed authentication — wrong key or tampered data')
   }
+}
+
+/** Decrypt with either the passphrase or the recovery key. Throws on tamper/wrong secret. */
+export async function openVault(blob: VaultBlob, secret: VaultSecret): Promise<Uint8Array> {
+  return (await openVaultKey(blob, secret)).plaintext
+}
+
+/**
+ * Reseal: a new payload under the SAME data key and header. The passphrase
+ * and the recovery key the person already filed keep working — this is what
+ * "save" means in a zero-knowledge session. Rotate with createVault instead.
+ */
+export async function sealVault(header: VaultHeader, rawDataKey: Uint8Array, plaintext: Uint8Array): Promise<VaultBlob> {
+  if (header.v !== 1) throw new Error(`unsupported vault version ${header.v}`)
+  if (rawDataKey.length !== 32) throw new Error('data key must be 32 bytes')
+  const dataKey = await subtle().importKey('raw', rawDataKey as BufferSource, 'AES-GCM', false, ['encrypt'])
+  return { v: 1, kdf: header.kdf, wrappedKey: header.wrappedKey, payload: await aesEncrypt(dataKey, plaintext) }
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {

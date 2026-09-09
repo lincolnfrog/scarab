@@ -7,7 +7,9 @@ import Goal from './screens/Goal'
 import Future from './screens/Future'
 import Taxes from './screens/Taxes'
 import Vault from './screens/Vault'
+import FrontDoor from './FrontDoor'
 import { exitLocalMode, localMode } from './local'
+import { fetchMode, type Mode } from './session'
 
 const SCREENS = [
   { id: 'dash', label: 'Dashboard', phase: '', blurb: '', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' },
@@ -26,6 +28,7 @@ type Me = { email: string }
 export default function App() {
   const [active, setActive] = useState<ScreenId>('dash')
   const [me, setMe] = useState<Me | null>(null)
+  const [mode, setMode] = useState<Mode | null | 'household'>(null)
   const [, forceRender] = useState(0)
 
   useEffect(() => {
@@ -36,9 +39,17 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then(setMe).catch(() => setMe(null))
+    // The front door: only when the server holds no plaintext. A household
+    // install with data goes straight in, as before.
+    fetchMode()
+      .then((m) => setMode(m.serverHasData ? 'household' : m))
+      .catch(() => setMode('household'))
   }, [])
 
   const screen = SCREENS.find((s) => s.id === active)!
+
+  if (mode === null) return null
+  if (mode !== 'household' && !localMode.active) return <FrontDoor mode={mode} onHousehold={() => setMode('household')} />
 
   return (
     <div className="app">
@@ -67,11 +78,16 @@ export default function App() {
       <div className="main">
         <div className="topbar">
           <span className="where">
-            Scarab household · <b>{screen.label}</b>
+            Scarab {localMode.active ? 'session' : 'household'} · <b>{screen.label}</b>
           </span>
           {localMode.active && (
-            <span className="tag" style={{ cursor: 'pointer' }} title="running on the in-tab engine — click to exit (discards unsaved local changes)" onClick={() => exitLocalMode()}>
-              ⬤ LOCAL
+            <span
+              className="tag"
+              style={{ cursor: 'pointer', color: localMode.dirty ? 'var(--down)' : undefined }}
+              title={localMode.dirty ? 'zero-knowledge session with UNSAVED changes — save from Data & Vault' : 'zero-knowledge session — everything saved. Click to end.'}
+              onClick={() => { if (!localMode.dirty || window.confirm('End the session and discard unsaved changes?')) exitLocalMode() }}
+            >
+              ⬤ {localMode.dirty ? 'UNSAVED' : 'LOCAL'}
             </span>
           )}
           <span className="who">

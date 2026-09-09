@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
+import { compress } from 'hono/compress'
 import { api } from './api'
 import { api2 } from './api2'
 import { api3 } from './api3'
@@ -8,6 +9,7 @@ import { api4 } from './api4'
 import { api5 } from './api5'
 import { api6 } from './api6'
 import { api7 } from './api7'
+import { api8 } from './api8'
 import { db, schemaVersion } from './db'
 import { detectTransfers } from './import'
 import { runRepairs } from './repairs'
@@ -29,6 +31,8 @@ app.use('/api/*', async (c, next) => {
   await next()
 })
 
+// The basket is ~10k rows; gzip it (Cloud Run's front end doesn't).
+app.use('/api/basket', compress())
 app.get('/api/me', (c) => c.json({ email: c.get('userEmail') }))
 app.route('/api', api)
 app.route('/api', api2)
@@ -37,6 +41,7 @@ app.route('/api', api4)
 app.route('/api', api5)
 app.route('/api', api6)
 app.route('/api', api7)
+app.route('/api', api8)
 
 // Built client, with SPA fallback for client-side routes. Hashed assets are
 // immutable; the HTML shell must never be cached or deploys leave users on

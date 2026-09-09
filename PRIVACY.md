@@ -38,6 +38,14 @@ Consequences, stated plainly:
   says so at the moment it matters.
 - **Tampering is detectable.** GCM authentication fails closed; a modified
   blob refuses to decrypt rather than decrypting wrongly.
+- **"Save" reseals, it does not re-key.** A zero-knowledge session keeps the
+  data key in memory after unlock and re-encrypts each new payload under it
+  (fresh GCM IV every time); the passphrase and the recovery key already filed
+  keep working. Rotating the key is a deliberate, separate action.
+- **The front door never sends plaintext.** scarab.one opens to *unlock*
+  (decrypt the stored ciphertext in the tab) or *start empty*; either way the
+  engine runs in the browser and only ciphertext is ever uploaded
+  (`PUT /api/vault`). The server is told nothing but the vault version.
 
 ## What the server still learns (honesty section)
 
@@ -46,10 +54,16 @@ the operator can observe:
 
 - **Identity and timing**: who syncs, when, and blob sizes (mitigation: none
   planned; this is inherent to hosted sync).
-- **Quote symbols**: price fetches go through the server (Yahoo/CoinGecko have
-  no browser CORS). The proxy sees tickers, not quantities. Mitigation: a
-  shared quote cache serves all users from one upstream fetch, so individual
-  request patterns blur; symbol padding is possible if warranted.
+- **Quote symbols**: in household mode price fetches name the held symbols to
+  the server (which already holds the ledger). In zero-knowledge mode the
+  server instead publishes a **daily price basket** — the whole US-listed
+  universe plus top crypto, fetched once and served identically to every
+  client — and the browser picks its own symbols out locally. The request is
+  the same for everyone, so it reveals nothing about the portfolio behind it;
+  the residual is identity and timing (who fetched the basket, and when), not
+  content. Not yet covered in ZK mode: off-universe holdings and daily-history
+  charts — the planned fix is an anonymous-add path and hashed symbol buckets;
+  until then those price as-of the last snapshot.
 - **Bank sync (future)**: automatic SimpleFIN-style sync is fundamentally in
   tension with zero-knowledge — a server-side job would see plaintext
   transactions. ZK mode therefore ships with manual imports (client-side

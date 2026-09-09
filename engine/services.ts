@@ -430,6 +430,33 @@ export function upsertPrices(db: DbLike, quotes: { symbol: string; cents: number
   return updated
 }
 
+/**
+ * Price this household's assets from the shared daily basket (server/basket.ts).
+ * The basket is the same list for everyone; the matching happens here, on the
+ * engine's side of the seam, so in a zero-knowledge session the symbols never
+ * leave the tab. Stocks match on Yahoo spelling (BRK.B → BRK-B), crypto on
+ * the bare ticker.
+ */
+export function applyBasket(
+  db: DbLike,
+  basket: { builtAt: string | null; quotes: { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string }[] },
+) {
+  const assets = db.prepare('SELECT symbol, kind FROM assets').all() as { symbol: string; kind: 'stock' | 'crypto' }[]
+  if (assets.length === 0) return { updated: 0, backfilled: 0, errors: ['no assets yet — record a trade first'], basketBuiltAt: basket.builtAt }
+  if (basket.quotes.length === 0)
+    return { updated: 0, backfilled: 0, errors: ['the price basket is empty — rebuild it from Data & Vault, or wait for today’s build'], basketBuiltAt: basket.builtAt }
+  const byKey = new Map(basket.quotes.map((q) => [`${q.kind}:${q.symbol}`, q]))
+  const quotes: { symbol: string; cents: number; pricedOn: string }[] = []
+  const errors: string[] = []
+  for (const a of assets) {
+    const key = `${a.kind}:${a.kind === 'stock' ? a.symbol.toUpperCase().replace(/\./g, '-') : a.symbol.toUpperCase()}`
+    const q = byKey.get(key)
+    if (q) quotes.push({ symbol: a.symbol, cents: q.cents, pricedOn: q.pricedOn })
+    else errors.push(`${a.symbol}: not in today’s basket`)
+  }
+  return { updated: upsertPrices(db, quotes), backfilled: 0, errors, basketBuiltAt: basket.builtAt }
+}
+
 /* ---------- properties & liabilities ---------- */
 
 export function listProperties(db: DbLike) {

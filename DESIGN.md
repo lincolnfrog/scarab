@@ -65,8 +65,11 @@ server/     Node-only shell.
   db.ts, migrations.ts  better-sqlite3 openDb + migrate.
   api.ts api2.ts api3.ts  Thin Hono wrappers over engine/services.
   api4.ts     Vault blob store + export/import endpoints.
-  api5–7.ts   Tax, digest/recurring, scenarios — each a thin wrapper over one
-              engine module.
+  api5–8.ts   Tax, digest/recurring, scenarios, and the ZK front door + price
+              basket — each a thin wrapper over one engine/service module.
+  basket.ts   The daily price basket: the whole US-listed universe + top crypto,
+              quoted once a day and served identically to every caller, so a
+              local/ZK session refreshes prices without revealing holdings.
   prices.ts charts.ts  Network fetchers (Yahoo, CoinGecko, bitcoin-data.com,
               alternative.me) — fetching stays server-side so engine/ is
               CORS-clean; results are written via services and cached in
@@ -79,7 +82,7 @@ shared/     money.ts (integer cents, string-math parsing; micro-share
             tax gross-up), types.ts.
 ```
 
-**Testing**: vitest, ~56 tests. The two structural ones: `engine/parity.test.ts`
+**Testing**: vitest, ~120 tests. The two structural ones: `engine/parity.test.ts`
 runs the full import→repair→transfer→networth pipeline on better-sqlite3 AND
 sql.js and demands identical output; `engine/hash.test.ts` pins sha1 to
 node:crypto. Everything else covers parsers, lots edge cases (365-day
@@ -166,6 +169,9 @@ at the edge).
 | ETF flows | (absent) | no keyless source exists (Farside/SoSoValue/Coinglass all key-gated). |
 | FRED fredgraph.csv | 30-yr PMMS mortgage average (digest rate trigger) | freddiemac.com's own CSV 403s datacenter IPs; FRED serves the same series keyless. Response is gzip — Node fetch handles it. |
 | Damodaran histretSP + Minneapolis Fed CPI | bundled historical real returns (`engine/history.ts`) | Static, hand-refreshed yearly; not fetched at runtime so ZK mode stays offline-clean. |
+| NASDAQ Trader SymDir | quote-basket universe (all US-listed symbols) | `nasdaqlisted.txt` + `otherlisted.txt`, pipe-delimited, keyless. Datacenter IPs may 403 (as Yahoo does); the build is best-effort and keeps yesterday's rows on failure. |
+| Yahoo v8 spark (batched) | basket quotes | ~200 symbols per call; v7 quote (crumb+cookie) is the fallback when spark returns nothing. |
+| CoinGecko /coins/markets | basket crypto quotes | top ~500 by market cap, keyless, browser-CORS-friendly. |
 | SimpleFIN | (planned, household mode) | $1.50/mo, read-only tokens via MX. Fundamentally in tension with ZK mode — see PRIVACY.md. |
 
 ## 6. Operations
@@ -186,21 +192,31 @@ at the edge).
 ## 7. Roadmap
 
 **Done**: Phases 0–IV (all six screens), vault layer (ZK-1), isomorphic
-engine + parity (ZK-2), local mode with encrypted saves (ZK-3).
+engine + parity (ZK-2), local mode with encrypted saves (ZK-3),
+boot-into-local-from-vault + start-empty (ZK front door, 2026-09-09), and the
+daily price basket that keeps a ZK session's quotes fresh without naming
+holdings (2026-09-09).
 
 **Remaining, in order:**
 
-1. **Boot-into-local-from-vault** — open app → unlock → decrypt vault →
-   local mode. A session that begins and ends with no server plaintext.
-   This is scarab.one's front door.
+1. ~~Boot-into-local-from-vault~~ **— done 2026-09-09** (`src/FrontDoor.tsx`,
+   `src/session.ts`). The front door shows only when the server holds no
+   plaintext: unlock the vault into this tab, or start empty. Save reseals the
+   payload under the data key kept from unlock (`sealVault`), so the filed
+   recovery key keeps working and the passphrase isn't asked twice. A session
+   that begins and ends with no server plaintext.
 2. **Persistent unlock** — unwrapped data key as a non-extractable CryptoKey
    in IndexedDB ("remember this device"); then WebAuthn-PRF passkey unlock
    (vault format v2).
 3. **Two-member vault** — wrap the data key once per household member; each
    unlocks with their own credential.
-4. **Quote proxy** — stateless, shared-cached price endpoint so local/ZK
-   clients get fresh quotes without CORS (sees symbols, not portfolios; see
-   PRIVACY.md metadata section).
+4. ~~Quote proxy~~ → **quote basket, done 2026-09-09** (`server/basket.ts`,
+   `server/api8.ts`). Rather than proxy per-symbol requests (whose stream is
+   the portfolio), the server fetches the whole US-listed universe + top crypto
+   once a day (NASDAQ Trader directory + Yahoo spark + CoinGecko markets) and
+   serves it whole, identical for every caller; the client picks its own
+   symbols out locally. Future: an anonymous-add path for off-universe symbols
+   and hashed-bucket daily-history charts in ZK mode (see PRIVACY.md).
 5. **Trust chain** — open-source the repo, reproducible builds, sigstore/
    GitHub attestations binding served bundle hashes to public commits,
    published asset manifest.
