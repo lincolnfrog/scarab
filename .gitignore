@@ -8,3 +8,4 @@ dist-server/
 .env.*
 .env.gcp
 .DS_Store
+.claude/
