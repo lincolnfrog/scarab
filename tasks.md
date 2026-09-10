@@ -53,15 +53,37 @@ no stored tax numbers.
 - [x] **Disclaimer copy.** This is estimation, not advice; say so in the UI
       where the numbers appear (matches README stance).
 
-Follow-ups (not blocking):
+Follow-ups — **shipped 2026-09-10** except the last:
 
-- [ ] State estimated-payment schedules (CA weights 30/40/0/30) — federal-only today.
-- [ ] Bundle brackets for more progressive states (NY, NJ, OR, MN, HI…) — custom
-      marginal rate is the fallback today.
-- [ ] Project remaining-year vests into the income picture (needs a vest
-      schedule; unvested_positions has no dates).
-- [ ] Qualified vs ordinary dividend split (all treated as ordinary today).
-- [ ] 2026 CA brackets when the FTB publishes them (currently 2025; HoH estimated).
+- [x] State estimated-payment schedules. `estimatedSchedule(rule, …)` runs the
+      federal and state safe harbors under one shape; CA's Form 540-ES rule is
+      bundled (30/40/0/30 installments, $500/$250 threshold, no prior-year
+      harbor at $1M+ AGI). Other taxing states get the federal shape, flagged
+      `assumed` in the API and the UI. New settings: state est. payments made,
+      last year's state tax.
+- [x] Bundled brackets for NY (2026, IT-2105-I), NJ (statutory), OR (2026
+      OR-ESTIMATE), MN (2026 DoR), HI (2026 Act 46 schedule + doubled standard
+      deduction), and — same day — VA, MD (2025 tiers + 2% gains surcharge),
+      OH (2026 flat), WI (2025, sliding deduction), CT (exemption phase-out),
+      SC (2026 Act 110: two brackets, SCIAD, 44% LT exclusion), DC (2026
+      D-40ES). One `StateTable` each in `engine/tax.ts` with a vintage, a
+      "what's not modeled" note the UI prints, and optional hooks for
+      income-dependent deductions, exclusions, and surcharges. 13 states are
+      bracketed, 9 have no tax, 15 are flat; the custom rate remains the
+      fallback for the 14 left (AL AR DE KS ME MO MT NE NM ND OK RI VT WV).
+- [x] Remaining-year vests. Migration 13 adds an optional cadence to
+      `unvested_positions` (`next_vest_on`, `vest_every_months`,
+      `vest_qty_micro`); `projectVests` walks it to Dec 31 at today's price and
+      the income lands in `incomes.rsuProjectedCents`. Recording a vest rolls the
+      cadence past the vest date so nothing double-counts.
+- [x] Qualified vs ordinary dividends: a `qualifiedDividendShareMicro` setting
+      splits the 'Dividends & interest' category; the qualified part stacks with
+      LT gains federally and stays ordinary for the state.
+- [ ] 2026 CA brackets when the FTB publishes them. As of 2026-09-10 they are
+      not out (the EDD's 2026 withholding tables still use 2025 thresholds), so
+      `CA` in `engine/tax.ts` now carries the *official 2025* Schedules X/Y/Z and
+      $5,706/$11,412 deduction (the previous table was actually 2024 data). The
+      swap is one entry: four arrays, one deduction line, one vintage string.
 
 ## 2 — Digest & proactivity
 

@@ -311,6 +311,15 @@ export const migrations: string[] = [
      priced_on TEXT NOT NULL,
      PRIMARY KEY (symbol, kind)
    )`,
+
+  // 13 — an optional vest cadence on each unvested position, so the tax layer
+  // can project the rest of the year's RSU income. Still one running count per
+  // account+asset (tranche tables were tried and dropped in 6): "N shares
+  // every M months, next on D" is what a release schedule boils down to, and
+  // it survives grants overlapping. All three are NULL until the user sets them.
+  `ALTER TABLE unvested_positions ADD COLUMN next_vest_on TEXT;
+   ALTER TABLE unvested_positions ADD COLUMN vest_every_months INTEGER;
+   ALTER TABLE unvested_positions ADD COLUMN vest_qty_micro INTEGER`,
 ]
 
 export function migrate(db: DbLike): void {

@@ -557,10 +557,20 @@ export function getActivity(db: DbLike) {
 
 /* ---------- unvested RSUs ---------- */
 
+/** Calendar-month arithmetic on ISO dates; the day clamps to the target month's end (Jan 31 + 1 → Feb 28). */
+export function addMonths(iso: string, months: number): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
+  const t = new Date(Date.UTC(y, m - 1 + months, 1))
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate()
+  t.setUTCDate(Math.min(d, last))
+  return t.toISOString().slice(0, 10)
+}
+
 export function getUnvested(db: DbLike) {
   const rows = db
     .prepare(
-      `SELECT u.invest_account_id, u.qty_micro, u.updated_on, a.symbol, a.id AS asset_id, ia.name AS account_name,
+      `SELECT u.invest_account_id, u.qty_micro, u.updated_on, u.next_vest_on, u.vest_every_months, u.vest_qty_micro,
+              a.symbol, a.id AS asset_id, ia.name AS account_name,
               (SELECT close_cents FROM prices WHERE asset_id = a.id ORDER BY priced_on DESC LIMIT 1) AS price_cents
        FROM unvested_positions u
        JOIN assets a ON a.id = u.asset_id
@@ -576,10 +586,35 @@ export function getUnvested(db: DbLike) {
   }
 }
 
-export function putUnvested(db: DbLike, b: { investAccountId?: number; symbol?: string; qty?: string }, today: string) {
+export type VestScheduleInput = { nextVestOn?: string; vestEveryMonths?: number | string; vestQty?: string }
+
+/** Validate an optional vest cadence. `nextVestOn` absent → leave the stored
+ *  schedule alone; empty → clear it; otherwise all three fields are required. */
+function parseVestSchedule(b: VestScheduleInput) {
+  if (b.nextVestOn === undefined) return undefined
+  if (!b.nextVestOn) return null
+  if (!isoDay.test(b.nextVestOn)) bad('nextVestOn must be YYYY-MM-DD')
+  const every = Number(b.vestEveryMonths)
+  if (!Number.isInteger(every) || every < 1 || every > 24) bad('vestEveryMonths must be a whole number of months, 1–24')
+  let qtyMicro: number
+  try {
+    qtyMicro = parseQtyMicro(b.vestQty ?? '')
+  } catch (e) {
+    throw new ApiError(400, `vestQty: ${e instanceof Error ? e.message : 'bad qty'}`)
+  }
+  if (qtyMicro <= 0) bad('vestQty must be positive')
+  return { nextVestOn: b.nextVestOn, every, qtyMicro }
+}
+
+export function putUnvested(
+  db: DbLike,
+  b: { investAccountId?: number; symbol?: string; qty?: string } & VestScheduleInput,
+  today: string,
+) {
   if (!b.investAccountId || !b.symbol?.trim() || b.qty == null) bad('investAccountId, symbol, qty required')
   if (!db.prepare("SELECT id FROM invest_accounts WHERE id = ? AND tracking = 'lots'").get(b.investAccountId))
     notFound('no such lots-tracked investment account')
+  const schedule = parseVestSchedule(b)
   const symbol = b.symbol!.trim().toUpperCase()
   db.prepare("INSERT INTO assets (symbol, kind) VALUES (?, 'stock') ON CONFLICT (symbol) DO NOTHING").run(symbol)
   const asset = db.prepare('SELECT id FROM assets WHERE symbol = ?').get(symbol) as { id: number }
@@ -602,6 +637,10 @@ export function putUnvested(db: DbLike, b: { investAccountId?: number; symbol?: 
      ON CONFLICT (invest_account_id, asset_id)
      DO UPDATE SET qty_micro = excluded.qty_micro, updated_on = excluded.updated_on`,
   ).run(b.investAccountId, asset.id, qtyMicro, today)
+  if (schedule !== undefined)
+    db.prepare(
+      'UPDATE unvested_positions SET next_vest_on = ?, vest_every_months = ?, vest_qty_micro = ? WHERE invest_account_id = ? AND asset_id = ?',
+    ).run(schedule?.nextVestOn ?? null, schedule?.every ?? null, schedule?.qtyMicro ?? null, b.investAccountId, asset.id)
   return { ok: true as const, qtyMicro }
 }
 
@@ -635,8 +674,12 @@ export function vestUnvested(
     )
     .run(b.investAccountId, asset!.id, b.tradedOn, qtyMicro, b.totalCents)
   const cur = db
-    .prepare('SELECT qty_micro FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?')
-    .get(b.investAccountId, asset!.id) as { qty_micro: number } | undefined
+    .prepare(
+      'SELECT qty_micro, next_vest_on, vest_every_months FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?',
+    )
+    .get(b.investAccountId, asset!.id) as
+    | { qty_micro: number; next_vest_on: string | null; vest_every_months: number | null }
+    | undefined
   let remaining = 0
   if (cur) {
     remaining = Math.max(0, cur.qty_micro - qtyMicro)
@@ -645,10 +688,19 @@ export function vestUnvested(
         b.investAccountId,
         asset!.id,
       )
-    else
+    else {
+      // A recorded vest consumes the scheduled event it corresponds to: roll
+      // the cadence forward past the vest date so the projection never counts
+      // the same tranche twice.
+      let next = cur.next_vest_on
+      if (next && cur.vest_every_months) {
+        let guard = 0
+        while (next <= b.tradedOn! && guard++ < 400) next = addMonths(next, cur.vest_every_months)
+      }
       db.prepare(
-        'UPDATE unvested_positions SET qty_micro = ?, updated_on = ? WHERE invest_account_id = ? AND asset_id = ?',
-      ).run(remaining, today, b.investAccountId, asset!.id)
+        'UPDATE unvested_positions SET qty_micro = ?, updated_on = ?, next_vest_on = ? WHERE invest_account_id = ? AND asset_id = ?',
+      ).run(remaining, today, next, b.investAccountId, asset!.id)
+    }
   }
   return { ok: true as const, tradeId: Number(trade.lastInsertRowid), remainingQtyMicro: remaining }
 }

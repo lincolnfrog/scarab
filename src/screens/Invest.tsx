@@ -34,6 +34,9 @@ type Unvested = {
   account_name: string
   qty_micro: number
   updated_on: string
+  next_vest_on: string | null
+  vest_every_months: number | null
+  vest_qty_micro: number | null
   price_cents: number | null
   est_cents: number | null
 }
@@ -62,7 +65,9 @@ export default function Invest() {
     basisPerShare: '',
   })
   const [openLots, setOpenLots] = useState<Set<string>>(new Set())
-  const [unvestedForm, setUnvestedForm] = useState({ investAccountId: 0, symbol: '', qty: '' })
+  const [unvestedForm, setUnvestedForm] = useState({
+    investAccountId: 0, symbol: '', qty: '', nextVestOn: '', vestEveryMonths: '3', vestQty: '',
+  })
   const [vesting, setVesting] = useState<{ row: Unvested; qty: string; date: string; total: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const autoRefreshed = useRef(false)
@@ -168,13 +173,23 @@ export default function Invest() {
   async function setUnvestedQty() {
     setMsg(null)
     try {
-      await put('/api/unvested', unvestedForm)
+      const f = unvestedForm
+      const scheduled = f.nextVestOn.trim() !== ''
+      await put('/api/unvested', {
+        investAccountId: f.investAccountId,
+        symbol: f.symbol,
+        qty: f.qty,
+        // date given → set the cadence; date blank with shares/cadence blank too → leave it alone
+        ...(scheduled
+          ? { nextVestOn: f.nextVestOn, vestEveryMonths: Number(f.vestEveryMonths), vestQty: f.vestQty }
+          : f.vestQty.trim() === '' ? {} : { nextVestOn: '' }),
+      })
       setMsg(
-        unvestedForm.qty.trim() === '0'
-          ? `Cleared unvested ${unvestedForm.symbol.toUpperCase()}`
-          : `Unvested ${unvestedForm.symbol.toUpperCase()} set to ${unvestedForm.qty} shares`,
+        f.qty.trim() === '0'
+          ? `Cleared unvested ${f.symbol.toUpperCase()}`
+          : `Unvested ${f.symbol.toUpperCase()} set to ${f.qty} shares${scheduled ? ` · ${f.vestQty} every ${f.vestEveryMonths} mo from ${f.nextVestOn}` : ''}`,
       )
-      setUnvestedForm((f) => ({ ...f, symbol: '', qty: '' }))
+      setUnvestedForm((f) => ({ ...f, symbol: '', qty: '', nextVestOn: '', vestQty: '' }))
       load().catch(console.error)
     } catch (e) {
       setMsg(`${e instanceof Error ? e.message : e}`)
@@ -410,7 +425,37 @@ export default function Invest() {
               value={unvestedForm.qty}
               onChange={(e) => setUnvestedForm({ ...unvestedForm, qty: e.target.value })}
             />
-            <button className="btn" disabled={!unvestedForm.symbol || !unvestedForm.qty} onClick={setUnvestedQty}>
+            <span className="sub2">vesting</span>
+            <input
+              className="qty"
+              placeholder="shares per vest"
+              title="Optional cadence — lets Taxes project the rest of this year's vests into income"
+              value={unvestedForm.vestQty}
+              onChange={(e) => setUnvestedForm({ ...unvestedForm, vestQty: e.target.value })}
+            />
+            <span className="sub2">every</span>
+            <select
+              value={unvestedForm.vestEveryMonths}
+              onChange={(e) => setUnvestedForm({ ...unvestedForm, vestEveryMonths: e.target.value })}
+            >
+              <option value="1">month</option>
+              <option value="3">3 months</option>
+              <option value="6">6 months</option>
+              <option value="12">year</option>
+            </select>
+            <span className="sub2">next on</span>
+            <input
+              className="date"
+              type="date"
+              title="Next vest date — leave blank to keep whatever cadence is already set"
+              value={unvestedForm.nextVestOn}
+              onChange={(e) => setUnvestedForm({ ...unvestedForm, nextVestOn: e.target.value })}
+            />
+            <button
+              className="btn"
+              disabled={!unvestedForm.symbol || !unvestedForm.qty || (!!unvestedForm.nextVestOn && !unvestedForm.vestQty)}
+              onClick={setUnvestedQty}
+            >
               Set
             </button>
           </div>
@@ -419,7 +464,7 @@ export default function Invest() {
               <thead>
                 <tr>
                   <th>Asset</th><th>Account</th><th className="r">Unvested shares</th>
-                  <th className="r">Est. value today</th><th>Updated</th><th style={{ width: 120 }} />
+                  <th className="r">Est. value today</th><th>Schedule</th><th>Updated</th><th style={{ width: 120 }} />
                 </tr>
               </thead>
               <tbody>
@@ -429,6 +474,11 @@ export default function Invest() {
                     <td className="muted">{u.account_name}</td>
                     <td className="r num">{formatQtyMicro(u.qty_micro)}</td>
                     <td className="r num">{u.est_cents !== null ? formatCents(u.est_cents) : '—'}</td>
+                    <td className="muted">
+                      {u.next_vest_on && u.vest_every_months && u.vest_qty_micro
+                        ? `${formatQtyMicro(u.vest_qty_micro)} every ${u.vest_every_months === 1 ? 'month' : `${u.vest_every_months} mo`} · next ${u.next_vest_on}`
+                        : '—'}
+                    </td>
                     <td className="muted">{u.updated_on}</td>
                     <td className="r">
                       <button

@@ -3,7 +3,14 @@ import { formatCents, formatQtyMicro, parseMoney } from '../../shared/money'
 import { get, put } from '../api'
 
 type FilingStatus = 'single' | 'mfj' | 'mfs' | 'hoh'
-type StateInfo = { code: string; name: string; kind: 'none' | 'flat' | 'brackets' | 'custom'; rateMicro?: number }
+type StateInfo = {
+  code: string
+  name: string
+  kind: 'none' | 'flat' | 'brackets' | 'custom'
+  rateMicro?: number
+  vintage?: string
+  note?: string
+}
 type TaxSettings = {
   filingStatus: FilingStatus
   state: string
@@ -15,8 +22,25 @@ type TaxSettings = {
   withheldFederalCents: number
   withheldStateCents: number
   estPaidFederalCents: number
+  estPaidStateCents: number
   priorYearTaxFederalCents: number
+  priorYearTaxStateCents: number
   priorYearAgiOver150k: boolean
+  qualifiedDividendShareMicro: number
+}
+type VestEvent = { symbol: string; account: string; vest_on: string; qty_micro: number; cents: number | null }
+type SafeHarbor = {
+  rule: string
+  weights: [number, number, number, number]
+  assumed: boolean
+  requiredCents: number
+  basis: string
+  paidCents: number
+  remainingCents: number
+  thresholdCents: number
+  belowThreshold: boolean
+  priorYearHarborAvailable: boolean
+  quarters: { due: string; past: boolean; cents: number; weightPct: number }[]
 }
 type HarvestLot = {
   symbol: string
@@ -41,7 +65,12 @@ type Tax = {
     wagesCents: number
     otherCents: number
     rsuYtdCents: number
+    rsuProjectedCents: number
+    rsuProjected: VestEvent[]
+    rsuUnpriced: number
     dividendsYtdCents: number
+    dividendsQualifiedCents: number
+    dividendsOrdinaryCents: number
     realizedStCents: number
     realizedLtCents: number
     totalIncomeCents: number
@@ -54,6 +83,7 @@ type Tax = {
     capLossCarryCents: number
     taxableOrdinaryCents: number
     taxableLtCents: number
+    qualifiedDividendCents: number
     fedOrdinaryCents: number
     fedLtCents: number
     niitCents: number
@@ -66,13 +96,8 @@ type Tax = {
   effRateMicro: number
   fedGapCents: number
   stateGapCents: number
-  safeHarbor: {
-    requiredCents: number
-    basis: string
-    paidCents: number
-    remainingCents: number
-    quarters: { due: string; past: boolean; cents: number }[]
-  }
+  safeHarbor: SafeHarbor
+  stateSafeHarbor: SafeHarbor | null
   harvest: {
     rows: HarvestLot[]
     totals: { harvestableStCents: number; harvestableLtCents: number; estTaxSavedCents: number; washFlagged: number }
@@ -93,8 +118,11 @@ type Form = {
   withheldFederal: string
   withheldState: string
   estPaidFederal: string
+  estPaidState: string
   priorYearTax: string
+  priorYearTaxState: string
   priorYearAgiOver150k: boolean
+  qualifiedShare: string
 }
 
 const toForm = (s: TaxSettings): Form => ({
@@ -108,9 +136,51 @@ const toForm = (s: TaxSettings): Form => ({
   withheldFederal: s.withheldFederalCents ? money(s.withheldFederalCents) : '',
   withheldState: s.withheldStateCents ? money(s.withheldStateCents) : '',
   estPaidFederal: s.estPaidFederalCents ? money(s.estPaidFederalCents) : '',
+  estPaidState: s.estPaidStateCents ? money(s.estPaidStateCents) : '',
   priorYearTax: s.priorYearTaxFederalCents ? money(s.priorYearTaxFederalCents) : '',
+  priorYearTaxState: s.priorYearTaxStateCents ? money(s.priorYearTaxStateCents) : '',
   priorYearAgiOver150k: s.priorYearAgiOver150k,
+  qualifiedShare: s.qualifiedDividendShareMicro ? (s.qualifiedDividendShareMicro / 10_000).toString() : '',
 })
+
+function Schedule({ title, sh }: { title: string; sh: SafeHarbor }) {
+  const weighted = sh.weights.some((w) => w !== sh.weights[0])
+  return (
+    <>
+      <div className="sub2 topline">
+        {title} ({sh.basis}): <b className="inkstrong">{formatCents(sh.requiredCents)}</b> —{' '}
+        {sh.belowThreshold ? (
+          <>the shortfall after withholding is under {formatCents(sh.thresholdCents)}, so no estimated payments are required.</>
+        ) : sh.remainingCents > 0 ? (
+          <>still <b className="inkstrong">{formatCents(sh.remainingCents)}</b> to pay across the remaining dates:</>
+        ) : (
+          <>covered by projected withholding and payments. No estimated payments required.</>
+        )}
+        {!sh.priorYearHarborAvailable && <> Prior-year safe harbor unavailable at this income — 90% of this year applies.</>}
+      </div>
+      {sh.remainingCents > 0 && (
+        <table style={{ marginTop: 8 }}>
+          <tbody>
+            {sh.quarters.map((q) => (
+              <tr key={q.due}>
+                <td className={q.past ? 'muted' : ''}>
+                  {q.due}{q.past ? ' · passed' : ''}
+                  {weighted && <span className="muted"> · {q.weightPct}%</span>}
+                </td>
+                <td className="r num">{q.past ? '—' : formatCents(q.cents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="sub2" style={{ marginTop: 6 }}>
+        {sh.rule}
+        {weighted ? ` — installments weighted ${sh.weights.join('/')}.` : '.'}
+        {sh.assumed && ' This state\'s actual schedule and thresholds are not bundled; the federal shape is assumed.'}
+      </p>
+    </>
+  )
+}
 
 export default function Taxes() {
   const [tax, setTax] = useState<Tax | null>(null)
@@ -147,8 +217,13 @@ export default function Taxes() {
         withheldFederalCents: dollars(form.withheldFederal),
         withheldStateCents: dollars(form.withheldState),
         estPaidFederalCents: dollars(form.estPaidFederal),
+        estPaidStateCents: dollars(form.estPaidState),
         priorYearTaxFederalCents: dollars(form.priorYearTax),
+        priorYearTaxStateCents: dollars(form.priorYearTaxState),
         priorYearAgiOver150k: form.priorYearAgiOver150k,
+        qualifiedDividendShareMicro: form.qualifiedShare.trim()
+          ? Math.round(Number(form.qualifiedShare) * 10_000)
+          : 0,
       })
       await load()
       setMsg('Saved — every number on this screen just recomputed.')
@@ -161,8 +236,10 @@ export default function Taxes() {
 
   if (!tax || !form) return <div className="card">{msg ?? 'Deriving the tax picture…'}</div>
 
-  const { incomes, tax: t, safeHarbor: sh, harvest } = tax
+  const { incomes, tax: t, safeHarbor: sh, stateSafeHarbor: ssh, harvest } = tax
   const stateInfo = tax.states.find((s) => s.code === form.state)
+  const stateName = stateInfo?.name ?? 'State'
+  const hasQualified = incomes.dividendsQualifiedCents > 0
   const gap = tax.fedGapCents + tax.stateGapCents
   const losses = harvest.rows.filter((r) => r.gain_cents < 0)
   const nearLt = harvest.rows.filter((r) => r.gain_cents > 0 && r.term === 'st' && r.days_to_lt <= 90)
@@ -182,7 +259,7 @@ export default function Taxes() {
         <table style={{ marginTop: 14 }}>
           <tbody>
             <tr><td className="muted">Federal — ordinary income</td><td className="r num">{formatCents(t.fedOrdinaryCents)}</td></tr>
-            <tr><td className="muted">Federal — long-term gains</td><td className="r num">{formatCents(t.fedLtCents)}</td></tr>
+            <tr><td className="muted">Federal — long-term gains{hasQualified ? ' & qualified dividends' : ''}</td><td className="r num">{formatCents(t.fedLtCents)}</td></tr>
             {t.niitCents > 0 && <tr><td className="muted">Net investment income tax (3.8%)</td><td className="r num">{formatCents(t.niitCents)}</td></tr>}
             <tr><td className="muted">{stateInfo?.name ?? 'State'}{t.mhstCents > 0 ? ' (incl. 1% MHST)' : ''}</td><td className="r num">{formatCents(t.stateCents)}</td></tr>
           </tbody>
@@ -202,7 +279,23 @@ export default function Taxes() {
           <tbody>
             <tr><td className="muted">Salary (projected)</td><td className="r num">{formatCents(incomes.wagesCents)}</td></tr>
             <tr><td className="muted">RSU vests (from the ledger)</td><td className="r num">{formatCents(incomes.rsuYtdCents)}</td></tr>
-            <tr><td className="muted">Dividends &amp; interest</td><td className="r num">{formatCents(incomes.dividendsYtdCents)}</td></tr>
+            {(incomes.rsuProjected.length > 0 || incomes.rsuUnpriced > 0) && (
+              <tr>
+                <td className="muted" title={incomes.rsuProjected.map((e) => `${e.vest_on} · ${formatQtyMicro(e.qty_micro)} ${e.symbol}${e.cents === null ? ' (no price yet)' : ` ≈ ${formatCents(e.cents)}`}`).join('\n')}>
+                  RSU vests still to come ({incomes.rsuProjected.length}, at today's price)
+                  {incomes.rsuUnpriced > 0 && <span title="Some scheduled vests have no price on file — add one in Invest"> ⚠</span>}
+                </td>
+                <td className="r num">{formatCents(incomes.rsuProjectedCents)}</td>
+              </tr>
+            )}
+            {hasQualified ? (
+              <>
+                <tr><td className="muted">Qualified dividends</td><td className="r num">{formatCents(incomes.dividendsQualifiedCents)}</td></tr>
+                <tr><td className="muted">Ordinary dividends &amp; interest</td><td className="r num">{formatCents(incomes.dividendsOrdinaryCents)}</td></tr>
+              </>
+            ) : (
+              <tr><td className="muted">Dividends &amp; interest</td><td className="r num">{formatCents(incomes.dividendsYtdCents)}</td></tr>
+            )}
             <tr><td className="muted">Other income</td><td className="r num">{formatCents(incomes.otherCents)}</td></tr>
             <tr><td className="muted">Realized short-term</td><td className={`r num ${incomes.realizedStCents < 0 ? 'neg' : ''}`}>{formatCents(incomes.realizedStCents, { sign: incomes.realizedStCents > 0 })}</td></tr>
             <tr><td className="muted">Realized long-term</td><td className={`r num ${incomes.realizedLtCents < 0 ? 'neg' : ''}`}>{formatCents(incomes.realizedLtCents, { sign: incomes.realizedLtCents > 0 })}</td></tr>
@@ -228,30 +321,11 @@ export default function Taxes() {
             <tr><td className="muted">{stateInfo?.name ?? 'State'} gap</td><td className={`r num ${tax.stateGapCents > 0 ? 'neg' : 'pos'}`}>{formatCents(tax.stateGapCents, { sign: tax.stateGapCents > 0 })}</td></tr>
           </tbody>
         </table>
-        <div className="sub2 topline">
-          Safe harbor ({sh.basis}): <b className="inkstrong">{formatCents(sh.requiredCents)}</b> —{' '}
-          {sh.remainingCents > 0 ? (
-            <>still <b className="inkstrong">{formatCents(sh.remainingCents)}</b> to pay across the remaining dates:</>
-          ) : (
-            <>covered by projected withholding. No estimated payments required.</>
-          )}
-        </div>
-        {sh.remainingCents > 0 && (
-          <table style={{ marginTop: 8 }}>
-            <tbody>
-              {sh.quarters.map((q) => (
-                <tr key={q.due}>
-                  <td className={q.past ? 'muted' : ''}>{q.due}{q.past ? ' · passed' : ''}</td>
-                  <td className="r num">{q.past ? '—' : formatCents(q.cents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Schedule title="Federal safe harbor" sh={sh} />
+        {ssh && <Schedule title={`${stateName} safe harbor`} sh={ssh} />}
+        {!ssh && (
+          <p className="sub2" style={{ marginTop: 8 }}>No state income tax — no state estimated payments.</p>
         )}
-        <p className="sub2" style={{ marginTop: 8 }}>
-          Federal rule only — state estimated-payment schedules differ (California weights
-          installments 30/40/0/30 and requires its own safe harbor).
-        </p>
       </div>
 
       {/* ---------- harvesting ---------- */}
@@ -340,17 +414,29 @@ export default function Taxes() {
           <input className="money" placeholder="other income $" value={form.other} onChange={(e) => setF({ other: e.target.value })} />
           <input className="money" placeholder="federal withholding $" title="Projected full-year federal withholding — paystub year-to-date extrapolated, plus RSU supplemental withholding" value={form.withheldFederal} onChange={(e) => setF({ withheldFederal: e.target.value })} />
           <input className="money" placeholder="state withholding $" value={form.withheldState} onChange={(e) => setF({ withheldState: e.target.value })} />
-          <input className="money" placeholder="est. payments made $" value={form.estPaidFederal} onChange={(e) => setF({ estPaidFederal: e.target.value })} />
+          <input className="money" placeholder="federal est. payments made $" value={form.estPaidFederal} onChange={(e) => setF({ estPaidFederal: e.target.value })} />
           <input className="money" placeholder="last year's federal tax $" title="Total tax from last year's 1040 — sets the safe-harbor floor" value={form.priorYearTax} onChange={(e) => setF({ priorYearTax: e.target.value })} />
+          {stateInfo && stateInfo.kind !== 'none' && (
+            <>
+              <input className="money" placeholder="state est. payments made $" value={form.estPaidState} onChange={(e) => setF({ estPaidState: e.target.value })} />
+              <input className="money" placeholder="last year's state tax $" title="Total tax from last year's state return — sets the state safe-harbor floor" value={form.priorYearTaxState} onChange={(e) => setF({ priorYearTaxState: e.target.value })} />
+            </>
+          )}
           <label className="sub2" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={form.priorYearAgiOver150k} onChange={(e) => setF({ priorYearAgiOver150k: e.target.checked })} />
             AGI over $150k last year (110% safe harbor)
           </label>
         </div>
+        <div className="formrow" style={{ marginTop: 8 }}>
+          <input className="qty" placeholder="qualified dividend %" title="Share of 'Dividends & interest' transactions that are qualified dividends (taxed at long-term rates). Broad ETFs run 90%+; interest is 0%. Blank = all ordinary." value={form.qualifiedShare} onChange={(e) => setF({ qualifiedShare: e.target.value })} />
+          <span className="sub2">of dividends &amp; interest are qualified dividends</span>
+        </div>
         {msg && <div className="sub2 importmsg">{msg}</div>}
         <p className="sub2" style={{ marginTop: 10 }}>
-          Estimation for planning, not tax advice or preparation. Brackets: {tax.vintage}. RSU vest income and
-          realized gains are derived from the ledger; dividends from categorized transactions. Payroll taxes
+          Estimation for planning, not tax advice or preparation. Brackets: {tax.vintage}.
+          {stateInfo?.note ? ` ${stateInfo.note}` : ''} RSU vest income and
+          realized gains are derived from the ledger; scheduled vests are valued at today's price (set the
+          cadence in Invest → Unvested RSUs); dividends from categorized transactions. Payroll taxes
           (Social Security, Medicare) are not modeled. Washington's capital-gains excise and Massachusetts's
           millionaire surtax are not modeled. Verify with a professional before acting.
         </p>
