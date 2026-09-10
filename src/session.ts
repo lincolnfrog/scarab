@@ -95,6 +95,9 @@ export async function saveVault(opts: { passphrase?: string; rotate?: boolean } 
   return { version: r.version, sha256: r.sha256, bytes: plaintext.length, recoveryKeyB64 }
 }
 
-/** Server-side state the front door needs: is there a vault, and does the server hold any plaintext? */
-export type Mode = { vault: { version: number; updated_at: string } | null; serverHasData: boolean }
+/**
+ * Server-side state the front door needs: is there a vault, does the server
+ * hold any plaintext, and is it a vault-only server (no household escape hatch)?
+ */
+export type Mode = { vault: { version: number; updated_at: string } | null; serverHasData: boolean; zkOnly: boolean }
 export const fetchMode = () => net<Mode>('/api/mode')

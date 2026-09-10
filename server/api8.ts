@@ -9,9 +9,9 @@ const db = rawDb as unknown as DbLike
 // Zero-knowledge mode plumbing: what the front door needs to know, and the
 // daily price basket (see ./basket.ts) that lets a local session refresh
 // quotes without telling the server what it holds.
-export const api8 = new Hono<{ Variables: { userEmail: string } }>()
+export const api8 = new Hono<{ Variables: { userEmail: string; zkOnly: boolean } }>()
 
-/** Does the server hold any plaintext household data at all? */
+/** Does the server hold any plaintext household data at all? (Ciphertext and the basket don't count.) */
 export function serverHasData(d: DbLike): boolean {
   for (const t of ['accounts', 'transactions', 'invest_accounts', 'trades', 'properties', 'rsu_vests'])
     if ((d.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n > 0) return true
@@ -23,7 +23,7 @@ api8.get('/mode', (c) =>
     const v = db
       .prepare('SELECT version, updated_at FROM vault_blobs WHERE owner_email = ?')
       .get(c.get('userEmail')) as { version: number; updated_at: string } | undefined
-    return { vault: v ?? null, serverHasData: serverHasData(db) }
+    return { vault: v ?? null, serverHasData: serverHasData(db), zkOnly: c.get('zkOnly') ?? false }
   }),
 )
 

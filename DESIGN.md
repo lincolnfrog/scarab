@@ -220,8 +220,10 @@ holdings (2026-09-09).
 5. **Trust chain** — open-source the repo, reproducible builds, sigstore/
    GitHub attestations binding served bundle hashes to public commits,
    published asset manifest.
-6. **scarab.one deploy** — IAP `allAuthenticatedUsers`, vault-only storage,
-   size caps, ToS/privacy pages.
+6. **scarab.one deploy** — ~~vault-only storage~~ (**done 2026-09-09**:
+   `SCARAB_ZK_ONLY=1`, `server/app.ts` — plaintext routes refused, boot refuses
+   plaintext data, one-time purge flag; `scripts/deploy.sh` forwards both);
+   still to do: IAP `allAuthenticatedUsers`, size caps, ToS/privacy pages.
 7. Household-mode conveniences that never made ZK controversial: SimpleFIN
    sync, nightly price refresh (Cloud Scheduler + OIDC through IAP),
    tax-rate settings page.

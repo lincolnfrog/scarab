@@ -41,7 +41,7 @@ You → Identity-Aware Proxy → Cloud Run (this app) → SQLite ⇄ Litestream 
   app reads the authenticated email from the `x-goog-authenticated-user-email`
   header. There is no auth code to get wrong.
 - **DB**: one SQLite file, WAL mode, money as integer cents, append-only
-  migrations in `server/db.ts`. Litestream streams every write to a private GCS
+  migrations in `engine/migrations.ts`. Litestream streams every write to a private GCS
   bucket and restores on cold start. `--max-instances 1` keeps the single-writer
   invariant.
 
@@ -53,6 +53,13 @@ You → Identity-Aware Proxy → Cloud Run (this app) → SQLite ⇄ Litestream 
 4. Walk the checklist the script prints (both accounts in, third account blocked).
 
 After that, every deploy is just `./scripts/deploy.sh`.
+
+**Vault-only (zero-knowledge) deploy**: add `SCARAB_ZK_ONLY=1` to `.env.gcp`.
+The server then serves only the encrypted-vault courier and the daily price
+basket; every plaintext route is refused and the app runs entirely in the
+browser tab (see `PRIVACY.md`). Converting an existing household install is a
+one-time `SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh` — export your data from
+Data & Vault first; the server refuses to boot vault-only over plaintext.
 
 ## Costs
 

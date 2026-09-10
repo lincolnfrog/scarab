@@ -112,12 +112,18 @@ export default function FrontDoor({ mode, onHousehold }: { mode: Mode; onHouseho
           </>
         )}
         {err && <div className="sub2 neg" style={{ marginTop: 10 }}>{err}</div>}
-        <div className="sub2 topline">
-          <span className="muted">Running your own instance for the household, with the server holding plaintext?</span>{' '}
-          <button className="btn mini ghosty" onClick={onHousehold} disabled={!!busy}>
-            Continue in household mode
-          </button>
-        </div>
+        {mode.zkOnly ? (
+          <div className="sub2 topline muted">
+            This server is vault-only: it accepts ciphertext and serves the daily price basket, nothing else.
+          </div>
+        ) : (
+          <div className="sub2 topline">
+            <span className="muted">Running your own instance for the household, with the server holding plaintext?</span>{' '}
+            <button className="btn mini ghosty" onClick={onHousehold} disabled={!!busy}>
+              Continue in household mode
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

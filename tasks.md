@@ -169,6 +169,33 @@ Follow-ups (not blocking):
 - [ ] Live basket build couldn't run from the build sandbox (egress 403s to
       nasdaqtrader.com / coingecko); verify a real build on the deployment.
 
+## Milestone: re-import from scratch through the vault (2026-09-09)
+
+The site becomes vault-only and the household's data is re-entered through the
+front door (start empty → accounts → statements → trades/properties/liabilities
+→ save). Done so far:
+
+- [x] Snapshots hold household data only: `vault_blobs` and the basket
+      (`basket_quotes`, `basket:*` app_meta keys) are out of `TABLES`. Before
+      this, every household backup nested the previous ciphertext inside the new
+      blob, and a restore rolled the vault version back.
+- [x] `SCARAB_ZK_ONLY=1` server (`server/app.ts`): only me/health/mode/vault/
+      basket routes answer; boot refuses plaintext data unless
+      `SCARAB_PURGE_PLAINTEXT=1` wipes it once; `/api/mode` reports it and the
+      front door drops the household escape hatch. Tests in `server/app.test.ts`.
+
+Still needed for the milestone:
+
+- [ ] **Deploy vault-only**: download a plain export of the current site as a
+      keepsake, then `SCARAB_ZK_ONLY=1 SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh`
+      (put `SCARAB_ZK_ONLY=1` in `.env.gcp` so later deploys keep it).
+- [ ] **Autosave in a session**: once a session key exists, reseal + PUT after
+      each write (debounced). Importing is dozens of steps; a closed tab loses
+      them all today.
+- [ ] Verify the basket builds on the real deployment (see above).
+- [ ] Then: two-member vault (partner sees "Nothing here yet" — blobs are
+      per-email), gzip before encrypt (10MB blob cap), persistent unlock.
+
 ## Backlog: smaller, high leverage
 
 - [ ] Performance attribution on Invest: TWR/IRR per account and total, vs a

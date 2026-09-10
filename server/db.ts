@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { migrations, openDb } from './migrations'
 
-export const db = openDb(resolve(process.env.DB_PATH ?? './scarab.db'))
+const path = process.env.DB_PATH ?? './scarab.db'
+export const db = openDb(path === ':memory:' ? path : resolve(path))
 export const schemaVersion = migrations.length

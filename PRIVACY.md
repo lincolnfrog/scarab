@@ -14,7 +14,8 @@ the household.
 
 **Zero-knowledge mode** (scarab.one, in progress): the server stores only
 ciphertext. All plaintext handling — parsing, ledgers, charts, simulation,
-encryption — happens in the browser.
+encryption — happens in the browser. Deployed with `SCARAB_ZK_ONLY=1`, the
+server has no plaintext routes at all (see below).
 
 ## The vault (shipped)
 
@@ -42,6 +43,14 @@ Consequences, stated plainly:
   data key in memory after unlock and re-encrypts each new payload under it
   (fresh GCM IV every time); the passphrase and the recovery key already filed
   keep working. Rotating the key is a deliberate, separate action.
+- **The server can be made unable to hold plaintext.** With
+  `SCARAB_ZK_ONLY=1` (`server/app.ts`), the server answers exactly five
+  things: identity, the mode probe, the encrypted-blob courier, the price
+  basket, and health. Every other route returns 403 before any handler runs,
+  and the server refuses to boot at all if its database holds plaintext
+  (a one-time `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data,
+  keeping ciphertext and the basket). The allowed-route list is a single
+  regular expression, so the claim is auditable in one line.
 - **The front door never sends plaintext.** scarab.one opens to *unlock*
   (decrypt the stored ciphertext in the tab) or *start empty*; either way the
   engine runs in the browser and only ciphertext is ever uploaded

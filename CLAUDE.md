@@ -18,12 +18,18 @@ Match it when building screens (layout, copy tone, chart anatomy).
 
 - **Money is integer cents** (`shared/money.ts`). Floats never touch monetary
   values — not in the DB, the API, or app state.
-- **Migrations are append-only** — the `migrations` array in `server/db.ts`.
-  Never edit a shipped entry.
+- **Migrations are append-only** — the `migrations` array in
+  `engine/migrations.ts`. Never edit a shipped entry.
+- **Snapshots hold household data only.** `engine/snapshot.ts` TABLES excludes
+  `vault_blobs` (ciphertext) and the price basket (`basket_quotes`, `basket:*`
+  keys in app_meta). Don't add them back.
 - **Single writer**: Cloud Run runs with `--max-instances 1` (SQLite). Don't
   "fix" that flag.
 - **No auth code in the app.** Identity is IAP's header
   (`x-goog-authenticated-user-email`); dev fallback is `dev@localhost`.
+- **`SCARAB_ZK_ONLY=1` is the vault-only server.** `server/app.ts` ZK_ROUTES is
+  the complete list of what it answers; every new route is plaintext-only
+  unless it is deliberately added there.
 - **Derived numbers come from the ledger.** Store facts (transactions, lots,
   valuations); compute charts/balances from them, never store both.
 
