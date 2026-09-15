@@ -29,6 +29,10 @@ export default function App() {
   const [active, setActive] = useState<ScreenId>('dash')
   const [me, setMe] = useState<Me | null>(null)
   const [mode, setMode] = useState<Mode | null | 'household'>(null)
+  // The front door owns the tab until a session is unlocked, created, or the
+  // household escape hatch is taken — even while a session is already booting
+  // behind it (creating a vault starts the engine before the passkey prompt).
+  const [entered, setEntered] = useState(false)
   const [, forceRender] = useState(0)
 
   useEffect(() => {
@@ -49,7 +53,8 @@ export default function App() {
   const screen = SCREENS.find((s) => s.id === active)!
 
   if (mode === null) return null
-  if (mode !== 'household' && !localMode.active) return <FrontDoor mode={mode} onHousehold={() => setMode('household')} />
+  if (mode !== 'household' && !entered)
+    return <FrontDoor mode={mode} onEnter={() => setEntered(true)} onHousehold={() => setMode('household')} />
 
   return (
     <div className="app">

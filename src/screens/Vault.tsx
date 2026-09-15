@@ -3,6 +3,7 @@ import { sha256Hex, type PasskeyWrap } from '../../shared/vault'
 import { get, post } from '../api'
 import type { Dump } from '../../engine/snapshot'
 import { enterLocalMode, exitLocalMode, loadLocalDump, localMode } from '../local'
+import RecoveryCode from '../RecoveryCode'
 import {
   addMember,
   addPasskey,
@@ -32,43 +33,6 @@ function download(filename: string, contents: string, type = 'application/json')
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
-
-/** Print the recovery code on its own page: a drawer, a safe, the folder with the passports. */
-function printRecoveryCode(code: string) {
-  const w = window.open('', '_blank', 'width=560,height=420')
-  if (!w) return
-  w.document.write(
-    `<title>Scarab recovery code</title><body style="font-family:system-ui;padding:32px;color:#111">` +
-      `<h2 style="margin:0 0 6px">Scarab vault — recovery code</h2>` +
-      `<p style="margin:0 0 18px;color:#555">Printed ${today()}. Opens the vault without a passkey. There is no reset: keep this somewhere real.</p>` +
-      `<pre style="font:18px/1.6 ui-monospace,monospace;letter-spacing:1px;white-space:pre-wrap">${code.replace(/(.{24})-/g, '$1-\n')}</pre></body>`,
-  )
-  w.document.close()
-  w.focus()
-  w.print()
-}
-
-/** The one place the raw data key is ever shown. */
-function RecoveryCode({ code, title, onDone }: { code: string; title: string; onDone: () => void }) {
-  return (
-    <div className="recovery">
-      <div className="h4row">
-        <b className="inkstrong">{title}</b>
-        <div className="right muted">write it down · it will not be shown again unprompted</div>
-      </div>
-      <pre className="recoverycode">{code}</pre>
-      <p className="sub2">
-        This code alone opens the vault, on any device, without a passkey. Zero-knowledge means nobody can reset it
-        for you: lose every passkey and this code, and the vault is gone.
-      </p>
-      <div className="formrow">
-        <button className="btn" onClick={() => printRecoveryCode(code)}>Print</button>
-        <button className="btn ghosty" onClick={() => navigator.clipboard?.writeText(code)}>Copy</button>
-        <button className="btn gold" onClick={onDone}>I've stored it</button>
-      </div>
-    </div>
-  )
-}
 
 export default function Vault() {
   const [info, setInfo] = useState<VaultInfo | null>(null)
