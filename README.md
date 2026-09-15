@@ -55,6 +55,9 @@ You → Identity-Aware Proxy → Cloud Run (this app) → SQLite ⇄ Litestream 
 After that, every deploy is just `./scripts/deploy.sh`.
 
 **Vault-only (zero-knowledge) deploy**: add `SCARAB_ZK_ONLY=1` to `.env.gcp`.
+The vault unlocks with a passkey (fingerprint/face; Chrome or Safari on
+current macOS, iOS, Android, Windows) and a printed recovery code — see
+PRIVACY.md.
 The server then serves only the encrypted-vault courier and the daily price
 basket; every plaintext route is refused and the app runs entirely in the
 browser tab (see `PRIVACY.md`). Converting an existing household install is a

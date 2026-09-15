@@ -1,9 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { b64decode, sha256Hex } from '../../shared/vault'
+import { sha256Hex, type PasskeyWrap } from '../../shared/vault'
 import { get, post } from '../api'
 import type { Dump } from '../../engine/snapshot'
 import { enterLocalMode, exitLocalMode, loadLocalDump, localMode } from '../local'
-import { fetchVaultInfo, saveVault, startEmpty, unlockVault, type VaultInfo } from '../session'
+import {
+  addMember,
+  addPasskey,
+  createVault,
+  fetchMembers,
+  fetchVaultInfo,
+  fetchVaultKeys,
+  recoveryCodeOfSession,
+  removeMember,
+  removePasskey,
+  rotateVault,
+  saveVault,
+  startEmpty,
+  unlockVault,
+  unlockWithRecoveryCode,
+  type Member,
+  type VaultInfo,
+} from '../session'
 
 function download(filename: string, contents: string, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([contents], { type }))
@@ -16,37 +33,63 @@ function download(filename: string, contents: string, type = 'application/json')
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-function recoveryKit(recoveryKeyB64: string, vaultVersion: number) {
-  download(
-    `scarab-recovery-key-${today()}.json`,
-    JSON.stringify(
-      {
-        note: 'Scarab vault recovery key. This OR your passphrase decrypts the vault. Zero-knowledge means no reset — keep this somewhere real.',
-        created: new Date().toISOString(),
-        vaultVersion,
-        recoveryKeyB64,
-      },
-      null,
-      2,
-    ),
+/** Print the recovery code on its own page: a drawer, a safe, the folder with the passports. */
+function printRecoveryCode(code: string) {
+  const w = window.open('', '_blank', 'width=560,height=420')
+  if (!w) return
+  w.document.write(
+    `<title>Scarab recovery code</title><body style="font-family:system-ui;padding:32px;color:#111">` +
+      `<h2 style="margin:0 0 6px">Scarab vault — recovery code</h2>` +
+      `<p style="margin:0 0 18px;color:#555">Printed ${today()}. Opens the vault without a passkey. There is no reset: keep this somewhere real.</p>` +
+      `<pre style="font:18px/1.6 ui-monospace,monospace;letter-spacing:1px;white-space:pre-wrap">${code.replace(/(.{24})-/g, '$1-\n')}</pre></body>`,
+  )
+  w.document.close()
+  w.focus()
+  w.print()
+}
+
+/** The one place the raw data key is ever shown. */
+function RecoveryCode({ code, title, onDone }: { code: string; title: string; onDone: () => void }) {
+  return (
+    <div className="recovery">
+      <div className="h4row">
+        <b className="inkstrong">{title}</b>
+        <div className="right muted">write it down · it will not be shown again unprompted</div>
+      </div>
+      <pre className="recoverycode">{code}</pre>
+      <p className="sub2">
+        This code alone opens the vault, on any device, without a passkey. Zero-knowledge means nobody can reset it
+        for you: lose every passkey and this code, and the vault is gone.
+      </p>
+      <div className="formrow">
+        <button className="btn" onClick={() => printRecoveryCode(code)}>Print</button>
+        <button className="btn ghosty" onClick={() => navigator.clipboard?.writeText(code)}>Copy</button>
+        <button className="btn gold" onClick={onDone}>I've stored it</button>
+      </div>
+    </div>
   )
 }
 
 export default function Vault() {
   const [info, setInfo] = useState<VaultInfo | null>(null)
-  const [pass, setPass] = useState('')
-  const [pass2, setPass2] = useState('')
-  const [rotating, setRotating] = useState(false)
+  const [keys, setKeys] = useState<PasskeyWrap[]>([])
+  const [members, setMembers] = useState<{ household: string; members: Member[] } | null>(null)
+  const [label, setLabel] = useState('')
+  const [memberEmail, setMemberEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [recovering, setRecovering] = useState(false)
+  const [shown, setShown] = useState<{ code: string; title: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [engineResult, setEngineResult] = useState<string[] | null>(null)
   const [basket, setBasket] = useState<{ builtAt: string | null; count: number; errors: string[]; building: boolean } | null>(null)
   const [, bump] = useState(0)
   const restoreFileRef = useRef<HTMLInputElement>(null)
-  const recoveryFileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
     fetchVaultInfo().then(setInfo).catch(() => setInfo(null))
+    fetchVaultKeys().then((k) => setKeys(k?.keys ?? [])).catch(() => setKeys([]))
+    fetchMembers().then(setMembers).catch(() => setMembers(null))
     fetch('/api/basket/status').then((r) => (r.ok ? r.json() : null)).then(setBasket).catch(() => setBasket(null))
   }, [])
   useEffect(() => {
@@ -60,104 +103,86 @@ export default function Vault() {
   const session = localMode.vault
   const fail = (e: unknown) => setMsg(`${e instanceof Error ? e.message : e}`)
 
-  /* ---------- save ---------- */
+  /* ---------- save / create / passkeys ---------- */
 
-  async function save(rotate: boolean) {
+  async function act(label: string, fn: () => Promise<string | void>) {
     setMsg(null)
-    const needsPass = rotate || !session
-    if (needsPass) {
-      if (pass.length < 8) return setMsg('Passphrase needs at least 8 characters.')
-      if (pass !== pass2) return setMsg('Passphrases do not match.')
-    }
-    setBusy('Encrypting in this tab…')
+    setBusy(label)
     try {
-      const r = await saveVault({ passphrase: needsPass ? pass : undefined, rotate })
-      if (r.recoveryKeyB64) recoveryKit(r.recoveryKeyB64, r.version)
-      setMsg(
-        `Vault v${r.version} stored (${(r.bytes / 1024).toFixed(0)} KB plaintext → ciphertext sha ${r.sha256.slice(0, 12)}…).` +
-          (r.recoveryKeyB64 ? ' Recovery key downloaded — file it with the passports.' : ' Same key as before; your filed recovery key still works.'),
+      const m = await fn()
+      if (m) setMsg(m)
+      load()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const save = () =>
+    act('Encrypting in this tab…', async () => {
+      const r = await saveVault()
+      return `Vault v${r.version} stored (${(r.bytes / 1024).toFixed(0)} KB plaintext → ciphertext sha ${r.sha256.slice(0, 12)}…). Same key as before; every passkey and the recovery code still work.`
+    })
+
+  const create = () =>
+    act('Waiting for your passkey…', async () => {
+      const r = await createVault(label.trim() || 'this device')
+      setShown({ code: r.recoveryCode, title: `Vault v${r.version} created — your recovery code` })
+      setLabel('')
+    })
+
+  const addDevice = () =>
+    act('Waiting for the new passkey…', async () => {
+      const w = await addPasskey(label.trim() || 'another device')
+      setLabel('')
+      return `Passkey "${w.label}" added and the vault saved. It can unlock from now on.`
+    })
+
+  /** A household member: their phone answers the QR prompt, their passkey lands in the header, then the server learns whose it is. */
+  const addHousehold = () =>
+    act('Waiting for their passkey…', async () => {
+      const email = memberEmail.trim().toLowerCase()
+      if (!email.includes('@')) throw new Error('Enter the Google account email they sign in with.')
+      await addPasskey(email)
+      await addMember(email)
+      setMemberEmail('')
+      return `${email} can now unlock this vault with their own passkey.`
+    })
+
+  const drop = (w: PasskeyWrap) =>
+    act('Saving…', async () => {
+      if (!window.confirm(`Remove the passkey "${w.label}"? It will no longer unlock the vault.`)) return
+      await removePasskey(w.credentialId)
+      const m = members?.members.find((x) => x.email === w.label)
+      if (m && !keys.some((k) => k !== w && k.label === w.label)) await removeMember(m.email)
+      return `Passkey "${w.label}" removed.`
+    })
+
+  const rotate = () =>
+    act('Waiting for your passkey…', async () => {
+      if (
+        !window.confirm(
+          'Rotate the vault key? The passkey you answer with stays; every other passkey and the old recovery code stop working and must be added again.',
+        )
       )
-      setPass('')
-      setPass2('')
-      setRotating(false)
-      load()
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  /** Household mode: encrypt the server's data into the vault (the pre-ZK backup path). */
-  async function backupFromServer() {
-    setMsg(null)
-    if (pass.length < 8) return setMsg('Passphrase needs at least 8 characters.')
-    if (pass !== pass2) return setMsg('Passphrases do not match.')
-    setBusy('Encrypting in this tab…')
-    try {
-      const dump = await get<Dump>('/api/export')
-      // Reuse the session machinery by booting a throwaway local session? No —
-      // household mode must keep running on the server. Seal directly instead.
-      const { createVault } = await import('../../shared/vault')
-      const plaintext = new TextEncoder().encode(JSON.stringify(dump))
-      const { blob, recoveryKeyB64 } = await createVault(pass, plaintext)
-      const r = await fetch('/api/vault', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ data: JSON.stringify(blob), version: info?.version ?? 0 }),
-      })
-      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? `${r.status}`)
-      const j = (await r.json()) as { version: number; sha256: string }
-      recoveryKit(recoveryKeyB64, j.version)
-      setMsg(`Encrypted backup v${j.version} stored (${(plaintext.length / 1024).toFixed(0)} KB → sha ${j.sha256.slice(0, 12)}…). Recovery key downloaded.`)
-      setPass('')
-      setPass2('')
-      load()
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(null)
-    }
-  }
+        return
+      const r = await rotateVault()
+      setShown({ code: r.recoveryCode, title: `Vault v${r.version} re-keyed — new recovery code` })
+      return `Re-keyed. Kept "${r.kept}"; add other devices and members again.`
+    })
 
   /* ---------- unlock ---------- */
 
-  async function unlock(secret: { passphrase: string } | { recoveryKeyB64: string }) {
-    setMsg(null)
-    if (!info) return setMsg('No vault stored yet.')
-    if (local && localMode.dirty && !window.confirm('Replace this tab’s unsaved data with the vault contents?')) return
-    setBusy('Decrypting in this tab…')
-    try {
-      const r = await unlockVault(secret)
-      setMsg(`Vault v${r.version} unlocked into this tab. The server never saw the plaintext.`)
-      setPass('')
-      setPass2('')
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  /** Household mode only: decrypt and load into the server database. */
-  async function restoreToServer() {
-    setMsg(null)
-    if (!info) return setMsg('No vault stored yet.')
-    if (!window.confirm(`Decrypt vault v${info.version} and REPLACE the server's data with it? (This puts plaintext on the server — household mode.)`)) return
-    setBusy('Decrypting…')
-    try {
-      const { openVault } = await import('../../shared/vault')
-      const plaintext = await openVault(JSON.parse(info.data), { passphrase: pass })
-      const dump = JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, unknown>
-      await post('/api/import', { ...dump, confirm: 'REPLACE' })
-      setMsg('Vault restored to the server. Reloading…')
-      setTimeout(() => window.location.reload(), 800)
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(null)
-    }
-  }
+  const unlock = (fn: () => Promise<{ version: number }>) =>
+    act('Decrypting in this tab…', async () => {
+      if (!info) throw new Error('No vault stored yet.')
+      if (local && localMode.dirty && !window.confirm('Replace this tab’s unsaved data with the vault contents?')) return
+      const r = await fn()
+      setCode('')
+      setRecovering(false)
+      return `Vault v${r.version} unlocked into this tab. The server never saw the plaintext.`
+    })
 
   /* ---------- plain export ---------- */
 
@@ -234,13 +259,6 @@ export default function Vault() {
     )
   }
 
-  const passInputs = (
-    <>
-      <input type="password" placeholder="vault passphrase (8+ chars)" style={{ width: 220 }} value={pass} onChange={(e) => setPass(e.target.value)} />
-      <input type="password" placeholder="repeat it" style={{ width: 160 }} value={pass2} onChange={(e) => setPass2(e.target.value)} />
-    </>
-  )
-
   return (
     <div className="grid12">
       <div className="card c12">
@@ -249,7 +267,8 @@ export default function Vault() {
           A <b className="inkstrong">zero-knowledge session</b> runs Scarab entirely in this browser tab: the
           vault is decrypted here, every screen computes here, and saving encrypts here before anything is
           uploaded. The server stores ciphertext it cannot read and couriers a daily price basket that is the
-          same for everyone. Your passphrase (or the filed recovery key) decrypts; there is{' '}
+          same for everyone. A passkey — fingerprint or face, synced by Apple or Google across your devices —
+          decrypts; the printed recovery code is the only other way in, and there is{' '}
           <b className="inkstrong">no reset</b>. Details and honest limits in <span className="num">PRIVACY.md</span>.
         </p>
       </div>
@@ -265,7 +284,7 @@ export default function Vault() {
             <p className="sub2">
               {session
                 ? `Unlocked from vault v${session.version} — the key stays in memory until you close the tab.`
-                : 'Started without a vault — set a passphrase below to save.'}{' '}
+                : 'Started without a vault — create one below to save.'}{' '}
               {localMode.dirty ? <b className="neg">Unsaved changes.</b> : <span className="pos">Everything saved.</span>}
             </p>
             <div className="formrow" style={{ marginTop: 8 }}>
@@ -360,80 +379,139 @@ export default function Vault() {
           </div>
         </div>
 
-        {local && session && !rotating ? (
+        {shown && <RecoveryCode code={shown.code} title={shown.title} onDone={() => setShown(null)} />}
+
+        {local && session ? (
           <div className="formrow">
-            <button className="btn gold" disabled={!!busy} onClick={() => save(false)}>
+            <button className="btn gold" disabled={!!busy} onClick={save}>
               {busy ?? (localMode.dirty ? 'Save to vault' : 'Save to vault (no changes)')}
             </button>
-            <button className="btn ghosty" disabled={!!busy} onClick={() => setRotating(true)}>
-              Rotate passphrase & recovery key…
+            <button className="btn ghosty" disabled={!!busy} onClick={rotate}>
+              Rotate key…
+            </button>
+            <button
+              className="btn ghosty"
+              disabled={!!busy}
+              onClick={() => {
+                if (window.confirm('Show the recovery code? Anyone who sees it can open the vault.'))
+                  setShown({ code: recoveryCodeOfSession(), title: 'Recovery code' })
+              }}
+            >
+              Show recovery code
             </button>
           </div>
         ) : local ? (
           <div className="formrow">
-            {passInputs}
-            <button className="btn gold" disabled={!!busy || !pass} onClick={() => save(rotating)}>
-              {busy ?? (rotating ? 'Rotate & save' : info ? 'Save to vault (replaces stored)' : 'Create vault & save')}
+            <input placeholder="name this device (e.g. Max's Mac)" style={{ width: 220 }} value={label} onChange={(e) => setLabel(e.target.value)} disabled={!!busy} />
+            <button className="btn gold" disabled={!!busy} onClick={create}>
+              {busy ?? (info ? 'Create vault & save (replaces stored)' : 'Create vault with a passkey')}
             </button>
-            {rotating && (
-              <button className="btn ghosty" onClick={() => setRotating(false)}>
-                Cancel
-              </button>
-            )}
           </div>
         ) : (
-          <div className="formrow">
-            {passInputs}
-            <button className="btn gold" disabled={!!busy || !pass} onClick={backupFromServer}>
-              {busy ?? 'Encrypt server data & store'}
+          <p className="sub2">
+            Household mode keeps plaintext on the server. To move into the vault, start a session from server data
+            (left), then create the vault with a passkey here.
+          </p>
+        )}
+
+        {info && (!local || !session) && (
+          <div className="formrow" style={{ marginTop: 10 }}>
+            {!recovering ? (
+              <>
+                <button className="btn" disabled={!!busy} onClick={() => unlock(unlockVault)} title="decrypt in this tab and run on it — the server never sees plaintext">
+                  Unlock with passkey
+                </button>
+                <button className="btn ghosty" disabled={!!busy} onClick={() => setRecovering(true)}>
+                  Use recovery code…
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  autoFocus
+                  placeholder="XXXX-XXXX-… (13 groups)"
+                  spellCheck={false}
+                  autoComplete="off"
+                  style={{ width: 280, fontFamily: 'var(--mono)' }}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  disabled={!!busy}
+                />
+                <button className="btn" disabled={!!busy || !code.trim()} onClick={() => unlock(() => unlockWithRecoveryCode(code))}>
+                  Unlock
+                </button>
+                <button className="btn ghosty" disabled={!!busy} onClick={() => setRecovering(false)}>
+                  Back
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {info && (
+          <div className="formrow" style={{ marginTop: 10 }}>
+            <button className="btn mini ghosty" disabled={!!busy} onClick={verifyBlob} title="hash the stored ciphertext locally and compare to the server's claim">
+              Verify integrity
             </button>
           </div>
         )}
 
-        {info && (
-          <div className="formrow" style={{ marginTop: 10 }}>
-            {local && session && !rotating && (
-              <input type="password" placeholder="passphrase to unlock" style={{ width: 200 }} value={pass} onChange={(e) => setPass(e.target.value)} />
-            )}
-            <button className="btn" disabled={!!busy || !pass} onClick={() => unlock({ passphrase: pass })} title="decrypt in this tab and run on it — the server never sees plaintext">
-              Unlock into this tab
-            </button>
-            <input
-              ref={recoveryFileRef}
-              type="file"
-              accept=".json"
-              style={{ display: 'none' }}
-              onChange={async (e) => {
-                const f = e.target.files?.[0]
-                if (!f) return
-                try {
-                  const kit = JSON.parse(await f.text()) as { recoveryKeyB64?: string }
-                  if (!kit.recoveryKeyB64) throw new Error('not a Scarab recovery-key file')
-                  b64decode(kit.recoveryKeyB64)
-                  unlock({ recoveryKeyB64: kit.recoveryKeyB64 })
-                } catch (err) {
-                  fail(err)
-                } finally {
-                  if (recoveryFileRef.current) recoveryFileRef.current.value = ''
-                }
-              }}
-            />
-            <button className="btn ghosty" disabled={!!busy} onClick={() => recoveryFileRef.current?.click()}>
-              Unlock with recovery key…
-            </button>
-            <button className="btn ghosty" disabled={!!busy} onClick={verifyBlob} title="hash the stored ciphertext locally and compare to the server's claim">
-              Verify integrity
-            </button>
-            {!local && (
-              <button className="btn mini ghosty" disabled={!!busy || !pass} onClick={restoreToServer} title="household mode: decrypt and load into the server database">
-                Restore to server…
-              </button>
+        {/* ---------- passkeys & household ---------- */}
+        {(session ? session.header.keys : keys).length > 0 && (
+          <div className="topline">
+            <div className="h4row">
+              <b className="inkstrong">Passkeys</b>
+              <div className="right muted">
+                {members?.household && members.household !== 'dev@localhost' && members.members.length > 0
+                  ? `household of ${members.household}`
+                  : 'each one unlocks the same vault'}
+              </div>
+            </div>
+            <table style={{ marginTop: 6 }}>
+              <tbody>
+                {(session ? session.header.keys : keys).map((w) => {
+                  const m = members?.members.find((x) => x.email === w.label)
+                  return (
+                    <tr key={w.credentialId}>
+                      <td>{w.label}</td>
+                      <td className="muted">{m ? `household member · added by ${m.added_by}` : 'device'}</td>
+                      <td className="muted num" style={{ whiteSpace: 'nowrap' }}>{w.addedAt.slice(0, 10)}</td>
+                      <td className="right">
+                        {session && (
+                          <button className="btn mini ghosty" disabled={!!busy || session.header.keys.length === 1} onClick={() => drop(w)}>
+                            Remove
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {session && (
+              <>
+                <div className="formrow" style={{ marginTop: 10 }}>
+                  <input placeholder="name this device" style={{ width: 180 }} value={label} onChange={(e) => setLabel(e.target.value)} disabled={!!busy} />
+                  <button className="btn" disabled={!!busy} onClick={addDevice} title="register a passkey on this device, or on a phone via the QR prompt">
+                    Add passkey
+                  </button>
+                  <input placeholder="partner's Google email" style={{ width: 200 }} value={memberEmail} onChange={(e) => setMemberEmail(e.target.value)} disabled={!!busy} />
+                  <button className="btn" disabled={!!busy || !memberEmail.trim()} onClick={addHousehold} title="they scan the QR prompt with their phone; their passkey joins the vault">
+                    Add household member
+                  </button>
+                </div>
+                <p className="sub2 muted" style={{ marginTop: 8 }}>
+                  Adding a member: enter the Google account they sign in with, then hand them the QR prompt — their phone
+                  creates the passkey, in their own Apple or Google account, and this tab wraps the vault key for it.
+                  They unlock with a fingerprint from then on, and they are your recovery too.
+                </p>
+              </>
             )}
           </div>
         )}
+
         <p className="sub2" style={{ marginTop: 10 }}>
-          Saving from an unlocked session reseals under the same key — no new recovery key each time. Rotating
-          mints a fresh key and downloads a new recovery file; the old one stops working.
+          Saving reseals under the same key — passkeys and the recovery code keep working. Rotating mints a fresh key
+          and recovery code; every passkey but the one you answer with drops off.
         </p>
         {msg && <div className="sub2 importmsg">{msg}</div>}
       </div>

@@ -349,6 +349,17 @@ export const migrations: string[] = [
      invest_account_id      INTEGER REFERENCES invest_accounts(id),
      sort                   INTEGER NOT NULL DEFAULT 0
    )`,
+
+  // 15 — household membership for the vault (scarab.one). A member's email
+  // resolves to another identity's vault_blobs row, so two people unlock one
+  // ciphertext with their own passkeys. Routing metadata only — never part of
+  // a snapshot (see engine/snapshot.ts).
+  `CREATE TABLE household_members (
+     email      TEXT PRIMARY KEY,
+     household  TEXT NOT NULL,
+     added_by   TEXT NOT NULL,
+     added_at   TEXT NOT NULL DEFAULT (datetime('now'))
+   )`,
 ]
 
 export function migrate(db: DbLike): void {

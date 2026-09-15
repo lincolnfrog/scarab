@@ -14,6 +14,8 @@ import { migrations } from './migrations'
  *     backup and a restore would roll the vault's version back.
  *   - basket_quotes and the basket:* keys in app_meta: shared price
  *     infrastructure (server/basket.ts), not anyone's data.
+ *   - household_members: which identities share a vault — routing for the
+ *     courier, meaningful only to the deployment that stores the ciphertext.
  */
 export const TABLES = [
   'app_meta',

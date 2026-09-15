@@ -12,8 +12,13 @@ beforeAll(async () => {
 })
 
 const wipe = () => {
-  for (const t of ['accounts', 'vault_blobs', 'app_meta', 'basket_quotes']) db.prepare(`DELETE FROM ${t}`).run()
+  for (const t of ['accounts', 'vault_blobs', 'household_members', 'app_meta', 'basket_quotes']) db.prepare(`DELETE FROM ${t}`).run()
 }
+const as = (email: string, init?: RequestInit): RequestInit => ({
+  ...init,
+  headers: { ...(init?.headers as Record<string, string>), 'x-goog-authenticated-user-email': `accounts.google.com:${email}` },
+})
+const json = (body: unknown, method = 'POST'): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
 const count = (t: string) => (db.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n
 
 describe('zero-knowledge-only server', () => {
@@ -46,6 +51,48 @@ describe('zero-knowledge-only server', () => {
       expect(r.status, `${method} ${p}`).toBe(403)
     }
     expect(count('accounts')).toBe(0)
+  })
+
+  it('a household member reads and writes the same blob; membership is the only new ZK route', async () => {
+    wipe()
+    const app = mod.createApp({ zkOnly: true })
+    expect((await app.request('/api/vault/members', as('a@x'))).status).toBe(200)
+    await app.request('/api/vault', as('a@x', json({ data: '{"v":2}', version: 0 }, 'PUT')))
+    expect((await app.request('/api/vault', as('b@x'))).status).toBe(404) // not a member yet
+
+    // Bad adds: no email, self, someone who already owns a vault.
+    expect((await app.request('/api/vault/members', as('a@x', json({})))).status).toBe(400)
+    expect((await app.request('/api/vault/members', as('a@x', json({ email: 'A@x' })))).status).toBe(400)
+    await app.request('/api/vault', as('c@x', json({ data: '{"v":2}', version: 0 }, 'PUT')))
+    expect((await app.request('/api/vault/members', as('a@x', json({ email: 'c@x' })))).status).toBe(409)
+
+    const add = await app.request('/api/vault/members', as('a@x', json({ email: ' B@x ' })))
+    expect(add.status).toBe(200)
+    expect(await add.json()).toMatchObject({ household: 'a@x', email: 'b@x' })
+    expect((await app.request('/api/vault/members', as('a@x', json({ email: 'b@x' })))).status).toBe(400) // already
+
+    // b now sees a's vault, in /mode and on the courier, and can save over it with the version check.
+    const modeB = (await (await app.request('/api/mode', as('b@x'))).json()) as { vault: { version: number }; household: string }
+    expect(modeB.vault.version).toBe(1)
+    expect(modeB.household).toBe('a@x')
+    const modeA = (await (await app.request('/api/mode', as('a@x'))).json()) as { household: string | null }
+    expect(modeA.household).toBeNull()
+    expect((await (await app.request('/api/vault', as('b@x'))).json()) as { version: number }).toMatchObject({ version: 1 })
+    expect((await app.request('/api/vault', as('b@x', json({ data: '{"v":2,"by":"b"}', version: 0 }, 'PUT')))).status).toBe(409)
+    expect((await app.request('/api/vault', as('b@x', json({ data: '{"v":2,"by":"b"}', version: 1 }, 'PUT')))).status).toBe(200)
+    expect((await (await app.request('/api/vault', as('a@x'))).json()) as { data: string }).toMatchObject({ version: 2, data: '{"v":2,"by":"b"}' })
+    expect(count('vault_blobs')).toBe(2) // a's household blob and c's own — never one per member
+
+    // Either member sees the list; a member cannot be poached by another household.
+    const list = (await (await app.request('/api/vault/members', as('b@x'))).json()) as { household: string; members: { email: string }[] }
+    expect(list.household).toBe('a@x')
+    expect(list.members.map((m) => m.email)).toEqual(['b@x'])
+    expect((await app.request('/api/vault/members', as('c@x', json({ email: 'b@x' })))).status).toBe(409)
+
+    // Removal detaches b, who is back to an empty front door.
+    expect((await app.request('/api/vault/members/nobody%40x', as('a@x', { method: 'DELETE' }))).status).toBe(404)
+    expect((await app.request('/api/vault/members/b%40x', as('a@x', { method: 'DELETE' }))).status).toBe(200)
+    expect((await app.request('/api/vault', as('b@x'))).status).toBe(404)
   })
 
   it('household mode still serves everything', async () => {

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { DbLike } from '../engine/db'
 import { handle } from './api'
+import { householdOf } from './api4'
 import { basketStatus, buildBasket, ensureBasket, getBasket, isBuilding } from './basket'
 import { db as rawDb } from './db'
 
@@ -20,10 +21,17 @@ export function serverHasData(d: DbLike): boolean {
 
 api8.get('/mode', (c) =>
   handle(c, () => {
+    const email = c.get('userEmail')
+    const household = householdOf(db, email)
     const v = db
       .prepare('SELECT version, updated_at FROM vault_blobs WHERE owner_email = ?')
-      .get(c.get('userEmail')) as { version: number; updated_at: string } | undefined
-    return { vault: v ?? null, serverHasData: serverHasData(db), zkOnly: c.get('zkOnly') ?? false }
+      .get(household) as { version: number; updated_at: string } | undefined
+    return {
+      vault: v ?? null,
+      household: household === email ? null : household, // whose vault this identity was added to
+      serverHasData: serverHasData(db),
+      zkOnly: c.get('zkOnly') ?? false,
+    }
   }),
 )
 

@@ -19,42 +19,67 @@ server has no plaintext routes at all (see below).
 
 ## The vault (shipped)
 
-`shared/vault.ts` implements envelope encryption, entirely client-side:
+`shared/vault.ts` implements envelope encryption, entirely client-side, with
+passkeys as the only day-to-day key:
 
 - A random 256-bit AES-GCM **data key** encrypts the payload.
-- The data key is **wrapped** by a key derived from the user's passphrase
-  (PBKDF2-SHA256, 600,000 iterations — WebCrypto-native; the format is
-  versioned so Argon2id or WebAuthn-PRF passkey wrapping can ship as v2).
-- The raw data key doubles as the **recovery key**, downloaded at backup time.
-- The server (`server/api4.ts`) stores `{kdf params, wrapped key, ciphertext}`
+- The data key is **wrapped once per passkey**. A passkey's WebAuthn PRF
+  extension, evaluated on the vault's salt, yields a deterministic 32-byte
+  secret that never leaves the browser; HKDF turns it into the wrapping key.
+  Fingerprint or face on the device, synced by Apple or Google across the
+  user's devices. There is no passphrase.
+- The raw data key doubles as the **recovery code**: 52 characters, shown
+  once at creation, meant for paper. It opens the vault on any device.
+- Adding a device or a household member adds one more wrapping to the
+  header; the payload is never re-encrypted. A member's phone answers the
+  browser's QR passkey prompt from an unlocked session, so their passkey is
+  created in *their* Apple or Google account and their PRF secret wraps the
+  key in *your* tab.
+- The server (`server/api4.ts`) stores `{prf salt, wrappings, ciphertext}`
   with a version counter and a SHA-256 it cannot forge cheaply — the client
   recomputes the hash locally ("Verify integrity" on the Data & Vault screen).
+  A `household_members` table maps a partner's identity onto the same blob.
+  Nothing in the header is secret.
+- WebAuthn is used **only as a key-derivation device**. Authentication is
+  IAP's job, so the server never sees a challenge, an attestation, or a
+  signature; `src/passkey.ts` is a client-only file.
 
 Consequences, stated plainly:
 
-- **A server breach yields ciphertext.** AES-GCM with a 256-bit key; the
-  passphrase never leaves the browser in any form.
-- **There is no password reset.** Losing both the passphrase and every
-  recovery key means the vault is gone. This is a feature with a cost; the UI
-  says so at the moment it matters.
+- **A server breach yields ciphertext.** AES-GCM with a 256-bit key; the PRF
+  secret never leaves the browser in any form.
+- **There is no password reset.** Losing every passkey and the recovery code
+  means the vault is gone. In a household, the partner's passkey is the
+  practical recovery: they unlock and add you again. The UI says so at the
+  moment it matters.
+- **A Google or Apple account is not enough.** Synced passkeys are end-to-end
+  encrypted by the platform and restoring them to a new device needs an
+  existing device's screen lock. The account alone does not decrypt Scarab.
 - **Tampering is detectable.** GCM authentication fails closed; a modified
-  blob refuses to decrypt rather than decrypting wrongly.
+  blob refuses to decrypt rather than decrypting wrongly, and a wrapping
+  moved to another credential id fails too (HKDF salts on the id).
 - **"Save" reseals, it does not re-key.** A zero-knowledge session keeps the
   data key in memory after unlock and re-encrypts each new payload under it
-  (fresh GCM IV every time); the passphrase and the recovery key already filed
-  keep working. Rotating the key is a deliberate, separate action.
+  (fresh GCM IV every time); every passkey and the recovery code keep
+  working. Rotating the key is a deliberate, separate action that keeps only
+  the passkey that answers and mints a new recovery code.
 - **The server can be made unable to hold plaintext.** With
-  `SCARAB_ZK_ONLY=1` (`server/app.ts`), the server answers exactly five
-  things: identity, the mode probe, the encrypted-blob courier, the price
-  basket, and health. Every other route returns 403 before any handler runs,
-  and the server refuses to boot at all if its database holds plaintext
-  (a one-time `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data,
-  keeping ciphertext and the basket). The allowed-route list is a single
-  regular expression, so the claim is auditable in one line.
+  `SCARAB_ZK_ONLY=1` (`server/app.ts`), the server answers exactly six
+  things: identity, the mode probe, the encrypted-blob courier, its
+  membership list (emails it already knows from IAP), the price basket, and
+  health. Every other route returns 403 before any handler runs, and the
+  server refuses to boot at all if its database holds plaintext (a one-time
+  `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data, keeping
+  ciphertext and the basket). The allowed-route list is a single regular
+  expression, so the claim is auditable in one line.
 - **The front door never sends plaintext.** scarab.one opens to *unlock*
-  (decrypt the stored ciphertext in the tab) or *start empty*; either way the
-  engine runs in the browser and only ciphertext is ever uploaded
-  (`PUT /api/vault`). The server is told nothing but the vault version.
+  (one passkey tap decrypts the stored ciphertext in the tab) or *start
+  empty*; either way the engine runs in the browser and only ciphertext is
+  ever uploaded (`PUT /api/vault`). The server is told nothing but the vault
+  version.
+- **Browser requirement.** Passkeys with the PRF extension: Chrome and Safari
+  on current macOS, iOS, Android and Windows. A browser without it can open
+  the vault only with the recovery code, and the front door says so.
 
 ## What the server still learns (honesty section)
 

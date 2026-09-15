@@ -330,6 +330,20 @@ body {
 
 .importbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .importmsg { margin-top: 10px; }
+.frontdoor { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+.recovery { border: 1px solid rgba(227, 178, 60, 0.45); background: var(--gold-dim); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.recoverycode {
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: 1px;
+  line-height: 1.6;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
 .addform { display: inline-flex; gap: 6px; align-items: center; }
 
 input, select {

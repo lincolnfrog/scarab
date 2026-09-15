@@ -147,10 +147,13 @@ at the edge).
 - **Repairs**: data fixes ship as one-off boot repairs guarded by app_meta
   keys (e.g. `repair:card-payment-signs` flipped Citi's negative-credit
   payments and recomputed dedupe hashes to match the fixed parser).
-- **Vault crypto** (`shared/vault.ts`): random AES-GCM-256 data key encrypts
-  the payload; PBKDF2-SHA256(600k)-derived KEK wraps the data key; raw data
-  key doubles as the recovery key (zero-knowledge = no reset). Format is
-  versioned — v2 slots in Argon2id or WebAuthn-PRF without breaking blobs.
+- **Vault crypto** (`shared/vault.ts`, format v2): random AES-GCM-256 data
+  key encrypts the payload; each passkey's WebAuthn PRF output (HKDF'd) wraps
+  the data key once; raw data key doubles as the typed recovery code
+  (zero-knowledge = no reset). No passphrase. WebAuthn is a key-derivation
+  device only (`src/passkey.ts`, client-side, nothing verified server-side —
+  IAP authenticates). v1 (PBKDF2 passphrase) was dropped before any real
+  vault existed.
 - **Local mode**: per-tab, in-memory, entered from a snapshot; durable saves
   go through the encrypted vault. Server plaintext provably untouched by
   local edits (verified end-to-end).
@@ -205,11 +208,14 @@ holdings (2026-09-09).
    payload under the data key kept from unlock (`sealVault`), so the filed
    recovery key keeps working and the passphrase isn't asked twice. A session
    that begins and ends with no server plaintext.
-2. **Persistent unlock** — unwrapped data key as a non-extractable CryptoKey
-   in IndexedDB ("remember this device"); then WebAuthn-PRF passkey unlock
-   (vault format v2).
-3. **Two-member vault** — wrap the data key once per household member; each
-   unlocks with their own credential.
+2. ~~Persistent unlock / passkeys~~ **— done 2026-09-15**: vault v2 is
+   passkey-only (WebAuthn PRF → HKDF → wraps the data key). One tap unlocks;
+   Apple/Google sync the passkey across devices; the QR hybrid prompt covers
+   a device without one. An IndexedDB key cache was dropped as unnecessary.
+3. ~~Two-member vault~~ **— done 2026-09-15**: "Add household member" on
+   Data & Vault runs the same passkey registration with the partner's phone
+   answering the QR prompt; their wrapping joins the header and
+   `household_members` (`server/api4.ts`) maps their identity onto the blob.
 4. ~~Quote proxy~~ → **quote basket, done 2026-09-09** (`server/basket.ts`,
    `server/api8.ts`). Rather than proxy per-symbol requests (whose stream is
    the portfolio), the server fetches the whole US-listed universe + top crypto

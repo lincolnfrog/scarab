@@ -202,8 +202,10 @@ Follow-ups (not blocking):
       as-of-snapshot in local mode today.
 - [ ] Migrate household price refresh onto the basket path too (one code path);
       today `POST /api/prices/refresh` still fetches held symbols per-symbol.
-- [ ] Persistent unlock (non-extractable CryptoKey in IndexedDB; then
-      WebAuthn-PRF passkey, vault v2) — DESIGN.md roadmap #2.
+- [x] Passkey-only vault v2 (WebAuthn PRF; no passphrase; typed recovery
+      code) and the household member flow — DESIGN.md roadmap #2 and #3,
+      2026-09-15. Not yet exercised on a real authenticator: verify create →
+      unlock → add member on a Mac + iPhone before the vault-only deploy.
 - [ ] Live basket build couldn't run from the build sandbox (egress 403s to
       nasdaqtrader.com / coingecko); verify a real build on the deployment.
 
@@ -231,8 +233,7 @@ Still needed for the milestone:
       each write (debounced). Importing is dozens of steps; a closed tab loses
       them all today.
 - [ ] Verify the basket builds on the real deployment (see above).
-- [ ] Then: two-member vault (partner sees "Nothing here yet" — blobs are
-      per-email), gzip before encrypt (10MB blob cap), persistent unlock.
+- [ ] Then: gzip before encrypt (10MB blob cap).
 
 ## Backlog: smaller, high leverage
 

@@ -20,11 +20,12 @@ export type ServerOptions = { zkOnly: boolean }
 
 /**
  * Everything a zero-knowledge-only server will answer. Identity, the mode
- * probe, the encrypted-blob courier, and the daily price basket — nothing
- * that carries plaintext in either direction. The list is the whole
+ * probe, the encrypted-blob courier and its membership list (emails the
+ * server already knows from IAP), and the daily price basket — nothing that
+ * carries plaintext in either direction. The list is the whole
  * privacy claim for scarab.one, so it is deliberately short and literal.
  */
-export const ZK_ROUTES = /^\/api\/(me|health|mode|vault|basket|basket\/status|basket\/rebuild)$/
+export const ZK_ROUTES = /^\/api\/(me|health|mode|vault|vault\/members|vault\/members\/[^/]+|basket|basket\/status|basket\/rebuild)$/
 
 /**
  * Identity comes from Identity-Aware Proxy. IAP sets this header after
