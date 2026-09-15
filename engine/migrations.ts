@@ -360,6 +360,17 @@ export const migrations: string[] = [
      added_by   TEXT NOT NULL,
      added_at   TEXT NOT NULL DEFAULT (datetime('now'))
    )`,
+
+  // 16 — employee stock plans are opt-in. Unvested RSUs only make sense for
+  // the one brokerage your grants land in, so the screen stops assuming every
+  // lots-tracked account has them. Accounts already carrying unvested shares
+  // (or linked from a paycheck as the stock-comp destination) are grandfathered.
+  `ALTER TABLE invest_accounts ADD COLUMN stock_plan INTEGER NOT NULL DEFAULT 0;
+   UPDATE invest_accounts SET stock_plan = 1 WHERE id IN (
+     SELECT invest_account_id FROM unvested_positions
+     UNION SELECT invest_account_id FROM rsu_vests
+     UNION SELECT invest_account_id FROM pay_sources WHERE invest_account_id IS NOT NULL
+   )`,
 ]
 
 export function migrate(db: DbLike): void {

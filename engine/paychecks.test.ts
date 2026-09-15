@@ -156,7 +156,7 @@ describe('household payroll taxes', () => {
 describe('pay source CRUD', () => {
   it('round-trips, defaults the YTD column as a unit, and validates', () => {
     const db = openDb(':memory:') as unknown as DbLike
-    db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Brokerage', 'brokerage', 'lots')").run()
+    db.prepare("INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES ('Brokerage', 'brokerage', 'lots', 1)").run()
     const a = createPaySource(db, { earner: ' A ', employer: 'Acme', cadence: 'biweekly', paidOn: '2026-08-21', grossCents: $(5_000), fedWithheldCents: $(900), ytdGrossCents: $(90_000), investAccountId: 1 })
     expect(a.earner).toBe('A')
     expect(a.ytdFedWithheldCents).toBe(0) // gross anchors the column; the rest default to 0

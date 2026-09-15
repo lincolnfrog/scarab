@@ -85,7 +85,7 @@ type Payroll = {
   addlMedicareWithheldCents: number
   stale: number
 }
-type InvestAccount = { id: number; name: string; tracking: string }
+type InvestAccount = { id: number; name: string; tracking: string; stock_plan: number }
 type SafeHarbor = {
   rule: string
   weights: [number, number, number, number]
@@ -659,7 +659,7 @@ export default function Taxes() {
               <input className="date" type="date" title="Pay date printed on the stub these numbers come from" value={pay.paidOn} onChange={(e) => setP({ paidOn: e.target.value })} />
               <select value={pay.investAccountId} title="Where this employer's RSUs vest — their income counts as this earner's wages for Medicare and their withholding is already on this stub's YTD" onChange={(e) => setP({ investAccountId: e.target.value })}>
                 <option value="">no stock comp</option>
-                {accounts.filter((a) => a.tracking === 'lots').map((a) => <option key={a.id} value={a.id}>RSUs vest into {a.name}</option>)}
+                {accounts.filter((a) => a.tracking === 'lots' && a.stock_plan === 1).map((a) => <option key={a.id} value={a.id}>RSUs vest into {a.name}</option>)}
               </select>
             </div>
             <div className="formrow" style={{ marginTop: 8 }}>

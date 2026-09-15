@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { formatCents, formatQtyMicro, parseMoney, parseQtyMicro } from '../../shared/money'
-import { get, post, put } from '../api'
+import { del, get, patch, post, put } from '../api'
 import BigChart, { type ChartData } from '../BigChart'
 
 type InvestAccount = {
@@ -8,7 +8,9 @@ type InvestAccount = {
   name: string
   kind: 'brokerage' | 'retirement' | 'crypto'
   tracking: 'lots' | 'balance'
+  stock_plan: number
   latest_snapshot: { balanced_on: string; balance_cents: number } | null
+  counts: { trades: number; balances: number; unvested: number; paychecks: number }
 }
 type PosLot = { trade_id?: number; opened_on: string; qty_micro: number; cost_cents: number }
 type Position = {
@@ -43,6 +45,7 @@ type Unvested = {
 type UnvestedList = { rows: Unvested[]; total_est_cents: number }
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
+const plural = (n: number, noun: string) => (n === 0 ? '' : `${n} ${noun}${n === 1 ? '' : 's'}`)
 const perShare = (costCents: number, qtyMicro: number) => Math.round(costCents / (qtyMicro / 1_000_000))
 
 export default function Invest() {
@@ -51,7 +54,9 @@ export default function Invest() {
   const [unvested, setUnvested] = useState<UnvestedList>({ rows: [], total_est_cents: 0 })
   const [msg, setMsg] = useState<string | null>(null)
   const [addingAccount, setAddingAccount] = useState(false)
-  const [acctForm, setAcctForm] = useState({ name: '', kind: 'brokerage', tracking: 'lots' })
+  const [acctForm, setAcctForm] = useState({ name: '', kind: 'brokerage', tracking: 'lots', stockPlan: false })
+  const [editAcct, setEditAcct] = useState<{ id: number; name: string; stockPlan: boolean } | null>(null)
+  const [deleteAcct, setDeleteAcct] = useState<{ acct: InvestAccount; typed: string } | null>(null)
   const [trade, setTrade] = useState({
     investAccountId: 0,
     symbol: '',
@@ -88,8 +93,12 @@ export default function Invest() {
       .then((t) => setTaxMarginal(t.marginal))
       .catch(() => setTaxMarginal(null))
     const firstLots = a.find((x) => x.tracking === 'lots')?.id ?? 0
-    setTrade((t) => ({ ...t, investAccountId: t.investAccountId || firstLots }))
-    setUnvestedForm((f) => ({ ...f, investAccountId: f.investAccountId || firstLots }))
+    const firstPlan = a.find((x) => x.tracking === 'lots' && x.stock_plan === 1)?.id ?? 0
+    setTrade((t) => ({ ...t, investAccountId: a.some((x) => x.id === t.investAccountId) ? t.investAccountId : firstLots }))
+    setUnvestedForm((f) => ({
+      ...f,
+      investAccountId: a.some((x) => x.id === f.investAccountId && x.stock_plan === 1) ? f.investAccountId : firstPlan,
+    }))
     return p
   }, [])
 
@@ -124,10 +133,51 @@ export default function Invest() {
 
   async function addAccount() {
     if (!acctForm.name.trim()) return
-    await post('/api/invest/accounts', acctForm)
-    setAddingAccount(false)
-    setAcctForm({ name: '', kind: 'brokerage', tracking: 'lots' })
-    load().catch(console.error)
+    setMsg(null)
+    try {
+      await post('/api/invest/accounts', { ...acctForm, stockPlan: acctForm.tracking === 'lots' && acctForm.stockPlan })
+      setAddingAccount(false)
+      setAcctForm({ name: '', kind: 'brokerage', tracking: 'lots', stockPlan: false })
+      load().catch(console.error)
+    } catch (e) {
+      setMsg(`Could not add the account — ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  async function saveAccount() {
+    if (!editAcct?.name.trim()) return
+    setMsg(null)
+    try {
+      await patch(`/api/invest/accounts/${editAcct.id}`, { name: editAcct.name, stockPlan: editAcct.stockPlan })
+      setEditAcct(null)
+      load().catch(console.error)
+    } catch (e) {
+      setMsg(`Could not save the account — ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  async function removeAccount() {
+    if (!deleteAcct) return
+    setMsg(null)
+    try {
+      const r = await del<{ name: string; removed: { trades: number; balances: number; unvested: number }; unlinkedPaychecks: number }>(
+        `/api/invest/accounts/${deleteAcct.acct.id}`,
+      )
+      const bits = [
+        plural(r.removed.trades, 'trade'),
+        plural(r.removed.balances, 'balance update'),
+        plural(r.removed.unvested, 'unvested grant'),
+      ].filter(Boolean)
+      setMsg(
+        (bits.length ? `Deleted “${r.name}” and ${bits.join(', ')}.` : `Deleted “${r.name}”.`) +
+          (r.unlinkedPaychecks ? ` ${plural(r.unlinkedPaychecks, 'paycheck')} lost the stock-comp link.` : ''),
+      )
+      setDeleteAcct(null)
+      setEditAcct(null)
+      load().catch(console.error)
+    } catch (e) {
+      setMsg(`Could not delete the account — ${e instanceof Error ? e.message : e}`)
+    }
   }
 
   async function recordTrade() {
@@ -229,6 +279,7 @@ export default function Invest() {
   }, [chartSymbol, charts])
 
   const lotAccounts = accounts.filter((a) => a.tracking === 'lots')
+  const planAccounts = lotAccounts.filter((a) => a.stock_plan === 1)
   const sellableLots =
     trade.side === 'sell'
       ? (portfolio?.positions.find((p) => p.symbol === trade.symbol.trim().toUpperCase())?.lots.filter((l) => l.trade_id) ?? [])
@@ -254,20 +305,59 @@ export default function Invest() {
               Add your brokerage/Coinbase (tracked by trades) and 401(k)s (tracked by balance) →
             </span>
           )}
-          {accounts.map((a) => (
-            <span key={a.id} className="chipbtn" style={{ cursor: 'default' }}>
-              {a.name} <span className="muted">· {a.kind}</span>
-              {a.tracking === 'balance' && (
-                <>
-                  {' '}
-                  <b className="inkstrong">{a.latest_snapshot ? formatCents(a.latest_snapshot.balance_cents) : '—'}</b>
-                  <button className="btn mini" style={{ marginLeft: 6 }} onClick={() => snapshotBalance(a)}>
-                    update
-                  </button>
-                </>
-              )}
-            </span>
-          ))}
+          {accounts.map((a) =>
+            editAcct?.id === a.id ? (
+              <span key={a.id} className="addform">
+                <input
+                  autoFocus
+                  value={editAcct.name}
+                  onChange={(e) => setEditAcct({ ...editAcct, name: e.target.value })}
+                />
+                {a.tracking === 'lots' && (
+                  <label className="checkline" title="Grants that vest into this account — adds the unvested-RSU tracker">
+                    <input
+                      type="checkbox"
+                      checked={editAcct.stockPlan}
+                      onChange={(e) => setEditAcct({ ...editAcct, stockPlan: e.target.checked })}
+                    />
+                    employee stock plan
+                  </label>
+                )}
+                <button className="btn" onClick={saveAccount}>Save</button>
+                <button className="btn ghosty" onClick={() => setEditAcct(null)}>Cancel</button>
+                <button
+                  className="btn danger"
+                  onClick={() => setDeleteAcct({ acct: a, typed: '' })}
+                >
+                  Delete…
+                </button>
+              </span>
+            ) : (
+              <span key={a.id} className="chipbtn" style={{ cursor: 'default' }}>
+                {a.name} <span className="muted">· {a.kind}{a.stock_plan === 1 ? ' · stock plan' : ''}</span>
+                {a.tracking === 'balance' && (
+                  <>
+                    {' '}
+                    <b className="inkstrong">{a.latest_snapshot ? formatCents(a.latest_snapshot.balance_cents) : '—'}</b>
+                    <button className="btn mini" style={{ marginLeft: 6 }} onClick={() => snapshotBalance(a)}>
+                      update
+                    </button>
+                  </>
+                )}
+                <button
+                  className="btn mini"
+                  style={{ marginLeft: 6 }}
+                  title="Rename, mark as an employee stock plan, or delete"
+                  onClick={() => {
+                    setDeleteAcct(null)
+                    setEditAcct({ id: a.id, name: a.name, stockPlan: a.stock_plan === 1 })
+                  }}
+                >
+                  edit
+                </button>
+              </span>
+            ),
+          )}
           {addingAccount ? (
             <span className="addform">
               <input
@@ -289,6 +379,19 @@ export default function Invest() {
                 <option value="lots">track trades</option>
                 <option value="balance">track balance</option>
               </select>
+              {acctForm.tracking === 'lots' && (
+                <label
+                  className="checkline"
+                  title="Tick this only for the account your employer's grants vest into — it adds the unvested-RSU tracker"
+                >
+                  <input
+                    type="checkbox"
+                    checked={acctForm.stockPlan}
+                    onChange={(e) => setAcctForm({ ...acctForm, stockPlan: e.target.checked })}
+                  />
+                  employee stock plan
+                </label>
+              )}
               <button className="btn" onClick={addAccount}>Add</button>
               <button className="btn ghosty" onClick={() => setAddingAccount(false)}>Cancel</button>
             </span>
@@ -296,6 +399,49 @@ export default function Invest() {
             <button className="chipbtn" onClick={() => setAddingAccount(true)}>+ account</button>
           )}
         </div>
+        {deleteAcct && (
+          <div className="dangerbox">
+            <b className="inkstrong">Delete “{deleteAcct.acct.name}”?</b>
+            <p className="sub2">
+              {plural(deleteAcct.acct.counts.trades, 'trade') ||
+              plural(deleteAcct.acct.counts.balances, 'balance update') ||
+              plural(deleteAcct.acct.counts.unvested, 'unvested grant')
+                ? `This also deletes ${[
+                    plural(deleteAcct.acct.counts.trades, 'trade'),
+                    plural(deleteAcct.acct.counts.balances, 'balance update'),
+                    plural(deleteAcct.acct.counts.unvested, 'unvested grant'),
+                  ]
+                    .filter(Boolean)
+                    .join(', ')}. Holdings, net worth and the tax picture recompute without them.`
+                : 'Nothing has been recorded against it yet.'}
+              {deleteAcct.acct.counts.paychecks > 0 &&
+                ` ${plural(deleteAcct.acct.counts.paychecks, 'paycheck')} will lose the stock-comp link.`}{' '}
+              There is no undo — export from the Vault first if you want a way back.
+            </p>
+            <div className="formrow">
+              <span className="sub2">
+                Type <b className="inkstrong">delete</b> to confirm:
+              </span>
+              <input
+                autoFocus
+                placeholder="delete"
+                value={deleteAcct.typed}
+                onChange={(e) => setDeleteAcct({ ...deleteAcct, typed: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && deleteAcct.typed.trim().toLowerCase() === 'delete') removeAccount()
+                }}
+              />
+              <button
+                className="btn danger"
+                disabled={deleteAcct.typed.trim().toLowerCase() !== 'delete'}
+                onClick={removeAccount}
+              >
+                Delete account
+              </button>
+              <button className="btn ghosty" onClick={() => setDeleteAcct(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
         {msg && <div className="sub2 importmsg">{msg}</div>}
       </div>
 
@@ -390,8 +536,8 @@ export default function Invest() {
         </div>
       )}
 
-      {/* ---------- unvested RSUs ---------- */}
-      {lotAccounts.length > 0 && (
+      {/* ---------- unvested RSUs (employee stock plans only) ---------- */}
+      {planAccounts.length > 0 && (
         <div className="card c12">
           <div className="h4row">
             <h2>Unvested RSUs</h2>
@@ -409,7 +555,7 @@ export default function Invest() {
               value={unvestedForm.investAccountId}
               onChange={(e) => setUnvestedForm({ ...unvestedForm, investAccountId: Number(e.target.value) })}
             >
-              {lotAccounts.map((a) => (
+              {planAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>

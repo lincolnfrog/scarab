@@ -171,6 +171,10 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
         return svc.listInvestAccounts(db)
       case 'POST /invest/*':
         return svc.createInvestAccount(db, b)
+      case 'PATCH /invest/*':
+        return svc.updateInvestAccount(db, Number(seg[2]), b)
+      case 'DELETE /invest/*':
+        return svc.deleteInvestAccount(db, Number(seg[2]))
       case 'PUT /invest/*':
         return svc.putBalanceSnapshot(db, b)
       case 'POST /trades':

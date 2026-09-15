@@ -321,7 +321,7 @@ describe('marginal rates', () => {
 /* ---------- ledger-derived, on a real database ---------- */
 
 function seed(db: DbLike) {
-  db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Brokerage', 'brokerage', 'lots')").run()
+  db.prepare("INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES ('Brokerage', 'brokerage', 'lots', 1)").run()
   db.prepare("INSERT INTO assets (symbol, kind) VALUES ('ACME', 'stock')").run()
   const trade = db.prepare(
     'INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents, note) VALUES (1, 1, ?, ?, ?, ?, ?)',
@@ -436,7 +436,7 @@ describe('harvesting', () => {
 
   it('the 30-day window has a hard edge', () => {
     const db = openDb(':memory:') as unknown as DbLike
-    db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('B', 'brokerage', 'lots')").run()
+    db.prepare("INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES ('B', 'brokerage', 'lots', 1)").run()
     db.prepare("INSERT INTO assets (symbol, kind) VALUES ('EDGE', 'stock')").run()
     const trade = db.prepare(
       'INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents) VALUES (1, 1, ?, ?, ?, ?)',

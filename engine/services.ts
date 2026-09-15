@@ -264,24 +264,106 @@ export function putBudget(db: DbLike, b: { categoryId?: number; monthlyCents?: n
 /* ---------- investments ---------- */
 
 export function listInvestAccounts(db: DbLike) {
-  const rows = db.prepare('SELECT id, name, kind, tracking FROM invest_accounts ORDER BY id').all() as { id: number }[]
+  const rows = db
+    .prepare('SELECT id, name, kind, tracking, stock_plan FROM invest_accounts ORDER BY id')
+    .all() as { id: number }[]
   const latest = db.prepare(
     'SELECT balanced_on, balance_cents FROM balance_snapshots WHERE invest_account_id = ? ORDER BY balanced_on DESC LIMIT 1',
   )
-  return rows.map((r) => ({ ...r, latest_snapshot: latest.get(r.id) ?? null }))
+  // Counts so a delete can say out loud what it is about to take with it.
+  const counts = db.prepare(
+    `SELECT (SELECT count(*) FROM trades WHERE invest_account_id = ?) AS trades,
+            (SELECT count(*) FROM balance_snapshots WHERE invest_account_id = ?) AS balances,
+            (SELECT count(*) FROM unvested_positions WHERE invest_account_id = ?) AS unvested,
+            (SELECT count(*) FROM pay_sources WHERE invest_account_id = ?) AS paychecks`,
+  )
+  return rows.map((r) => ({ ...r, latest_snapshot: latest.get(r.id) ?? null, counts: counts.get(r.id, r.id, r.id, r.id) }))
 }
 
-export function createInvestAccount(db: DbLike, b: { name?: string; kind?: string; tracking?: string }) {
+/** Unvested RSUs need somewhere to vest into: a lot-tracked account. */
+const stockPlanOk = (tracking: string | undefined, stockPlan: boolean) => {
+  if (stockPlan && tracking !== 'lots') bad('an employee stock plan has to track trades (vests land as buys)')
+}
+
+export function createInvestAccount(db: DbLike, b: { name?: string; kind?: string; tracking?: string; stockPlan?: boolean }) {
   if (
     !b.name?.trim() ||
     !['brokerage', 'retirement', 'crypto'].includes(b.kind ?? '') ||
     !['lots', 'balance'].includes(b.tracking ?? '')
   )
     bad('name, kind (brokerage|retirement|crypto), tracking (lots|balance) required')
+  const stockPlan = b.stockPlan === true
+  stockPlanOk(b.tracking, stockPlan)
   const r = db
-    .prepare('INSERT INTO invest_accounts (name, kind, tracking) VALUES (?, ?, ?)')
-    .run(b.name!.trim(), b.kind, b.tracking)
-  return { id: Number(r.lastInsertRowid), name: b.name!.trim(), kind: b.kind, tracking: b.tracking }
+    .prepare('INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES (?, ?, ?, ?)')
+    .run(b.name!.trim(), b.kind, b.tracking, stockPlan ? 1 : 0)
+  return { id: Number(r.lastInsertRowid), name: b.name!.trim(), kind: b.kind, tracking: b.tracking, stock_plan: stockPlan ? 1 : 0 }
+}
+
+/**
+ * Rename an account or flip its employee-stock-plan flag. Kind and tracking
+ * stay put — trades and balance snapshots are recorded against them.
+ */
+export function updateInvestAccount(db: DbLike, id: number, b: { name?: string; stockPlan?: boolean }) {
+  const row = db.prepare('SELECT id, name, tracking, stock_plan FROM invest_accounts WHERE id = ?').get(id) as
+    | { id: number; name: string; tracking: string; stock_plan: number }
+    | undefined
+  if (!row) notFound('no such investment account')
+  const name = b.name === undefined ? row!.name : b.name.trim()
+  if (!name) bad('name required')
+  const stockPlan = b.stockPlan === undefined ? row!.stock_plan === 1 : b.stockPlan === true
+  stockPlanOk(row!.tracking, stockPlan)
+  if (!stockPlan && row!.stock_plan === 1) {
+    const held = (db.prepare('SELECT count(*) AS n FROM unvested_positions WHERE invest_account_id = ?').get(id) as { n: number }).n
+    if (held > 0) bad('clear the unvested shares on this account before turning off its stock plan')
+    const linked = (db.prepare('SELECT count(*) AS n FROM pay_sources WHERE invest_account_id = ?').get(id) as { n: number }).n
+    if (linked > 0) bad('a paycheck still vests stock comp into this account — unlink it on Taxes first')
+  }
+  db.prepare('UPDATE invest_accounts SET name = ?, stock_plan = ? WHERE id = ?').run(name, stockPlan ? 1 : 0, id)
+  return { ok: true as const, id, name, stock_plan: stockPlan ? 1 : 0 }
+}
+
+/**
+ * Delete an account and every dated fact recorded against it — trades, balance
+ * snapshots, unvested shares. Nothing is derived-and-stored, so holdings, net
+ * worth and the tax picture simply recompute without it. Paychecks that named
+ * it as their stock-comp destination lose only that link. Assets left with no
+ * trades and no unvested shares go too, along with their price history.
+ */
+export function deleteInvestAccount(db: DbLike, id: number) {
+  const row = db.prepare('SELECT id, name FROM invest_accounts WHERE id = ?').get(id) as
+    | { id: number; name: string }
+    | undefined
+  if (!row) notFound('no such investment account')
+  const n = (t: string) =>
+    (db.prepare(`SELECT count(*) AS n FROM ${t} WHERE invest_account_id = ?`).get(id) as { n: number }).n
+  const removed = { trades: n('trades'), balances: n('balance_snapshots'), unvested: n('unvested_positions') }
+  const unlinkedPaychecks = n('pay_sources')
+  db.transaction(() => {
+    // A sell in another account can point at a lot that lived here; it keeps
+    // its own acquisition date and basis, so drop the dangling pointer only.
+    db.prepare(
+      'UPDATE trades SET sold_lot_trade_id = NULL WHERE sold_lot_trade_id IN (SELECT id FROM trades WHERE invest_account_id = ?)',
+    ).run(id)
+    db.prepare('UPDATE pay_sources SET invest_account_id = NULL WHERE invest_account_id = ?').run(id)
+    for (const t of ['rsu_vests', 'unvested_positions', 'balance_snapshots', 'trades'])
+      db.prepare(`DELETE FROM ${t} WHERE invest_account_id = ?`).run(id)
+    db.prepare('DELETE FROM invest_accounts WHERE id = ?').run(id)
+
+    const orphanWhere = `id NOT IN (SELECT asset_id FROM trades)
+       AND id NOT IN (SELECT asset_id FROM unvested_positions)
+       AND id NOT IN (SELECT asset_id FROM rsu_vests)`
+    const orphans = db.prepare(`SELECT id, symbol FROM assets WHERE ${orphanWhere}`).all() as
+      { id: number; symbol: string }[]
+    for (const a of orphans) {
+      db.prepare('DELETE FROM prices WHERE asset_id = ?').run(a.id)
+      db.prepare('DELETE FROM prices_daily WHERE asset_id = ?').run(a.id)
+      // So a symbol added back later backfills its history again.
+      db.prepare('DELETE FROM app_meta WHERE key = ?').run(`backfilled:${a.symbol}`)
+      db.prepare('DELETE FROM assets WHERE id = ?').run(a.id)
+    }
+  })()
+  return { ok: true as const, name: row!.name, removed, unlinkedPaychecks }
 }
 
 export function putBalanceSnapshot(db: DbLike, b: { investAccountId?: number; balancedOn?: string; balanceCents?: number }) {
@@ -612,8 +694,8 @@ export function putUnvested(
   today: string,
 ) {
   if (!b.investAccountId || !b.symbol?.trim() || b.qty == null) bad('investAccountId, symbol, qty required')
-  if (!db.prepare("SELECT id FROM invest_accounts WHERE id = ? AND tracking = 'lots'").get(b.investAccountId))
-    notFound('no such lots-tracked investment account')
+  if (!db.prepare("SELECT id FROM invest_accounts WHERE id = ? AND tracking = 'lots' AND stock_plan = 1").get(b.investAccountId))
+    notFound('no such employee stock plan — mark the account as one on Investments')
   const schedule = parseVestSchedule(b)
   const symbol = b.symbol!.trim().toUpperCase()
   db.prepare("INSERT INTO assets (symbol, kind) VALUES (?, 'stock') ON CONFLICT (symbol) DO NOTHING").run(symbol)

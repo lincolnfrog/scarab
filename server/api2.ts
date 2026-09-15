@@ -20,6 +20,11 @@ api2.post('/invest/accounts', async (c) => {
   const b = await c.req.json()
   return handle(c, () => svc.createInvestAccount(db, b))
 })
+api2.patch('/invest/accounts/:id', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => svc.updateInvestAccount(db, Number(c.req.param('id')), b))
+})
+api2.delete('/invest/accounts/:id', (c) => handle(c, () => svc.deleteInvestAccount(db, Number(c.req.param('id')))))
 api2.put('/invest/balances', async (c) => {
   const b = await c.req.json()
   return handle(c, () => svc.putBalanceSnapshot(db, b))
