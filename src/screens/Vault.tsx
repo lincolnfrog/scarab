@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sha256Hex, type PasskeyWrap } from '../../shared/vault'
+import { autosave } from '../session'
 import { get, post } from '../api'
 import type { Dump } from '../../engine/snapshot'
 import { enterLocalMode, exitLocalMode, loadLocalDump, localMode } from '../local'
@@ -160,9 +161,9 @@ export default function Vault() {
     try {
       const dump = JSON.parse(await file.text()) as Dump
       if (local) {
-        if (!window.confirm('Replace this tab’s data with the export file?')) return
+        if (!window.confirm(session ? 'Replace this tab’s data with the export file? It will be saved over the stored vault.' : 'Replace this tab’s data with the export file?')) return
         await loadLocalDump(dump)
-        setMsg('Loaded into this tab. Save to the vault to keep it.')
+        setMsg(session ? 'Loaded into this tab; saving to the vault.' : 'Loaded into this tab. Create a vault to keep it.')
       } else {
         if (!window.confirm('REPLACE all server data with this export file?')) return
         await post('/api/import', { ...dump, confirm: 'REPLACE' })
@@ -247,9 +248,22 @@ export default function Vault() {
           <>
             <p className="sub2">
               {session
-                ? `Unlocked from vault v${session.version} — the key stays in memory until you close the tab.`
+                ? `Vault v${session.version} — the key stays in memory until you close the tab, and every change is saved on its own.`
                 : 'Started without a vault — create one below to save.'}{' '}
-              {localMode.dirty ? <b className="neg">Unsaved changes.</b> : <span className="pos">Everything saved.</span>}
+              {autosave.status === 'error' ? (
+                <b className="neg">
+                  Autosave failed: {autosave.error}.{' '}
+                  {/version conflict/.test(autosave.error ?? '')
+                    ? 'Another device saved first — export this tab’s data if you need it, then unlock again to load theirs.'
+                    : 'Save to vault below to retry.'}
+                </b>
+              ) : autosave.status === 'saving' ? (
+                <span className="muted">Saving…</span>
+              ) : localMode.dirty ? (
+                <b className="neg">{session ? 'Unsaved changes — saving shortly.' : 'Unsaved changes.'}</b>
+              ) : (
+                <span className="pos">Everything saved.</span>
+              )}
             </p>
             <div className="formrow" style={{ marginTop: 8 }}>
               <button className="btn ghosty" onClick={() => exitLocalMode()}>

@@ -25,8 +25,18 @@ type LocalState = {
   db: (DbLike & { export(): Uint8Array }) | null
   vault: VaultSession | null
   dirty: boolean
+  /** Monotonic count of writes this session. A save records it at dump time to know whether later writes slipped in. */
+  writes: number
 }
-const state: LocalState = { db: null, vault: null, dirty: false }
+const state: LocalState = { db: null, vault: null, dirty: false, writes: 0 }
+
+function markDirty() {
+  state.writes++
+  if (!state.dirty) {
+    state.dirty = true
+    window.dispatchEvent(new Event('scarab-mode'))
+  }
+}
 
 export const localMode = {
   get active() {
@@ -39,12 +49,20 @@ export const localMode = {
   get vault() {
     return state.vault
   },
+  get writes() {
+    return state.writes
+  },
   setVault(v: VaultSession | null) {
     state.vault = v
     window.dispatchEvent(new Event('scarab-mode'))
   },
-  markSaved(version: number) {
-    state.dirty = false
+  /**
+   * A save landed. `writesAtDump` is what `writes` read when the payload was
+   * dumped; if more writes arrived while the upload was in flight the tab
+   * stays dirty (and says so), so the next save picks them up.
+   */
+  markSaved(version: number, writesAtDump: number = state.writes) {
+    state.dirty = writesAtDump !== state.writes
     if (state.vault) state.vault.version = version
     window.dispatchEvent(new Event('scarab-mode'))
   },
@@ -68,6 +86,7 @@ export async function enterLocalMode(dump: Dump | null, vault: VaultSession | nu
   state.db = db
   state.vault = vault
   state.dirty = dump === null // an empty start has nothing saved yet
+  state.writes = 0
   window.dispatchEvent(new Event('scarab-mode'))
 }
 
@@ -76,8 +95,8 @@ export async function loadLocalDump(dump: Dump): Promise<void> {
   if (!state.db) throw new Error('local mode is not active')
   const { loadDump } = await import('../engine/snapshot')
   loadDump(state.db, dump)
-  state.dirty = true
-  window.dispatchEvent(new Event('scarab-mode'))
+  state.dirty = false // caller decides: an unlock marks it saved, a file load marks it dirty
+  markDirty()
 }
 
 export function exitLocalMode(): void {
@@ -109,10 +128,8 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
   const b = (body ?? {}) as never
   const seg = path.split('/').filter(Boolean)
   const key = `${method} /${seg[0] ?? ''}${seg.length > 1 ? '/*' : ''}`
-  if (method !== 'GET' && !(method === 'POST' && seg[0] === 'scenarios' && (seg[1] === 'compare' || seg[1] === 'price'))) {
-    if (!state.dirty) window.dispatchEvent(new Event('scarab-mode'))
-    state.dirty = true
-  }
+  if (method !== 'GET' && !(method === 'POST' && seg[0] === 'scenarios' && (seg[1] === 'compare' || seg[1] === 'price')))
+    markDirty()
 
   try {
     switch (key) {

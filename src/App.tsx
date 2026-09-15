@@ -9,7 +9,7 @@ import Taxes from './screens/Taxes'
 import Vault from './screens/Vault'
 import FrontDoor from './FrontDoor'
 import { exitLocalMode, localMode } from './local'
-import { fetchMode, type Mode } from './session'
+import { autosave, fetchMode, type Mode } from './session'
 
 const SCREENS = [
   { id: 'dash', label: 'Dashboard', phase: '', blurb: '', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' },
@@ -88,11 +88,26 @@ export default function App() {
           {localMode.active && (
             <span
               className="tag"
-              style={{ cursor: 'pointer', color: localMode.dirty ? 'var(--down)' : undefined }}
-              title={localMode.dirty ? 'zero-knowledge session with UNSAVED changes — save from Data & Vault' : 'zero-knowledge session — everything saved. Click to end.'}
+              style={{ cursor: 'pointer', color: autosave.status === 'error' || (localMode.dirty && !localMode.vault) ? 'var(--down)' : undefined }}
+              title={
+                autosave.status === 'error'
+                  ? `autosave failed: ${autosave.error} — retry from Data & Vault`
+                  : !localMode.vault
+                    ? 'zero-knowledge session with no vault — create one from Data & Vault or this work is lost'
+                    : localMode.dirty
+                      ? 'zero-knowledge session — saving shortly'
+                      : 'zero-knowledge session — everything saved. Click to end.'
+              }
               onClick={() => { if (!localMode.dirty || window.confirm('End the session and discard unsaved changes?')) exitLocalMode() }}
             >
-              ⬤ {localMode.dirty ? 'UNSAVED' : 'LOCAL'}
+              ⬤{' '}
+              {autosave.status === 'error'
+                ? 'SAVE FAILED'
+                : autosave.status === 'saving'
+                  ? 'SAVING…'
+                  : localMode.dirty
+                    ? localMode.vault ? 'UNSAVED' : 'NO VAULT'
+                    : 'SAVED'}
             </span>
           )}
           <span className="who">

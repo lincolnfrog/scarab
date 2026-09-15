@@ -105,20 +105,101 @@ export async function startEmpty(): Promise<void> {
 
 export type SaveResult = { version: number; sha256: string; bytes: number }
 
-/** Seal the tab's database under the session key with the given header and upload it. */
-async function seal(header: VaultHeader, rawDataKey: Uint8Array, version: number): Promise<SaveResult> {
-  const dump = await localDump()
-  const plaintext = new TextEncoder().encode(JSON.stringify(dump))
-  const blob = await sealVault(header, rawDataKey, plaintext)
-  // Version check: the server refuses stale writes, so a second device can't
-  // silently clobber this one. Base it on what this session last saw.
-  const r = await net<{ ok: true; version: number; sha256: string }>('/api/vault', {
-    method: 'PUT',
-    body: JSON.stringify({ data: JSON.stringify(blob), version }),
+// Saves run one at a time. Autosave and a manual save can be requested in the
+// same instant; the second waits and then seals whatever the tab holds by the
+// time it runs, against the version the first one just established.
+let saveChain: Promise<unknown> = Promise.resolve()
+
+/**
+ * Seal the tab's database under the session key with the given header and
+ * upload it. `version` defaults to what the session has seen most recently,
+ * read when this save actually runs (after any save ahead of it).
+ */
+function seal(header: VaultHeader, rawDataKey: Uint8Array, version?: number): Promise<SaveResult> {
+  const job = async (): Promise<SaveResult> => {
+    const writesAtDump = localMode.writes
+    const dump = await localDump()
+    const plaintext = new TextEncoder().encode(JSON.stringify(dump))
+    const blob = await sealVault(header, rawDataKey, plaintext)
+    // Version check: the server refuses stale writes, so a second device can't
+    // silently clobber this one. Base it on what this session last saw.
+    const r = await net<{ ok: true; version: number; sha256: string }>('/api/vault', {
+      method: 'PUT',
+      body: JSON.stringify({ data: JSON.stringify(blob), version: version ?? localMode.vault?.version ?? 0 }),
+    })
+    localMode.setVault({ rawDataKey, header: headerOf(blob), version: r.version })
+    localMode.markSaved(r.version, writesAtDump)
+    return { version: r.version, sha256: r.sha256, bytes: plaintext.length }
+  }
+  const next = saveChain.then(job, job)
+  saveChain = next.catch(() => undefined)
+  return next
+}
+
+/* ---------- autosave ---------- */
+
+/**
+ * Once a session holds a key, every write is uploaded on its own: a short
+ * debounce after the last write, or at once when the tab goes into the
+ * background. A failure (typically a version conflict — another device saved
+ * first) is shown, not retried in a loop; the next write or a manual save
+ * tries again. Nothing here changes what "save" means: same key, reseal.
+ */
+export const autosave = {
+  status: 'idle' as 'idle' | 'saving' | 'error',
+  error: null as string | null,
+  lastSavedAt: null as Date | null,
+}
+const AUTOSAVE_DELAY_MS = 1500
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function announce() {
+  window.dispatchEvent(new Event('scarab-mode'))
+}
+
+async function runAutosave(): Promise<void> {
+  autosaveTimer = null
+  if (!localMode.active || !localMode.vault || !localMode.dirty || autosave.status === 'saving') return
+  autosave.status = 'saving'
+  announce()
+  try {
+    await saveVault()
+    autosave.status = 'idle'
+    autosave.error = null
+    autosave.lastSavedAt = new Date()
+  } catch (e) {
+    autosave.status = 'error'
+    autosave.error = e instanceof Error ? e.message : String(e)
+  }
+  announce()
+  // Writes that arrived mid-upload left the tab dirty: go again.
+  if (autosave.status === 'idle' && localMode.dirty) scheduleAutosave()
+}
+
+function scheduleAutosave(): void {
+  // An error is sticky: retrying a version conflict every second helps nobody.
+  // A manual save (or a fresh unlock) clears it.
+  if (!localMode.active || !localMode.vault || !localMode.dirty || autosave.status === 'error') return
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => void runAutosave(), AUTOSAVE_DELAY_MS)
+}
+
+if (typeof window !== 'undefined') {
+  // The engine fires this when the tab turns dirty (and on every save); the
+  // debounce absorbs bursts such as a statement import.
+  window.addEventListener('scarab-mode', () => {
+    if (autosave.status === 'error' && !localMode.dirty) {
+      autosave.status = 'idle' // a manual save or a new unlock cleared it
+      autosave.error = null
+    }
+    if (autosave.status !== 'saving') scheduleAutosave()
   })
-  localMode.setVault({ rawDataKey, header: headerOf(blob), version: r.version })
-  localMode.markSaved(r.version)
-  return { version: r.version, sha256: r.sha256, bytes: plaintext.length }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && localMode.dirty && localMode.vault) {
+      if (autosaveTimer) clearTimeout(autosaveTimer)
+      void runAutosave()
+    }
+  })
 }
 
 function requireSession(): VaultSession {
@@ -131,7 +212,7 @@ function requireSession(): VaultSession {
 /** Persist the in-tab database. Reseals under the session key; every passkey and the recovery code keep working. */
 export async function saveVault(): Promise<SaveResult> {
   const s = requireSession()
-  return seal(s.header, s.rawDataKey, s.version)
+  return seal(s.header, s.rawDataKey)
 }
 
 /**
@@ -164,7 +245,7 @@ export async function addPasskey(label: string): Promise<PasskeyWrap> {
   })
   const wrap = await wrapForPasskey(s.rawDataKey, pk.prfOutput, { credentialId: pk.credentialId, label })
   const header: VaultHeader = { ...s.header, keys: [...s.header.keys, wrap] }
-  await seal(header, s.rawDataKey, s.version)
+  await seal(header, s.rawDataKey)
   return wrap
 }
 
@@ -174,7 +255,7 @@ export async function removePasskey(credentialId: string): Promise<void> {
   if (!s.header.keys.some((k) => k.credentialId === credentialId)) throw new Error('that passkey is not on the vault')
   if (s.header.keys.length === 1) throw new Error('cannot remove the only passkey on the vault')
   const header: VaultHeader = { ...s.header, keys: s.header.keys.filter((k) => k.credentialId !== credentialId) }
-  await seal(header, s.rawDataKey, s.version)
+  await seal(header, s.rawDataKey)
 }
 
 /**
@@ -188,7 +269,7 @@ export async function rotateVault(): Promise<{ version: number; recoveryCode: st
   const pk = await assertPasskey({ prfSaltB64: fresh.header.prfSalt, credentialIds: s.header.keys.map((k) => k.credentialId) })
   const old = s.header.keys.find((k) => k.credentialId === pk.credentialId)!
   fresh.header.keys.push(await wrapForPasskey(fresh.rawDataKey, pk.prfOutput, { credentialId: pk.credentialId, label: old.label }))
-  const r = await seal(fresh.header, fresh.rawDataKey, s.version)
+  const r = await seal(fresh.header, fresh.rawDataKey)
   return { version: r.version, recoveryCode: encodeRecoveryCode(fresh.rawDataKey), kept: old.label }
 }
 

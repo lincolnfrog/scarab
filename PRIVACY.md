@@ -87,7 +87,9 @@ Zero-knowledge is a statement about *content*, not existence. Even in ZK mode
 the operator can observe:
 
 - **Identity and timing**: who syncs, when, and blob sizes (mitigation: none
-  planned; this is inherent to hosted sync).
+  planned; this is inherent to hosted sync). Autosave makes this finer-grained:
+  a session uploads a fresh ciphertext shortly after each burst of edits, so
+  the server sees when you are working, never what on.
 - **Quote symbols**: in household mode price fetches name the held symbols to
   the server (which already holds the ledger). In zero-knowledge mode the
   server instead publishes a **daily price basket** — the whole US-listed

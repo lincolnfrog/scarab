@@ -229,9 +229,12 @@ Still needed for the milestone:
 - [ ] **Deploy vault-only**: download a plain export of the current site as a
       keepsake, then `SCARAB_ZK_ONLY=1 SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh`
       (put `SCARAB_ZK_ONLY=1` in `.env.gcp` so later deploys keep it).
-- [ ] **Autosave in a session**: once a session key exists, reseal + PUT after
-      each write (debounced). Importing is dozens of steps; a closed tab loses
-      them all today.
+- [x] **Autosave in a session** (2026-09-15, `src/session.ts`): once a session
+      key exists, every write reseals + PUTs after a 1.5s debounce, or at once
+      when the tab is hidden. Saves are serialized; writes that land mid-upload
+      keep the tab dirty for the next one. A version conflict (another device
+      saved first) is sticky and shown, not retried — a manual save or a fresh
+      unlock clears it.
 - [ ] Verify the basket builds on the real deployment (see above).
 - [ ] Then: gzip before encrypt (10MB blob cap).
 
