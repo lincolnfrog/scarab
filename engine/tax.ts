@@ -1,5 +1,6 @@
 import type { DbLike } from './db'
 import { computePosition, positionValueCents, type TradeInput } from './lots'
+import { ADDL_MEDICARE_RATE_MICRO, computePayroll, listPaySources, PAYROLL_VINTAGE, type Payroll } from './paychecks'
 import { addMonths, ApiError } from './services'
 
 /**
@@ -56,6 +57,22 @@ export const NIIT_THRESHOLD: Record<FilingStatus, number> = {
   mfs: 125_000_00,
   hoh: 200_000_00,
 }
+
+// Additional Medicare Tax: 0.9% of wages over the filing-status threshold
+// (statutory, not indexed). Employers withhold it only above $200k per
+// employer, so two-earner households routinely come up short.
+export const ADDL_MEDICARE_THRESHOLD: Record<FilingStatus, number> = {
+  single: 200_000_00,
+  mfj: 250_000_00,
+  mfs: 125_000_00,
+  hoh: 200_000_00,
+}
+
+// Federal supplemental-wage withholding on stock comp: a flat 22% (37% only
+// once supplemental wages pass $1M in a year). State flat rates for bonuses
+// and stock, where the state publishes one.
+export const FEDERAL_SUPPLEMENTAL_MICRO = 220_000
+const STATE_SUPPLEMENTAL_MICRO: Record<string, number> = { CA: 102_300, NY: 117_000 }
 
 /* ------------------------- state bracket tables ------------------------- */
 
@@ -400,6 +417,8 @@ export type TaxSettings = {
   priorYearTaxStateCents: number // total state tax from last year's return (state safe harbor)
   priorYearAgiOver150k: boolean // 110% safe harbor instead of 100%
   qualifiedDividendShareMicro: number // share of 'Dividends & interest' that is qualified (0 = all ordinary)
+  rsuWithholdFederalMicro: number // supplemental rate the employer withholds on vests (22% statutory)
+  rsuWithholdStateMicro: number | null // null = the state's published supplemental rate (or flat rate)
 }
 
 export const TAX_DEFAULTS: TaxSettings = {
@@ -418,6 +437,8 @@ export const TAX_DEFAULTS: TaxSettings = {
   priorYearTaxStateCents: 0,
   priorYearAgiOver150k: true,
   qualifiedDividendShareMicro: 0,
+  rsuWithholdFederalMicro: FEDERAL_SUPPLEMENTAL_MICRO,
+  rsuWithholdStateMicro: null,
 }
 
 const SETTINGS_KEY = 'tax'
@@ -453,7 +474,7 @@ export function putTaxSettings(db: DbLike, body: Partial<TaxSettings>) {
   const ints: (keyof TaxSettings)[] = [
     'customStateRateMicro', 'wagesAnnualCents', 'otherIncomeCents', 'itemizedCents',
     'withheldFederalCents', 'withheldStateCents', 'estPaidFederalCents', 'estPaidStateCents',
-    'priorYearTaxFederalCents', 'priorYearTaxStateCents', 'qualifiedDividendShareMicro',
+    'priorYearTaxFederalCents', 'priorYearTaxStateCents', 'qualifiedDividendShareMicro', 'rsuWithholdFederalMicro',
   ]
   for (const k of ints) {
     const v = body[k]
@@ -463,6 +484,13 @@ export function putTaxSettings(db: DbLike, body: Partial<TaxSettings>) {
   }
   if (next.qualifiedDividendShareMicro > 1_000_000)
     throw new ApiError(400, 'qualifiedDividendShareMicro must be at most 1000000 (100%)')
+  if (body.rsuWithholdStateMicro !== undefined) {
+    const v = body.rsuWithholdStateMicro
+    if (v !== null && (!Number.isSafeInteger(v) || v < 0)) throw new ApiError(400, 'rsuWithholdStateMicro must be a non-negative integer or null')
+    next.rsuWithholdStateMicro = v
+  }
+  if (next.rsuWithholdFederalMicro > 1_000_000 || (next.rsuWithholdStateMicro ?? 0) > 1_000_000)
+    throw new ApiError(400, 'withholding rates must be at most 1000000 (100%)')
   db.prepare(
     'INSERT INTO goal_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
   ).run(SETTINGS_KEY, JSON.stringify(next))
@@ -494,6 +522,11 @@ export function federalLtTax(ordTaxableCents: number, ltTaxableCents: number, fi
   const end = start + ltTaxableCents
   const inBand = (lo: number, hi: number) => Math.max(0, Math.min(end, hi) - Math.max(start, lo))
   return Math.round((inBand(t0, t15) * 150_000 + inBand(t15, Infinity) * 200_000) / 1_000_000)
+}
+
+export function addlMedicareCents(medicareWagesCents: number, filing: FilingStatus): number {
+  const over = medicareWagesCents - ADDL_MEDICARE_THRESHOLD[filing]
+  return over > 0 ? Math.round((over * ADDL_MEDICARE_RATE_MICRO) / 1_000_000) : 0
 }
 
 export function niitCents(niiCents: number, magiCents: number, filing: FilingStatus): number {
@@ -541,6 +574,7 @@ export type TaxInputs = {
   qualifiedDividendCents?: number // taxed at LT rates federally; ordinary for states; NOT in ordinaryCents
   investmentIncomeCents: number // all dividends/interest, qualified or not (for NIIT)
   deductionCents: number
+  medicareWagesCents?: number // household Medicare wages (paychecks + stock comp) for the Additional Medicare Tax; omit when unknown
   state: Pick<TaxSettings, 'state' | 'filingStatus' | 'customStateRateMicro'>
 }
 
@@ -555,6 +589,7 @@ export type TaxComputed = {
   fedOrdinaryCents: number
   fedLtCents: number
   niitCents: number
+  addlMedicareCents: number
   fedTotalCents: number
   stateCents: number
   mhstCents: number
@@ -598,7 +633,8 @@ export function computeTax(i: TaxInputs): TaxComputed {
   const nii = Math.max(0, netted.netStCents + netted.netLtCents + Math.max(0, i.investmentIncomeCents))
   const niit = niitCents(nii, totalIncome, i.filing)
   const st = stateTaxCents(totalIncome, i.state, { netStCents: netted.netStCents, netLtCents: netted.netLtCents })
-  const fedTotal = fedOrdinary + fedLt + niit
+  const addlMedicare = addlMedicareCents(i.medicareWagesCents ?? 0, i.filing)
+  const fedTotal = fedOrdinary + fedLt + niit + addlMedicare
   return {
     ...netted,
     taxableOrdinaryCents: taxableOrd,
@@ -607,6 +643,7 @@ export function computeTax(i: TaxInputs): TaxComputed {
     fedOrdinaryCents: fedOrdinary,
     fedLtCents: fedLt,
     niitCents: niit,
+    addlMedicareCents: addlMedicare,
     fedTotalCents: fedTotal,
     stateCents: st.taxCents,
     mhstCents: st.mhstCents,
@@ -622,7 +659,10 @@ export function marginalRates(i: TaxInputs) {
   const bump = (patch: Partial<TaxInputs>) =>
     Math.round(((computeTax({ ...i, ...patch }).totalCents - base) * 1_000_000) / D)
   return {
-    ordinaryMicro: bump({ ordinaryCents: i.ordinaryCents + D }),
+    ordinaryMicro: bump({
+      ordinaryCents: i.ordinaryCents + D,
+      ...(i.medicareWagesCents !== undefined ? { medicareWagesCents: i.medicareWagesCents + D } : {}),
+    }),
     stMicro: bump({ stGainCents: i.stGainCents + D }),
     ltMicro: bump({ ltGainCents: i.ltGainCents + D }),
   }
@@ -636,21 +676,25 @@ const shiftDays = (iso: string, days: number) =>
 
 /** Sum of this year's RSU vest income: vest trades are buys at vest-day value,
  *  identifiable by their note or by the legacy rsu_vests linkage. */
-function rsuIncomeYtd(db: DbLike, year: string): number {
-  const r = db
+function rsuIncomeYtd(db: DbLike, year: string): { cents: number; byAccount: Map<number, number> } {
+  const rows = db
     .prepare(
-      `SELECT COALESCE(SUM(total_cents), 0) AS s FROM trades
+      `SELECT invest_account_id, COALESCE(SUM(total_cents), 0) AS s FROM trades
        WHERE side = 'buy' AND traded_on LIKE ?
          AND (note = 'RSU vest'
-              OR id IN (SELECT converted_trade_id FROM rsu_vests WHERE converted_trade_id IS NOT NULL))`,
+              OR id IN (SELECT converted_trade_id FROM rsu_vests WHERE converted_trade_id IS NOT NULL))
+       GROUP BY invest_account_id`,
     )
-    .get(`${year}%`) as { s: number }
-  return r.s
+    .all(`${year}%`) as { invest_account_id: number; s: number }[]
+  const byAccount = new Map<number, number>()
+  for (const r of rows) byAccount.set(r.invest_account_id, r.s)
+  return { cents: rows.reduce((t, r) => t + r.s, 0), byAccount }
 }
 
 export type VestEvent = {
   symbol: string
   account: string
+  account_id: number
   vest_on: string
   qty_micro: number
   cents: number | null // null when the asset has no price yet
@@ -662,7 +706,7 @@ export type VestEvent = {
 export function projectVests(db: DbLike, today: string): { events: VestEvent[]; cents: number; unpriced: number } {
   const rows = db
     .prepare(
-      `SELECT u.qty_micro, u.next_vest_on, u.vest_every_months, u.vest_qty_micro, a.symbol, ia.name AS account,
+      `SELECT u.qty_micro, u.next_vest_on, u.vest_every_months, u.vest_qty_micro, a.symbol, ia.name AS account, ia.id AS account_id,
               (SELECT close_cents FROM prices WHERE asset_id = a.id ORDER BY priced_on DESC LIMIT 1) AS price_cents
        FROM unvested_positions u
        JOIN assets a ON a.id = u.asset_id
@@ -677,6 +721,7 @@ export function projectVests(db: DbLike, today: string): { events: VestEvent[]; 
     vest_qty_micro: number
     symbol: string
     account: string
+    account_id: number
     price_cents: number | null
   }[]
   const yearEnd = `${today.slice(0, 4)}-12-31`
@@ -691,7 +736,7 @@ export function projectVests(db: DbLike, today: string): { events: VestEvent[]; 
       const q = Math.min(r.vest_qty_micro, remaining)
       const cents = r.price_cents === null ? null : positionValueCents(q, r.price_cents)
       if (cents === null) unpriced++
-      events.push({ symbol: r.symbol, account: r.account, vest_on: d, qty_micro: q, cents })
+      events.push({ symbol: r.symbol, account: r.account, account_id: r.account_id, vest_on: d, qty_micro: q, cents })
       remaining -= q
       d = addMonths(d, r.vest_every_months)
     }
@@ -802,6 +847,16 @@ export function estimatedSchedule(
   }
 }
 
+/** The state's flat supplemental rate on stock comp, unless the user overrode it. */
+export function rsuStateWithholdMicro(settings: TaxSettings): number {
+  if (settings.rsuWithholdStateMicro !== null) return settings.rsuWithholdStateMicro
+  const info = STATES.find((s) => s.code === settings.state)
+  if (!info || info.kind === 'none') return 0
+  if (info.kind === 'flat') return info.rateMicro
+  if (info.kind === 'custom') return settings.customStateRateMicro
+  return STATE_SUPPLEMENTAL_MICRO[info.code] ?? 0
+}
+
 export function computeTaxYear(db: DbLike, today: string) {
   const settings = getTaxSettings(db)
   const year = today.slice(0, 4)
@@ -815,14 +870,47 @@ export function computeTaxYear(db: DbLike, today: string) {
     settings.deductionMode === 'itemized'
       ? settings.itemizedCents
       : FEDERAL_STD_DEDUCTION_2026[settings.filingStatus]
+
+  // Stock comp by account (YTD + the rest of the year), for per-person
+  // Medicare wages and for the supplemental withholding the employer takes.
+  const rsuByAccount = new Map<number, number>(rsuYtd.byAccount)
+  const rsuProjectedByAccount = new Map<number, number>()
+  for (const e of projected.events) {
+    rsuByAccount.set(e.account_id, (rsuByAccount.get(e.account_id) ?? 0) + (e.cents ?? 0))
+    rsuProjectedByAccount.set(e.account_id, (rsuProjectedByAccount.get(e.account_id) ?? 0) + (e.cents ?? 0))
+  }
+  const sources = listPaySources(db)
+  const payroll: Payroll = computePayroll(sources, Number(year), rsuByAccount, ADDL_MEDICARE_THRESHOLD[settings.filingStatus])
+  const fromPaychecks = sources.length > 0
+
+  // Supplemental withholding on vests. A stub's YTD withholding already
+  // includes the vests to date for the account it links to; everything else
+  // (projected vests, YTD vests in unlinked accounts or behind an estimated
+  // YTD column) gets the flat rate here. Without paychecks the legacy setting
+  // is the user's own full-year figure, vests included.
+  let rsuWithholdBase = 0
+  if (fromPaychecks) {
+    const covered = new Set(payroll.sources.filter((p) => p.investAccountId !== null && !p.ytdEstimated).map((p) => p.investAccountId!))
+    for (const [acct, cents] of rsuByAccount)
+      rsuWithholdBase += covered.has(acct) ? (rsuProjectedByAccount.get(acct) ?? 0) : cents
+  }
+  const rsuStateMicro = rsuStateWithholdMicro(settings)
+  const rsuWithheldFederal = Math.round((rsuWithholdBase * settings.rsuWithholdFederalMicro) / 1_000_000)
+  const rsuWithheldState = Math.round((rsuWithholdBase * rsuStateMicro) / 1_000_000)
+
+  const wages = fromPaychecks ? payroll.wagesCents : settings.wagesAnnualCents
+  const withheldFederal = fromPaychecks ? payroll.fedWithheldCents + rsuWithheldFederal : settings.withheldFederalCents
+  const withheldState = fromPaychecks ? payroll.stateWithheldCents + rsuWithheldState : settings.withheldStateCents
+
   const inputs: TaxInputs = {
     filing: settings.filingStatus,
-    ordinaryCents: settings.wagesAnnualCents + settings.otherIncomeCents + rsuYtd + projected.cents + divOrdinary,
+    ordinaryCents: wages + settings.otherIncomeCents + rsuYtd.cents + projected.cents + divOrdinary,
     stGainCents: realized.stCents,
     ltGainCents: realized.ltCents,
     qualifiedDividendCents: divQualified,
     investmentIncomeCents: divYtd,
     deductionCents: deduction,
+    ...(fromPaychecks ? { medicareWagesCents: payroll.ficaWagesCents } : {}),
     state: settings,
   }
   const tax = computeTax(inputs)
@@ -831,8 +919,12 @@ export function computeTaxYear(db: DbLike, today: string) {
   const totalIncome =
     inputs.ordinaryCents - tax.capLossUsedCents + tax.netStCents + tax.netLtCents + divQualified
 
-  const fedGap = tax.fedTotalCents - settings.withheldFederalCents - settings.estPaidFederalCents
-  const stateGap = tax.stateCents - settings.withheldStateCents - settings.estPaidStateCents
+  // Withholding credited against federal tax: income-tax withholding, the
+  // 0.9% Medicare surtax employers took, and Social Security withheld past
+  // the wage base across employers (a refundable credit).
+  const fedCredits = payroll.addlMedicareWithheldCents + payroll.excessSocialSecurityCents
+  const fedGap = tax.fedTotalCents - withheldFederal - fedCredits - settings.estPaidFederalCents
+  const stateGap = tax.stateCents - withheldState - settings.estPaidStateCents
 
   const common = {
     year: Number(year),
@@ -844,7 +936,7 @@ export function computeTaxYear(db: DbLike, today: string) {
   const safeHarbor = estimatedSchedule(FEDERAL_EST_RULE, {
     ...common,
     taxCents: tax.fedTotalCents,
-    withheldCents: settings.withheldFederalCents,
+    withheldCents: withheldFederal + fedCredits,
     estPaidCents: settings.estPaidFederalCents,
     priorYearTaxCents: settings.priorYearTaxFederalCents,
   })
@@ -853,7 +945,7 @@ export function computeTaxYear(db: DbLike, today: string) {
     ? estimatedSchedule(stateRule, {
         ...common,
         taxCents: tax.stateCents,
-        withheldCents: settings.withheldStateCents,
+        withheldCents: withheldState,
         estPaidCents: settings.estPaidStateCents,
         priorYearTaxCents: settings.priorYearTaxStateCents,
       })
@@ -863,9 +955,10 @@ export function computeTaxYear(db: DbLike, today: string) {
     year: Number(year),
     settings,
     incomes: {
-      wagesCents: settings.wagesAnnualCents,
+      wagesCents: wages,
+      wagesFromPaychecks: fromPaychecks,
       otherCents: settings.otherIncomeCents,
-      rsuYtdCents: rsuYtd,
+      rsuYtdCents: rsuYtd.cents,
       rsuProjectedCents: projected.cents,
       rsuProjected: projected.events,
       rsuUnpriced: projected.unpriced,
@@ -880,8 +973,17 @@ export function computeTaxYear(db: DbLike, today: string) {
     tax,
     marginal,
     effRateMicro: totalIncome > 0 ? Math.round((tax.totalCents * 1_000_000) / totalIncome) : 0,
-    withheldFederalCents: settings.withheldFederalCents,
-    withheldStateCents: settings.withheldStateCents,
+    payroll,
+    rsuWithholding: {
+      baseCents: rsuWithholdBase,
+      federalMicro: settings.rsuWithholdFederalMicro,
+      stateMicro: rsuStateMicro,
+      federalCents: rsuWithheldFederal,
+      stateCents: rsuWithheldState,
+    },
+    withheldFederalCents: withheldFederal,
+    withheldStateCents: withheldState,
+    fedCreditsCents: fedCredits,
     estPaidFederalCents: settings.estPaidFederalCents,
     estPaidStateCents: settings.estPaidStateCents,
     fedGapCents: fedGap,
@@ -976,7 +1078,7 @@ export function getTax(db: DbLike, today: string) {
   const stateVintage =
     info?.kind === 'brackets' ? info.vintage : info?.kind === 'flat' ? 'flat-state rates: 2025' : null
   return {
-    vintage: stateVintage ? `${TAX_DATA_VINTAGE} · ${stateVintage}` : TAX_DATA_VINTAGE,
+    vintage: `${stateVintage ? `${TAX_DATA_VINTAGE} · ${stateVintage}` : TAX_DATA_VINTAGE} · ${PAYROLL_VINTAGE}`,
     states: STATES,
     ...year,
     harvest,

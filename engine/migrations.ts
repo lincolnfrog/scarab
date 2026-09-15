@@ -320,6 +320,35 @@ export const migrations: string[] = [
   `ALTER TABLE unvested_positions ADD COLUMN next_vest_on TEXT;
    ALTER TABLE unvested_positions ADD COLUMN vest_every_months INTEGER;
    ALTER TABLE unvested_positions ADD COLUMN vest_qty_micro INTEGER`,
+
+  // 14 — per-person paychecks (the tax layer's wage + withholding source).
+  // One row per earner per employer, transcribed from the latest paystub:
+  // the per-period amounts and the year-to-date column, anchored on that
+  // stub's pay date. Everything else (full-year wages, withholding, payroll
+  // taxes, the Additional Medicare gap) is derived by walking the cadence to
+  // Dec 31 — no projected number is stored. YTD columns are NULL when the
+  // user leaves them blank; the engine then assumes every paycheck this year
+  // looked like this one. `invest_account_id` links the stock comp that vests
+  // through this employer so Medicare wages can be attributed per person.
+  `CREATE TABLE pay_sources (
+     id                     INTEGER PRIMARY KEY,
+     earner                 TEXT NOT NULL,
+     employer               TEXT NOT NULL DEFAULT '',
+     cadence                TEXT NOT NULL CHECK (cadence IN ('weekly','biweekly','semimonthly','monthly')),
+     paid_on                TEXT NOT NULL,
+     gross_cents            INTEGER NOT NULL,
+     retirement_cents       INTEGER NOT NULL DEFAULT 0,
+     benefits_cents         INTEGER NOT NULL DEFAULT 0,
+     fed_withheld_cents     INTEGER NOT NULL DEFAULT 0,
+     state_withheld_cents   INTEGER NOT NULL DEFAULT 0,
+     ytd_gross_cents        INTEGER,
+     ytd_retirement_cents   INTEGER,
+     ytd_benefits_cents     INTEGER,
+     ytd_fed_withheld_cents INTEGER,
+     ytd_state_withheld_cents INTEGER,
+     invest_account_id      INTEGER REFERENCES invest_accounts(id),
+     sort                   INTEGER NOT NULL DEFAULT 0
+   )`,
 ]
 
 export function migrate(db: DbLike): void {

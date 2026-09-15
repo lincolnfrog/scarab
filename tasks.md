@@ -79,6 +79,22 @@ Follow-ups — **shipped 2026-09-10** except the last:
 - [x] Qualified vs ordinary dividends: a `qualifiedDividendShareMicro` setting
       splits the 'Dividends & interest' category; the qualified part stacks with
       LT gains federally and stays ordinary for the state.
+- [x] **Per-person paychecks** (2026-09-10; migration 14 `pay_sources`,
+      `engine/paychecks.ts`, `POST/PUT/DELETE /paychecks`). One row per earner
+      per employer, transcribed from the latest stub: a regular check's gross,
+      401k, §125 benefits, federal/state withholding, plus the optional YTD
+      column anchored on the stub's pay date. `projectPaySource` walks the
+      cadence (weekly/biweekly/semimonthly/monthly; semi-monthly pairs d with
+      d+15, month-end with the 15th) to Dec 31, so full-year wages and
+      withholding are derived — the `wagesAnnualCents`/`withheld*Cents`
+      settings only apply while no stub exists. Payroll taxes follow:
+      Social Security capped per person (excess across employers is a credit),
+      Medicare, and the Additional Medicare Tax owed on household wages over
+      the filing-status threshold but withheld per employer above $200k — the
+      two-earner gap lands in `fedGapCents`. Stock comp is attributed per
+      earner through an optional `invest_account_id`; vests a stub's YTD can't
+      vouch for get supplemental withholding at 22% federal / the state's
+      flat rate (CA 10.23%, NY 11.70%), overridable in settings.
 - [ ] 2026 CA brackets when the FTB publishes them. As of 2026-09-10 they are
       not out (the EDD's 2026 withholding tables still use 2025 thresholds), so
       `CA` in `engine/tax.ts` now carries the *official 2025* Schedules X/Y/Z and

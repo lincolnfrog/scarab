@@ -37,6 +37,7 @@ export const TABLES = [
   'rsu_vests',
   'unvested_positions',
   'goal_settings',
+  'pay_sources',
   'loan_options',
   'scenarios',
 ] as const

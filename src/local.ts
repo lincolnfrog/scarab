@@ -219,6 +219,18 @@ export async function localDispatch(method: string, rawUrl: string, body?: unkno
         const tax = await import('../engine/tax')
         return tax.putTaxSettings(db, b)
       }
+      case 'POST /paychecks': {
+        const pc = await import('../engine/paychecks')
+        return pc.createPaySource(db, b)
+      }
+      case 'PUT /paychecks/*': {
+        const pc = await import('../engine/paychecks')
+        return pc.updatePaySource(db, Number(seg[1]), b)
+      }
+      case 'DELETE /paychecks/*': {
+        const pc = await import('../engine/paychecks')
+        return pc.deletePaySource(db, Number(seg[1]))
+      }
       case 'GET /scenarios': {
         const sc = await import('../engine/scenarios')
         return sc.listScenarios(db, todayIso())

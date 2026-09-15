@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
 import type { DbLike } from './db'
+import { createPaySource } from './paychecks'
 import { addMonths, putUnvested, vestUnvested } from './services'
 import {
+  addlMedicareCents,
   computeHarvest,
   computeTax,
   computeTaxYear,
@@ -17,6 +19,7 @@ import {
   projectVests,
   putTaxSettings,
   quarterSchedule,
+  rsuStateWithholdMicro,
   stateEstRule,
   STATES,
   stateTaxCents,
@@ -380,7 +383,7 @@ describe('the ledger-derived year picture', () => {
     expect(y.incomes.dividendsOrdinaryCents).toBe($(1_000))
     expect(y.tax.qualifiedDividendCents).toBe($(3_000))
     expect(y.incomes.rsuProjected).toEqual([
-      { symbol: 'ACME', account: 'Brokerage', vest_on: '2026-11-15', qty_micro: 25_000_000, cents: $(10_000) },
+      { symbol: 'ACME', account: 'Brokerage', account_id: 1, vest_on: '2026-11-15', qty_micro: 25_000_000, cents: $(10_000) },
     ])
     expect(y.incomes.rsuProjectedCents).toBe($(10_000))
     expect(y.incomes.totalIncomeCents).toBe($(300_000) + $(50_000) + $(10_000) + $(4_000) + $(15_000))
@@ -497,5 +500,93 @@ describe('vest schedules', () => {
     expect(row.qty_micro).toBe(75_000_000)
     expect(row.next_vest_on).toBe('2027-01-01')
     expect(projectVests(db, '2026-10-01').events.length).toBe(0)
+  })
+})
+
+describe('paychecks in the year picture', () => {
+  const paycheck = (db: DbLike, earner: string, over: Partial<Parameters<typeof createPaySource>[1]> = {}) =>
+    createPaySource(db, {
+      earner,
+      cadence: 'monthly',
+      paidOn: '2026-12-31', // full-year stub: the YTD column IS the year, nothing left to project
+      grossCents: $(15_000),
+      fedWithheldCents: $(3_000),
+      stateWithheldCents: $(1_000),
+      ytdGrossCents: $(180_000),
+      ytdFedWithheldCents: $(36_000),
+      ytdStateWithheldCents: $(12_000),
+      ...over,
+    })
+
+  it('derives wages and withholding from the stubs and adds supplemental withholding on uncovered vests', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    seed(db)
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-05-15', vestEveryMonths: 3, vestQty: '25' }, '2026-08-27')
+    putTaxSettings(db, { filingStatus: 'mfj', state: 'CA', wagesAnnualCents: $(999_999), withheldFederalCents: $(999_999) })
+    // Earner A's employer is where the ACME RSUs vest; the stub's YTD withholding covers the $50k vest to date.
+    paycheck(db, 'A', { investAccountId: 1 })
+    paycheck(db, 'B', { ytdGrossCents: $(120_000), ytdFedWithheldCents: $(20_000), ytdStateWithheldCents: $(7_000) })
+    const y = computeTaxYear(db, '2026-08-27')
+    expect(y.incomes.wagesFromPaychecks).toBe(true)
+    expect(y.incomes.wagesCents).toBe($(300_000)) // the legacy setting is ignored once stubs exist
+    expect(y.payroll.earners.map((e) => e.earner)).toEqual(['A', 'B'])
+    // only the projected Nov vest ($10k) needs supplemental withholding: 22% federal, CA 10.23%
+    expect(y.rsuWithholding.baseCents).toBe($(10_000))
+    expect(y.rsuWithholding.federalCents).toBe($(2_200))
+    expect(y.rsuWithholding.stateCents).toBe($(1_023))
+    expect(y.withheldFederalCents).toBe($(56_000) + $(2_200))
+    expect(y.withheldStateCents).toBe($(19_000) + $(1_023))
+    // Medicare wages: A $180k + $60k stock comp, B $120k = $360k → 0.9% over $250k MFJ = $990 owed,
+    // withheld only by A's employer above $200k: 0.9% × $40k = $360
+    expect(y.payroll.ficaWagesCents).toBe($(360_000))
+    expect(y.tax.addlMedicareCents).toBe($(990))
+    expect(y.payroll.addlMedicareWithheldCents).toBe($(360))
+    expect(y.fedCreditsCents).toBe($(360))
+    expect(y.fedGapCents).toBe(y.tax.fedTotalCents - y.withheldFederalCents - $(360))
+    expect(y.safeHarbor.paidCents).toBe(y.withheldFederalCents + $(360))
+    // a salary raise now carries the 0.9% surtax on top of the bracket rate
+    expect(y.marginal.ordinaryMicro).toBeGreaterThanOrEqual(9_000)
+  })
+
+  it('withholds on YTD vests too when the stub cannot vouch for them', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    seed(db)
+    putTaxSettings(db, { state: 'TX', rsuWithholdFederalMicro: 220_000 })
+    paycheck(db, 'A', { ytdGrossCents: null }) // estimated YTD column → the $50k vest's withholding is not in it
+    const y = computeTaxYear(db, '2026-08-27')
+    expect(y.rsuWithholding.baseCents).toBe($(50_000))
+    expect(y.rsuWithholding.federalCents).toBe($(11_000))
+    expect(y.rsuWithholding.stateMicro).toBe(0)
+    expect(y.rsuWithholding.stateCents).toBe(0)
+  })
+
+  it('leaves the legacy full-year settings in charge until a stub exists', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    seed(db)
+    putTaxSettings(db, { wagesAnnualCents: $(300_000), withheldFederalCents: $(70_000) })
+    const y = computeTaxYear(db, '2026-08-27')
+    expect(y.incomes.wagesFromPaychecks).toBe(false)
+    expect(y.incomes.wagesCents).toBe($(300_000))
+    expect(y.withheldFederalCents).toBe($(70_000))
+    expect(y.tax.addlMedicareCents).toBe(0)
+    expect(y.payroll.sources).toEqual([])
+  })
+
+  it('Additional Medicare Tax and the state supplemental rate', () => {
+    expect(addlMedicareCents($(250_000), 'mfj')).toBe(0)
+    expect(addlMedicareCents($(350_000), 'mfj')).toBe($(900))
+    expect(addlMedicareCents($(210_000), 'single')).toBe($(90))
+    const base = { ...getTaxSettings(openDb(':memory:') as unknown as DbLike) }
+    expect(rsuStateWithholdMicro({ ...base, state: 'CA' })).toBe(102_300)
+    expect(rsuStateWithholdMicro({ ...base, state: 'NY' })).toBe(117_000)
+    expect(rsuStateWithholdMicro({ ...base, state: 'TX' })).toBe(0)
+    expect(rsuStateWithholdMicro({ ...base, state: 'CO' })).toBe(STATES.find((s) => s.code === 'CO')!.kind === 'flat' ? (STATES.find((s) => s.code === 'CO') as { rateMicro: number }).rateMicro : 0)
+    expect(rsuStateWithholdMicro({ ...base, state: 'CA', rsuWithholdStateMicro: 50_000 })).toBe(50_000)
+    const db = openDb(':memory:') as unknown as DbLike
+    putTaxSettings(db, { rsuWithholdStateMicro: 70_000 })
+    expect(getTaxSettings(db).rsuWithholdStateMicro).toBe(70_000)
+    putTaxSettings(db, { rsuWithholdStateMicro: null })
+    expect(getTaxSettings(db).rsuWithholdStateMicro).toBeNull()
+    expect(() => putTaxSettings(db, { rsuWithholdFederalMicro: 1_000_001 })).toThrow()
   })
 })
