@@ -12,7 +12,7 @@ import {
   type VaultBlob,
   type VaultHeader,
 } from '../shared/vault'
-import { enterLocalMode, loadLocalDump, localDump, localMode, type VaultSession } from './local'
+import { enterLocalMode, loadLocalDump, localDump, localMode, type SnapshotLoad, type VaultSession } from './local'
 import { assertPasskey, registerPasskey } from './passkey'
 
 /**
@@ -62,20 +62,26 @@ export async function fetchVaultKeys(): Promise<{ version: number; keys: Passkey
   return { version: info.version, keys: parseBlob(info).keys }
 }
 
-async function boot(dump: Dump, session: VaultSession): Promise<void> {
+async function boot(dump: Dump, session: VaultSession): Promise<SnapshotLoad> {
   if (localMode.active) {
-    await loadLocalDump(dump)
+    const loaded = await loadLocalDump(dump)
     localMode.setVault(session)
-    localMode.markSaved(session.version)
-  } else {
-    await enterLocalMode(dump, session)
+    // An upgraded snapshot is NOT what the vault holds — leave the tab dirty so
+    // the next save reseals it at the current version.
+    if (loaded.upgraded.length === 0) localMode.markSaved(session.version)
+    return loaded
   }
+  // A non-null dump always yields a load; the null is for an empty start.
+  return (await enterLocalMode(dump, session)) ?? { from: dump.schemaVersion, upgraded: [] }
 }
 
 const decodeDump = (plaintext: Uint8Array) => JSON.parse(new TextDecoder().decode(plaintext)) as Dump
 
+/** What an unlock reports: the vault's courier version, and what the loader had to do to the snapshot inside it. */
+export type Unlocked = { version: number; label: string; loaded: SnapshotLoad }
+
 /** One passkey tap: decrypt the stored vault in this tab and run on it. Replaces the tab's data if a session is already on. */
-export async function unlockVault(): Promise<{ version: number; label: string }> {
+export async function unlockVault(): Promise<Unlocked> {
   const info = await fetchVaultInfo()
   if (!info) throw new Error('no vault stored yet')
   const blob = parseBlob(info)
@@ -83,19 +89,19 @@ export async function unlockVault(): Promise<{ version: number; label: string }>
   const { credentialId, prfOutput } = await assertPasskey({ prfSaltB64: blob.prfSalt, credentialIds: blob.keys.map((k) => k.credentialId) })
   const rawDataKey = await unwrapWithPasskey(blob, credentialId, prfOutput)
   const dump = decodeDump(await openPayload(blob, rawDataKey))
-  await boot(dump, { rawDataKey, header: headerOf(blob), version: info.version })
-  return { version: info.version, label: blob.keys.find((k) => k.credentialId === credentialId)?.label ?? '' }
+  const loaded = await boot(dump, { rawDataKey, header: headerOf(blob), version: info.version })
+  return { version: info.version, label: blob.keys.find((k) => k.credentialId === credentialId)?.label ?? '', loaded }
 }
 
 /** Break-glass: the typed recovery code is the raw data key. */
-export async function unlockWithRecoveryCode(code: string): Promise<{ version: number }> {
+export async function unlockWithRecoveryCode(code: string): Promise<Unlocked> {
   const rawDataKey = decodeRecoveryCode(code)
   const info = await fetchVaultInfo()
   if (!info) throw new Error('no vault stored yet')
   const blob = parseBlob(info)
   const dump = decodeDump(await openPayload(blob, rawDataKey))
-  await boot(dump, { rawDataKey, header: headerOf(blob), version: info.version })
-  return { version: info.version }
+  const loaded = await boot(dump, { rawDataKey, header: headerOf(blob), version: info.version })
+  return { version: info.version, label: '', loaded }
 }
 
 /** Boot an empty in-tab database: a session that starts with no plaintext anywhere. */

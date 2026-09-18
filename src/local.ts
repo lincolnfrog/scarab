@@ -21,6 +21,13 @@ import type { VaultHeader } from '../shared/vault'
  */
 export type VaultSession = { rawDataKey: Uint8Array; header: VaultHeader; version: number }
 
+/**
+ * What loading a snapshot did: the version it was written at, and which
+ * tier-C upgrades this engine had to replay to read it (see
+ * engine/upgrades.ts).
+ */
+export type SnapshotLoad = { from: number; upgraded: number[] }
+
 type LocalState = {
   db: (DbLike & { export(): Uint8Array }) | null
   vault: VaultSession | null
@@ -73,7 +80,10 @@ export const localMode = {
  * null it starts from an empty, freshly migrated database — a session that
  * begins with no plaintext anywhere but this tab.
  */
-export async function enterLocalMode(dump: Dump | null, vault: VaultSession | null = null): Promise<void> {
+export async function enterLocalMode(
+  dump: Dump | null,
+  vault: VaultSession | null = null,
+): Promise<SnapshotLoad | null> {
   const [{ openBrowserDb }, { migrate }, { loadDump }, wasmUrl] = await Promise.all([
     import('../engine/sqljs-db'),
     import('../engine/migrations'),
@@ -82,21 +92,26 @@ export async function enterLocalMode(dump: Dump | null, vault: VaultSession | nu
   ])
   const db = await openBrowserDb({ wasmUrl })
   migrate(db)
-  if (dump) loadDump(db, dump)
+  const loaded = dump ? loadDump(db, dump) : null
   state.db = db
   state.vault = vault
-  state.dirty = dump === null // an empty start has nothing saved yet
+  // An empty start has nothing saved yet; so does a snapshot this engine had to
+  // upgrade on the way in — the stored copy is still the older one until a save
+  // reseals it at the current version.
+  state.dirty = dump === null || (loaded !== null && loaded.upgraded.length > 0)
   state.writes = 0
   window.dispatchEvent(new Event('scarab-mode'))
+  return loaded
 }
 
 /** Replace the tab's data in place — no reload, the session (and its key) survives. */
-export async function loadLocalDump(dump: Dump): Promise<void> {
+export async function loadLocalDump(dump: Dump): Promise<SnapshotLoad> {
   if (!state.db) throw new Error('local mode is not active')
   const { loadDump } = await import('../engine/snapshot')
-  loadDump(state.db, dump)
+  const loaded = loadDump(state.db, dump)
   state.dirty = false // caller decides: an unlock marks it saved, a file load marks it dirty
   markDirty()
+  return loaded
 }
 
 export function exitLocalMode(): void {

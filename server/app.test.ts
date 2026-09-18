@@ -95,6 +95,38 @@ describe('zero-knowledge-only server', () => {
     expect((await app.request('/api/vault', as('b@x'))).status).toBe(404)
   })
 
+  it('a save keeps the blob it replaced: one step of ciphertext history, per household', async () => {
+    wipe()
+    const app = mod.createApp({ zkOnly: true })
+    const prev = () =>
+      db.prepare('SELECT version, data, prev_version, prev_data, prev_sha256 FROM vault_blobs WHERE owner_email = ?').get('a@x') as {
+        version: number
+        data: string
+        prev_version: number | null
+        prev_data: string | null
+        prev_sha256: string | null
+      }
+
+    // First save: nothing to keep.
+    expect((await app.request('/api/vault', as('a@x', json({ data: '{"v":2,"n":1}', version: 0 }, 'PUT')))).status).toBe(200)
+    expect(prev()).toMatchObject({ version: 1, data: '{"v":2,"n":1}', prev_version: null, prev_data: null })
+
+    // Second and third: the outgoing blob moves to prev_*, and only the one before it.
+    const second = (await (await app.request('/api/vault', as('a@x', json({ data: '{"v":2,"n":2}', version: 1 }, 'PUT')))).json()) as { sha256: string }
+    expect(prev()).toMatchObject({ version: 2, data: '{"v":2,"n":2}', prev_version: 1, prev_data: '{"v":2,"n":1}' })
+    await app.request('/api/vault', as('a@x', json({ data: '{"v":2,"n":3}', version: 2 }, 'PUT')))
+    expect(prev()).toMatchObject({ version: 3, data: '{"v":2,"n":3}', prev_version: 2, prev_data: '{"v":2,"n":2}', prev_sha256: second.sha256 })
+
+    // A rejected save (stale version) keeps history exactly as it was.
+    expect((await app.request('/api/vault', as('a@x', json({ data: '{"v":2,"n":4}', version: 1 }, 'PUT')))).status).toBe(409)
+    expect(prev()).toMatchObject({ version: 3, prev_version: 2, prev_data: '{"v":2,"n":2}' })
+
+    // What GET serves is unchanged: the live blob only, never the previous one.
+    const served = (await (await app.request('/api/vault', as('a@x'))).json()) as Record<string, unknown>
+    expect(served).toMatchObject({ version: 3, data: '{"v":2,"n":3}' })
+    expect(Object.keys(served).filter((k) => k.startsWith('prev'))).toEqual([])
+  })
+
   it('household mode still serves everything', async () => {
     wipe()
     const app = mod.createApp({ zkOnly: false })

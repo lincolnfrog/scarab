@@ -3,6 +3,7 @@ import { sha256Hex, type PasskeyWrap } from '../../shared/vault'
 import { autosave } from '../session'
 import { get, post } from '../api'
 import type { Dump } from '../../engine/snapshot'
+import { CURRENT_VERSION } from '../../engine/upgrades'
 import { enterLocalMode, exitLocalMode, loadLocalDump, localMode } from '../local'
 import RecoveryCode from '../RecoveryCode'
 import {
@@ -21,6 +22,7 @@ import {
   unlockVault,
   unlockWithRecoveryCode,
   type Member,
+  type Unlocked,
   type VaultInfo,
 } from '../session'
 
@@ -139,14 +141,21 @@ export default function Vault() {
 
   /* ---------- unlock ---------- */
 
-  const unlock = (fn: () => Promise<{ version: number }>) =>
+  const unlock = (fn: () => Promise<Unlocked>) =>
     act('Decrypting in this tab…', async () => {
       if (!info) throw new Error('No vault stored yet.')
       if (local && localMode.dirty && !window.confirm('Replace this tab’s unsaved data with the vault contents?')) return
       const r = await fn()
       setCode('')
       setRecovering(false)
-      return `Vault v${r.version} unlocked into this tab. The server never saw the plaintext.`
+      return (
+        `Vault v${r.version} unlocked into this tab. The server never saw the plaintext.` +
+        // The stored copy is still the older snapshot; the tab is left dirty on
+        // purpose so a save reseals it at the current schema.
+        (r.loaded.upgraded.length
+          ? ` This snapshot was written by an older Scarab (schema v${r.loaded.from}) and was brought up to v${CURRENT_VERSION} as it loaded — save to keep it that way.`
+          : '')
+      )
     })
 
   /* ---------- plain export ---------- */
@@ -162,8 +171,9 @@ export default function Vault() {
       const dump = JSON.parse(await file.text()) as Dump
       if (local) {
         if (!window.confirm(session ? 'Replace this tab’s data with the export file? It will be saved over the stored vault.' : 'Replace this tab’s data with the export file?')) return
-        await loadLocalDump(dump)
-        setMsg(session ? 'Loaded into this tab; saving to the vault.' : 'Loaded into this tab. Create a vault to keep it.')
+        const loaded = await loadLocalDump(dump)
+        const note = loaded.upgraded.length ? ` The file was schema v${loaded.from}; it was brought up to v${CURRENT_VERSION} as it loaded.` : ''
+        setMsg((session ? 'Loaded into this tab; saving to the vault.' : 'Loaded into this tab. Create a vault to keep it.') + note)
       } else {
         if (!window.confirm('REPLACE all server data with this export file?')) return
         await post('/api/import', { ...dump, confirm: 'REPLACE' })
@@ -196,9 +206,10 @@ export default function Vault() {
       const dump = await get<Dump>('/api/export')
       const db = await openBrowserDb({ wasmUrl })
       migrate(db)
-      loadDump(db, dump)
+      const loaded = loadDump(db, dump)
       const txCount = (db.prepare('SELECT count(*) AS n FROM transactions').get() as { n: number }).n
-      lines.push(`Database rebuilt in a scratch engine: ${txCount} transactions, schema v${dump.schemaVersion} (${(performance.now() - t1).toFixed(0)}ms)`)
+      const upgraded = loaded.upgraded.length ? ` → v${CURRENT_VERSION} (upgraded ${loaded.upgraded.join(', ')})` : ''
+      lines.push(`Database rebuilt in a scratch engine: ${txCount} transactions, schema v${loaded.from}${upgraded} (${(performance.now() - t1).toFixed(0)}ms)`)
       const t2 = performance.now()
       const localSeries = netWorthSeries(db, today())
       const ref = await get<{ series: { month: string; total: number }[] }>('/api/networth')

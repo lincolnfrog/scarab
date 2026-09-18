@@ -371,6 +371,19 @@ export const migrations: string[] = [
      UNION SELECT invest_account_id FROM rsu_vests
      UNION SELECT invest_account_id FROM pay_sources WHERE invest_account_id IS NOT NULL
    )`,
+
+  // 17 — the courier keeps one step of history. A save overwrote the only copy
+  // of a household's ciphertext; now the blob it replaces moves into prev_*.
+  // Still ciphertext, still nothing the server can read — but a snapshot that
+  // an engine upgrade got subtly wrong, resealed and uploaded before anyone
+  // noticed, is no longer gone. Restoring is an operator step against the
+  // database: copy prev_* back over the live columns with version bumped by
+  // one, so every open tab's optimistic-concurrency check fails and re-unlocks.
+  `ALTER TABLE vault_blobs ADD COLUMN prev_version INTEGER;
+   ALTER TABLE vault_blobs ADD COLUMN prev_sha256 TEXT;
+   ALTER TABLE vault_blobs ADD COLUMN prev_size INTEGER;
+   ALTER TABLE vault_blobs ADD COLUMN prev_data TEXT;
+   ALTER TABLE vault_blobs ADD COLUMN prev_updated_at TEXT`,
 ]
 
 export function migrate(db: DbLike): void {

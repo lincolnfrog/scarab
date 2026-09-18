@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { Hono } from 'hono'
 import type { DbLike } from '../engine/db'
 import { dumpDb, loadDump, TABLES, type Dump } from '../engine/snapshot'
+import { readabilityError } from '../engine/upgrades'
 import { db, schemaVersion } from './db'
 
 /**
@@ -50,10 +51,15 @@ api4.put('/vault', async (c) => {
       409,
     )
   const sha = createHash('sha256').update(b.data).digest('hex')
+  // The blob being replaced moves into prev_* (one step of history, still
+  // ciphertext — see migration 17). Every right-hand side of an UPDATE reads
+  // the row as it was, so the prev_ assignments see the outgoing values.
   db.prepare(
     `INSERT INTO vault_blobs (owner_email, version, sha256, size, data, updated_at)
      VALUES (?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT (owner_email) DO UPDATE SET
+       prev_version = vault_blobs.version, prev_sha256 = vault_blobs.sha256, prev_size = vault_blobs.size,
+       prev_data = vault_blobs.data, prev_updated_at = vault_blobs.updated_at,
        version = excluded.version, sha256 = excluded.sha256, size = excluded.size,
        data = excluded.data, updated_at = excluded.updated_at`,
   ).run(email, b.version + 1, sha, b.data.length, b.data)
@@ -113,13 +119,13 @@ api4.get('/export', (c) => c.json(dumpDb(db as unknown as DbLike)))
 api4.post('/import', async (c) => {
   const b = (await c.req.json()) as Dump & { confirm?: string }
   if (!b.scarab || !b.tables) return c.json({ error: 'not a Scarab export' }, 400)
-  if (b.schemaVersion !== schemaVersion)
-    return c.json({ error: `schema mismatch: export is v${b.schemaVersion}, server is v${schemaVersion}` }, 400)
+  const why = readabilityError(b.schemaVersion)
+  if (why) return c.json({ error: why }, 400)
   if (b.confirm !== 'REPLACE')
     return c.json({ error: 'this REPLACES every row of data — resend with confirm: "REPLACE"' }, 400)
-  loadDump(db as unknown as DbLike, b)
+  const loaded = loadDump(db as unknown as DbLike, b)
   const counts = Object.fromEntries(
     TABLES.map((t) => [t, (db.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n]),
   )
-  return c.json({ ok: true, restored: counts })
+  return c.json({ ok: true, restored: counts, schemaVersion, loadedFrom: loaded.from, upgraded: loaded.upgraded })
 })
