@@ -41,3 +41,23 @@ export type ImportRecord = {
   imported_at: string
   imported_by: string
 }
+
+/** The Dream-home goal's numbers, derived by the engine: GET /api/goal → { …settings, derived }. */
+export type GoalDerived = {
+  targetCents: number // down payment + closing costs
+  fundCents: number // fund accounts + earmarked extra; negative if the accounts are overdrawn
+  remainingCents: number // max(0, target − fund)
+  monthlyPlanCents: number
+  etaMonth: string | null // YYYY-MM the monthly plan closes the gap (calendar months from today's month); null without a plan, once funded, or > 100 years out
+  pctMicro: number // fund / target, floored and clamped to 0…1e6 (1e6 = 100%, reached only once funded)
+}
+
+/** GET /api/transactions?q=&month=&category_id=|uncategorized=1&account_id=&offset=&limit= — one page, newest first. */
+export type TxPage = {
+  rows: Tx[]
+  total: number // every transaction in the ledger
+  matching: number // every row the filters select; the page is `limit` of them from `offset`
+  uncategorized: number // rows "uncategorized=1" would select with the other filters unchanged
+  offset: number
+  limit: number
+}

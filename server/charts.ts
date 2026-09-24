@@ -1,5 +1,7 @@
 import type { Database } from 'better-sqlite3'
+import { priceFlags } from '../engine/prices'
 import { parseYahooHistory } from './prices'
+import { upstreamSignal } from './upstream'
 
 /**
  * Daily chart data. Yahoo supplies daily closes (period1/period2 — range=max
@@ -25,13 +27,13 @@ export async function ensureDailyHistory(
   asset: { id: number; symbol: string; kind: 'stock' | 'crypto' },
   f: typeof fetch = fetch,
 ): Promise<string[]> {
-  const flag = `daily:v2:${asset.symbol}`
+  const flag = priceFlags.dailyFetched(asset.symbol)
   if (freshEnough(db, flag)) return []
   const ySym = asset.kind === 'crypto' ? `${asset.symbol}-USD` : asset.symbol
   try {
     const period2 = Math.floor(Date.now() / 1000)
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ySym)}?interval=1d&period1=0&period2=${period2}`
-    const r = await f(url, { headers: UA })
+    const r = await f(url, { headers: UA, signal: upstreamSignal() })
     if (!r.ok) return [`${asset.symbol}: Yahoo daily HTTP ${r.status}`]
     const quotes = parseYahooHistory(asset.symbol, await r.json())
     if (quotes.length === 0) return [`${asset.symbol}: no daily history`]

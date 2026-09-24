@@ -12,7 +12,10 @@ export const api3 = new Hono<{ Variables: { userEmail: string } }>()
 
 export type { GoalSettings, RentalSettings } from '../engine/services'
 
-api3.get('/goal', (c) => handle(c, () => svc.getGoal(db)))
+// The same UTC day api7 runs the scenarios on, so the goal ETA and the Future screen agree.
+const today = () => new Date().toISOString().slice(0, 10)
+
+api3.get('/goal', (c) => handle(c, () => svc.getGoal(db, today())))
 api3.put('/goal', async (c) => {
   const b = await c.req.json()
   return handle(c, () => svc.putGoal(db, b))

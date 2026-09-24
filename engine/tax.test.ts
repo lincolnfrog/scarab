@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
 import type { DbLike } from './db'
 import { createPaySource } from './paychecks'
+import { ApiError } from './errors'
+import { createTrade, deleteTrade, getUnvested, listTrades } from './invest'
 import { addMonths, putUnvested, vestUnvested } from './services'
 import {
   addlMedicareCents,
@@ -12,13 +14,17 @@ import {
   federalLtTax,
   FEDERAL_BRACKETS_2026,
   FEDERAL_EST_RULE,
+  getRealizedReport,
+  getTax,
   getTaxSettings,
   marginalRates,
   netCapitalGains,
   niitCents,
+  previewTrade,
   projectVests,
   putTaxSettings,
   quarterSchedule,
+  realizedTaxDelta,
   rsuStateWithholdMicro,
   stateEstRule,
   STATES,
@@ -491,15 +497,44 @@ describe('vest schedules', () => {
     expect(() => putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: '2026-10-01', vestEveryMonths: 0, vestQty: '25' }, '2026-08-27')).toThrow()
     expect(() => putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: 'soon', vestEveryMonths: 3, vestQty: '25' }, '2026-08-27')).toThrow()
   })
-  it('recording a vest rolls the cadence past the vest date', () => {
+  it('recording a vest moves the next vest past it; the stored anchor stays', () => {
     const db = openDb(':memory:') as unknown as DbLike
     seed(db)
     putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-10-01', vestEveryMonths: 3, vestQty: '25' }, '2026-08-27')
     vestUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '25', tradedOn: '2026-10-01', totalCents: $(10_000) }, '2026-10-01')
     const row = db.prepare('SELECT qty_micro, next_vest_on FROM unvested_positions').get() as { qty_micro: number; next_vest_on: string }
     expect(row.qty_micro).toBe(75_000_000)
-    expect(row.next_vest_on).toBe('2027-01-01')
+    expect(row.next_vest_on).toBe('2026-10-01')
+    expect(getUnvested(db).rows[0]!.next_vest_on).toBe('2027-01-01')
     expect(projectVests(db, '2026-10-01').events.length).toBe(0)
+  })
+
+  it('a month-end cadence keeps its day: every vest counts from the anchor, never from a clamped date before it', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    seed(db)
+    const next = () => getUnvested(db).rows[0]!.next_vest_on
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-03-31', vestEveryMonths: 3, vestQty: '10' }, '2026-03-01')
+    // Stepping date to date would give Jun 30, Sep 30, then Dec 30.
+    expect(projectVests(db, '2026-03-01').events.map((e) => e.vest_on)).toEqual(['2026-03-31', '2026-06-30', '2026-09-30', '2026-12-31'])
+    const vest = (on: string) => vestUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '10', tradedOn: on, totalCents: $(4_000) }, on)
+    vest('2026-03-31')
+    expect(next()).toBe('2026-06-30')
+    // Saving the grant form as it was shown (next Jun 30, every 3 months) changes nothing: the anchor keeps its 31st.
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: '2026-06-30', vestEveryMonths: 3, vestQty: '10' }, '2026-04-01')
+    expect(db.prepare('SELECT next_vest_on FROM unvested_positions').get()).toEqual({ next_vest_on: '2026-03-31' })
+    vest('2026-06-30')
+    vest('2026-09-30')
+    expect(next()).toBe('2026-12-31')
+    expect(projectVests(db, '2026-10-01').events.map((e) => e.vest_on)).toEqual(['2026-12-31'])
+    // A monthly cadence from Jan 31 lands on each month's end, Feb 28 included.
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2027-01-31', vestEveryMonths: 1, vestQty: '10' }, '2026-10-01')
+    expect(projectVests(db, '2027-01-01').events.map((e) => e.vest_on).slice(0, 4)).toEqual(['2027-01-31', '2027-02-28', '2027-03-31', '2027-04-30'])
+    // Deleting a recorded vest makes it due again.
+    vest('2027-01-31')
+    expect(next()).toBe('2027-02-28')
+    const t = db.prepare("SELECT id FROM trades WHERE note = 'RSU vest' AND traded_on = '2027-01-31'").get() as { id: number }
+    deleteTrade(db, t.id)
+    expect(next()).toBe('2027-01-31')
   })
 })
 
@@ -588,5 +623,411 @@ describe('paychecks in the year picture', () => {
     putTaxSettings(db, { rsuWithholdStateMicro: null })
     expect(getTaxSettings(db).rsuWithholdStateMicro).toBeNull()
     expect(() => putTaxSettings(db, { rsuWithholdFederalMicro: 1_000_001 })).toThrow()
+  })
+})
+
+/* ---------- per-account lots and tax-advantaged accounts ---------- */
+
+/** A taxable brokerage, a Roth and a traditional IRA (lots-tracked), with raw-inserted trades. */
+function sheltered(db: DbLike) {
+  const account = db.prepare('INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES (?, ?, ?, ?)')
+  account.run('Taxable', 'brokerage', 'lots', 1) // 1
+  account.run('Roth IRA', 'retirement', 'lots', 0) // 2
+  account.run('Rollover IRA', 'retirement', 'lots', 0) // 3
+  const asset = db.prepare("INSERT INTO assets (symbol, kind) VALUES (?, 'stock')")
+  asset.run('QQQ') // 1
+  asset.run('VTI') // 2
+  asset.run('ACME') // 3
+  const trade = db.prepare(
+    'INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents, acquired_on) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  )
+  return (acct: number, assetId: number, on: string, side: 'buy' | 'sell', sh: number, cents: number, acquiredOn: string | null = null) =>
+    trade.run(acct, assetId, on, side, sh * 1_000_000, cents, acquiredOn)
+}
+const price = (db: DbLike, assetId: number, cents: number) =>
+  db.prepare("INSERT INTO prices (asset_id, priced_on, close_cents) VALUES (?, '2026-09-19', ?)").run(assetId, cents)
+const M = { stMicro: 450_000, ltMicro: 250_000 }
+
+describe('tax-advantaged accounts leave the tax bill', () => {
+  it('a Roth gain is absent from realized gains and from harvest; an IRA loss is never harvestable (audit probe 2)', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    t(2, 1, '2025-01-10', 'buy', 10, $(4_000)) // Roth QQQ
+    t(2, 1, '2026-03-02', 'sell', 5, $(2_600)) // +$600 inside the Roth
+    t(3, 2, '2026-01-05', 'buy', 10, $(3_000)) // IRA VTI, under water below
+    t(1, 2, '2026-02-02', 'buy', 2, $(640)) // taxable VTI, also under water
+    price(db, 1, 60_000)
+    price(db, 2, 25_000)
+
+    const tax = getTax(db, '2026-09-22')
+    expect(tax.incomes.realizedStCents).toBe(0)
+    expect(tax.incomes.realizedLtCents).toBe(0)
+    expect(tax.incomes.realizedShelteredCents).toBe($(600))
+    expect(tax.tax.netStCents + tax.tax.netLtCents).toBe(0)
+    // Only the taxable VTI lot is on the harvest list — no Roth QQQ, no IRA VTI.
+    expect(tax.harvest.rows.map((r) => [r.symbol, r.account, r.account_id])).toEqual([['VTI', 'Taxable', 1]])
+    expect(tax.harvest.totals.harvestableStCents).toBe($(500) - $(640))
+  })
+
+  it('a taxable sale books its gain; the same ticker in the Roth never shares its FIFO queue', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    t(1, 2, '2020-03-02', 'buy', 10, $(1_500)) // taxable, old
+    t(2, 2, '2026-01-05', 'buy', 10, $(3_000)) // Roth, new
+    t(1, 2, '2026-06-01', 'sell', 10, $(3_200)) // taxable sale → its own 2020 lot, LT $1,700
+    const y = computeTaxYear(db, '2026-09-22')
+    expect(y.incomes.realizedLtCents).toBe($(1_700))
+    expect(y.incomes.realizedStCents).toBe(0)
+    expect(y.incomes.realizedShelteredCents).toBe(0)
+  })
+
+  it('a buy in an IRA flags the wash sale on a taxable loss (audit probe 5)', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    t(1, 2, '2026-01-05', 'buy', 10, $(3_000)) // taxable VTI at $300
+    price(db, 2, 25_000) // now $250: a $500 loss
+    expect(computeHarvest(db, '2026-09-22', M).rows[0]).toMatchObject({ account: 'Taxable', wash_risk: false })
+    t(3, 2, '2026-09-01', 'buy', 1, $(250)) // the rollover IRA buys VTI 21 days ago
+    const h = computeHarvest(db, '2026-09-22', M)
+    expect(h.rows).toHaveLength(1) // the IRA lot itself is not harvestable
+    expect(h.rows[0]).toMatchObject({ account: 'Taxable', wash_risk: true, wash_upcoming: null })
+    expect(h.totals.washFlagged).toBe(1)
+  })
+
+  it('crypto is property, outside the wash-sale rule: no flag on the harvest list, the report or the preview — while the same pattern in a stock still is', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Coinbase', 'crypto', 'lots')").run() // 4
+    db.prepare("INSERT INTO assets (symbol, kind) VALUES ('BTC', 'crypto')").run() // 4
+    for (const [acct, asset] of [
+      [4, 4],
+      [1, 2],
+    ]) {
+      t(acct!, asset!, '2025-01-10', 'buy', 2, $(200_000)) // an old lot at $100k a unit, under water now
+      t(acct!, asset!, '2026-03-01', 'buy', 1, $(80_000))
+      t(acct!, asset!, '2026-03-15', 'sell', 1, $(60_000)) // FIFO: 1 of the 2025 lot, a $40k loss
+      t(acct!, asset!, '2026-03-20', 'buy', 1, $(61_000)) // bought back 5 days later
+      t(acct!, asset!, '2026-09-10', 'buy', 1, $(60_000)) // and again 12 days ago
+    }
+    price(db, 4, 6_000_000)
+    price(db, 2, 6_000_000)
+    const TODAY = '2026-09-22'
+
+    const h = computeHarvest(db, TODAY, M)
+    const flags = (sym: string) => h.rows.filter((r) => r.symbol === sym && r.gain_cents < 0).map((r) => r.wash_risk)
+    expect(flags('BTC')).toEqual([false, false, false])
+    expect(flags('VTI')).toEqual([true, true, true])
+    expect(h.totals.washFlagged).toBe(3)
+
+    const rep = getRealizedReport(db, 2026, TODAY)
+    expect(rep.lines.map((l) => [l.symbol, l.gain_cents, l.wash_risk])).toEqual([
+      ['BTC', $(-40_000), false],
+      ['VTI', $(-40_000), true],
+    ])
+    expect(rep.flags.wash_risk).toBe(1)
+
+    const sell = (symbol: string, investAccountId: number, assetKind: string) =>
+      previewTrade(db, { investAccountId, symbol, assetKind, side: 'sell', tradedOn: TODAY, qty: '1', totalCents: $(60_000) }, TODAY)
+    expect(sell('BTC', 4, 'crypto').washSale).toEqual({ risk: false, buys: [], upcomingVest: null, lossSales: [] })
+    expect(sell('VTI', 1, 'stock').washSale.buys.map((b) => b.acquired_on)).toEqual(['2026-09-10'])
+    // A buy right after a loss sale: no trap for crypto either.
+    const buy = (symbol: string, investAccountId: number, assetKind: string) =>
+      previewTrade(db, { investAccountId, symbol, assetKind, side: 'buy', tradedOn: '2026-03-25', qty: '1', totalCents: $(60_000) }, TODAY)
+    expect(buy('BTC', 4, 'crypto').washSale.risk).toBe(false)
+    expect(buy('VTI', 1, 'stock').washSale.lossSales).toHaveLength(1)
+  })
+
+  it('the wash scan dates a buy by when its shares were acquired', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    t(1, 2, '2026-01-05', 'buy', 10, $(3_000))
+    price(db, 2, 25_000)
+    // Shares brought into the Roth last week, acquired back in 2019: not a fresh purchase.
+    t(2, 2, '2026-09-15', 'buy', 5, $(500), '2019-06-03')
+    expect(computeHarvest(db, '2026-09-22', M).rows[0]!.wash_risk).toBe(false)
+  })
+
+  it('a scheduled vest within 30 days is an upcoming wash sale; one 31 days out is not', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    t(1, 3, '2026-02-02', 'buy', 10, $(5_000)) // taxable ACME at $500
+    price(db, 3, 40_000) // $400 now: under water
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-10-23', vestEveryMonths: 3, vestQty: '25' }, '2026-09-22')
+    let row = computeHarvest(db, '2026-09-22', M).rows[0]!
+    expect(row.wash_upcoming).toBeNull() // Oct 23 is 31 days out
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-07-22', vestEveryMonths: 3, vestQty: '25' }, '2026-09-22')
+    const h = computeHarvest(db, '2026-09-22', M)
+    row = h.rows[0]!
+    // The cadence rolls past today: Jul 22 → Oct 22, exactly 30 days out.
+    expect(row.wash_upcoming).toEqual({ vest_on: '2026-10-22', qty_micro: 25_000_000, account: 'Taxable', account_id: 1 })
+    expect(row.wash_risk).toBe(false)
+    expect(h.totals.washFlagged).toBe(1)
+  })
+
+  it('holding periods follow the anniversary rule, and lt_on says when a lot turns long-term', () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    t(1, 2, '2025-09-22', 'buy', 1, $(200)) // anniversary today: still short-term
+    t(1, 2, '2025-09-21', 'buy', 1, $(200)) // anniversary yesterday: long-term
+    t(1, 2, '2024-02-29', 'buy', 1, $(200)) // leap-day lot
+    price(db, 2, 30_000)
+    const rows = computeHarvest(db, '2026-09-22', M).rows
+    const lot = (on: string) => rows.find((r) => r.opened_on === on)!
+    expect(lot('2025-09-22')).toMatchObject({ term: 'st', lt_on: '2026-09-23', days_to_lt: 1 })
+    expect(lot('2025-09-21')).toMatchObject({ term: 'lt', lt_on: '2026-09-22', days_to_lt: 0 })
+    expect(lot('2024-02-29')).toMatchObject({ term: 'lt', lt_on: '2025-03-01', days_to_lt: 0 })
+    // On Feb 28, 2025 the leap-day lot was still short-term, one day from long-term.
+    const feb28 = computeHarvest(db, '2025-02-28', M).rows.find((r) => r.opened_on === '2024-02-29')!
+    expect(feb28).toMatchObject({ term: 'st', days_to_lt: 1 })
+  })
+})
+
+/* ---------- B7 · the trade preview ---------- */
+
+describe('previewTrade: what a trade would do, written nowhere (B7)', () => {
+  const TODAY = '2026-09-22'
+  const setup = () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    putTaxSettings(db, { wagesAnnualCents: $(240_000) })
+    return { db, t }
+  }
+  const changes = (db: DbLike) => (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
+  const sell = (x: Record<string, unknown>) => ({ investAccountId: 1, symbol: 'VTI', assetKind: 'stock', side: 'sell', tradedOn: TODAY, ...x })
+  const status = (fn: () => unknown) => {
+    try {
+      fn()
+    } catch (e) {
+      return e instanceof ApiError ? e.status : String(e)
+    }
+    return 'no error'
+  }
+
+  it('is pure, and agrees with the trade once it is recorded — to the cent of tax', () => {
+    const { db, t } = setup()
+    t(1, 2, '2024-01-10', 'buy', 10, $(1_000))
+    t(1, 2, '2026-01-05', 'buy', 10, $(3_000))
+    const body = sell({ qty: '15', totalCents: $(4_800) })
+    const n = changes(db)
+    const p = previewTrade(db, body, TODAY)
+    expect(changes(db)).toBe(n)
+    expect(p).toMatchObject({
+      side: 'sell',
+      account: 'Taxable',
+      sheltered: false,
+      realized: { stCents: $(1_600) - $(1_500), ltCents: $(3_200) - $(1_000) },
+      zeroBasisCents: 0,
+      taxYear: 2026,
+      warnings: [],
+      affectedSales: 0,
+      washSale: { risk: false, buys: [], upcomingVest: null, lossSales: [] },
+    })
+    expect(p.parts.map((x) => [x.lot_trade_id, x.term, x.qty_micro])).toEqual([[1, 'lt', 10_000_000], [2, 'st', 5_000_000]])
+    expect(p.estTaxCents).toBe(realizedTaxDelta(db, TODAY, p.realized.stCents, p.realized.ltCents))
+    expect(p.estTaxCents).toBeGreaterThan(0)
+
+    const taxBefore = getTax(db, TODAY).tax.totalCents
+    const id = createTrade(db, body, TODAY).id
+    expect(listTrades(db).find((x) => x.id === id)!.realized).toEqual({ st_cents: p.realized.stCents, lt_cents: p.realized.ltCents, zero_basis_cents: 0 })
+    expect(getTax(db, TODAY).tax.totalCents - taxBefore).toBe(p.estTaxCents)
+  })
+
+  it('a taxable loss sale warns of a buy in an IRA and of a vest coming up (wash sales)', () => {
+    const { db, t } = setup()
+    t(1, 3, '2026-02-02', 'buy', 10, $(5_000)) // taxable ACME at $500 (trade 1)
+    t(3, 3, '2026-09-10', 'buy', 1, $(400)) // the rollover IRA buys ACME 12 days ago (trade 2)
+    const loss = sell({ symbol: 'ACME', qty: '10', totalCents: $(4_000) })
+    let p = previewTrade(db, loss, TODAY)
+    expect(p.realized).toEqual({ stCents: -$(1_000), ltCents: 0 })
+    expect(p.estTaxCents).toBeLessThan(0) // a loss saves tax
+    expect(p.washSale).toEqual({
+      risk: true,
+      buys: [{ trade_id: 2, account: 'Rollover IRA', account_id: 3, acquired_on: '2026-09-10', qty_micro: 1_000_000, note: null, sheltered: true }],
+      upcomingVest: null,
+      lossSales: [],
+    })
+    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-10-15', vestEveryMonths: 3, vestQty: '25' }, TODAY)
+    p = previewTrade(db, loss, TODAY)
+    expect(p.washSale.upcomingVest).toEqual({ vest_on: '2026-10-15', qty_micro: 25_000_000, account: 'Taxable', account_id: 1 })
+
+    // A lot sold whole is no replacement for itself; the IRA buy still is.
+    t(1, 3, '2026-09-15', 'buy', 2, $(900)) // trade 3
+    // Each flagged buy says whether it sits in a tax-advantaged account (there the loss is lost for good).
+    expect(previewTrade(db, loss, TODAY).washSale.buys.map((b) => [b.trade_id, b.sheltered])).toEqual([[2, true], [3, false]])
+    p = previewTrade(db, sell({ symbol: 'ACME', qty: '2', totalCents: $(700), soldLotTradeId: 3 }), TODAY)
+    expect(p.washSale.buys.map((b) => b.trade_id)).toEqual([2])
+    // A gain is never a wash sale.
+    expect(previewTrade(db, sell({ symbol: 'ACME', qty: '2', totalCents: $(1_100), soldLotTradeId: 3 }), TODAY).washSale)
+      .toMatchObject({ risk: false, buys: [], upcomingVest: null })
+  })
+
+  it('a sale in a tax-advantaged account owes nothing and has no wash-sale trap', () => {
+    const { db, t } = setup()
+    t(3, 3, '2026-02-02', 'buy', 10, $(5_000))
+    t(1, 3, '2026-09-10', 'buy', 1, $(400))
+    const p = previewTrade(db, sell({ investAccountId: 3, symbol: 'ACME', qty: '10', totalCents: $(4_000) }), TODAY)
+    expect(p).toMatchObject({ sheltered: true, account: 'Rollover IRA', estTaxCents: 0, realized: { stCents: -$(1_000) } })
+    expect(p.washSale.risk).toBe(false)
+  })
+
+  it("a buy within 30 days of a taxable loss sale warns that it could disallow that loss", () => {
+    const { db, t } = setup()
+    t(1, 2, '2026-01-05', 'buy', 10, $(3_000))
+    t(1, 2, '2026-09-10', 'sell', 10, $(2_500)) // −$500 in Taxable (trade 2)
+    const buy = { investAccountId: 2, symbol: 'VTI', assetKind: 'stock', side: 'buy', qty: '1', totalCents: $(250) }
+    const p = previewTrade(db, { ...buy, tradedOn: TODAY }, TODAY)
+    expect(p).toMatchObject({ side: 'buy', sheltered: true, estTaxCents: 0, realized: { stCents: 0, ltCents: 0 }, parts: [] })
+    expect(p.washSale).toEqual({ risk: true, buys: [], upcomingVest: null, lossSales: [{ trade_id: 2, account: 'Taxable', account_id: 1, traded_on: '2026-09-10', loss_cents: $(500) }] })
+    // 40 days before the sale is outside the window; so is a lot acquired long ago.
+    expect(previewTrade(db, { ...buy, tradedOn: '2026-08-01' }, TODAY).washSale.risk).toBe(false)
+    expect(previewTrade(db, { ...buy, tradedOn: TODAY, acquiredOn: '2019-04-01' }, TODAY).washSale.risk).toBe(false)
+  })
+
+  it('warns of an oversell and of later sales that would re-resolve; an earlier tax year is not estimated', () => {
+    const { db, t } = setup()
+    t(1, 2, '2024-01-10', 'buy', 10, $(1_000))
+    t(1, 2, '2025-01-10', 'buy', 10, $(3_000))
+    t(1, 2, '2026-03-02', 'sell', 10, $(4_000)) // took the 2024 lot
+    const early = previewTrade(db, sell({ tradedOn: '2026-02-01', qty: '5', totalCents: $(2_000) }), TODAY)
+    expect(early.affectedSales).toBe(1)
+    expect(early.warnings).toEqual(['1 later sale in Taxable will re-resolve — its realized gain recomputes (FIFO).'])
+    const over = previewTrade(db, sell({ qty: '12', totalCents: $(4_800) }), TODAY)
+    expect(over.zeroBasisCents).toBe($(800))
+    expect(over.warnings[0]).toMatch(/Taxable holds only 10 VTI on 2026-09-22 — 2 shares have no recorded basis/)
+    const tooEarly = previewTrade(db, sell({ tradedOn: '2025-02-01', qty: '15', totalCents: $(3_000) }), TODAY)
+    expect(tooEarly.warnings.some((w) => /leaves 1 later sale in Taxable short/.test(w))).toBe(true)
+    const lastYear = previewTrade(db, sell({ tradedOn: '2025-06-02', qty: '1', totalCents: $(350) }), TODAY)
+    expect(lastYear).toMatchObject({ estTaxCents: null, taxYear: 2025 })
+  })
+
+  it('refuses what createTrade refuses', () => {
+    const { db, t } = setup()
+    t(1, 2, '2024-01-10', 'buy', 10, $(1_000))
+    expect(status(() => previewTrade(db, sell({ qty: '1', totalCents: 1, tradedOn: '2999-01-01' }), TODAY))).toBe(400)
+    expect(status(() => previewTrade(db, sell({ qty: '1', totalCents: 1, assetKind: 'crypto' }), TODAY))).toBe(400)
+    expect(status(() => previewTrade(db, sell({ qty: '1', totalCents: 1, investAccountId: 99 }), TODAY))).toBe(404)
+    expect(status(() => previewTrade(db, sell({ qty: '1', totalCents: 1, soldLotTradeId: 1, investAccountId: 2 }), TODAY))).toBe(400)
+  })
+})
+
+describe('the realized-gains report: Form 8949’s lines (B14)', () => {
+  const TODAY = '2026-09-22'
+  const setup = () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    const t = sheltered(db)
+    return { db, t }
+  }
+  const status = (fn: () => unknown) => {
+    try {
+      fn()
+    } catch (e) {
+      return e instanceof ApiError ? e.status : String(e)
+    }
+    return 'no error'
+  }
+
+  it('one line per lot a sale took, with its own acquired date and term — summing to Taxes’ realized gains to the cent', () => {
+    const { db, t } = setup()
+    t(1, 2, '2024-01-10', 'buy', 10, $(1_000)) // VTI lot 1: long-term by the sale
+    t(1, 2, '2026-01-05', 'buy', 10, $(3_000)) // VTI lot 2: short-term
+    t(1, 2, '2026-06-01', 'sell', 15, $(4_800)) // FIFO: 10 from lot 1, 5 from lot 2
+    t(1, 1, '2026-02-02', 'buy', 3, $(1_500))
+    t(1, 1, '2026-08-03', 'sell', 3, $(1_200)) // a short-term QQQ loss
+    const r = getRealizedReport(db, undefined, TODAY)
+    expect(r.year).toBe(2026)
+    expect(r.lines.map((l) => [l.symbol, l.qty_micro, l.acquired_on, l.sold_on, l.proceeds_cents, l.cost_cents, l.gain_cents, l.term, l.basis])).toEqual([
+      ['VTI', 10_000_000, '2024-01-10', '2026-06-01', $(3_200), $(1_000), $(2_200), 'lt', 'lot'],
+      ['VTI', 5_000_000, '2026-01-05', '2026-06-01', $(1_600), $(1_500), $(100), 'st', 'lot'],
+      ['QQQ', 3_000_000, '2026-02-02', '2026-08-03', $(1_200), $(1_500), -$(300), 'st', 'lot'],
+    ])
+    expect(r.st).toEqual({ proceeds_cents: $(2_800), cost_cents: $(3_000), gain_cents: -$(200), lines: 2 })
+    expect(r.lt).toEqual({ proceeds_cents: $(3_200), cost_cents: $(1_000), gain_cents: $(2_200), lines: 1 })
+    const tax = getTax(db, TODAY)
+    expect([r.st.gain_cents, r.lt.gain_cents]).toEqual([tax.incomes.realizedStCents, tax.incomes.realizedLtCents])
+    // Netting as the return does: the short-term loss comes off the long-term gain.
+    expect(r.netted).toEqual({ netStCents: 0, netLtCents: $(2_000), capLossUsedCents: 0, capLossCarryCents: 0 })
+    expect(r.flags).toEqual({ no_basis: 0, wash_risk: 0 })
+  })
+
+  it('leaves tax-advantaged accounts out, counting them apart', () => {
+    const { db, t } = setup()
+    t(2, 1, '2025-01-10', 'buy', 10, $(4_000))
+    t(2, 1, '2026-03-02', 'sell', 5, $(2_600)) // +$600 inside the Roth
+    t(1, 2, '2026-01-05', 'buy', 2, $(600))
+    t(1, 2, '2026-04-01', 'sell', 2, $(700))
+    const r = getRealizedReport(db, 2026, TODAY)
+    expect(r.lines.map((l) => l.account)).toEqual(['Taxable'])
+    expect(r.sheltered).toEqual({ sales: 1, gain_cents: $(600) })
+  })
+
+  it('an entered basis says so; shares no lot covered are a zero-basis, short-term line flagged for attention', () => {
+    const { db, t } = setup()
+    t(1, 2, '2026-01-05', 'buy', 2, $(600))
+    t(1, 2, '2026-05-01', 'sell', 5, $(1_500)) // 3 more than recorded: zero basis
+    createTrade(db, { investAccountId: 1, symbol: 'VTI', assetKind: 'stock', side: 'sell', tradedOn: '2026-07-01', qty: '4', totalCents: $(1_300), acquiredOn: '2019-06-03', basisCents: $(700) }, TODAY)
+    const r = getRealizedReport(db, 2026, TODAY)
+    expect(r.lines.map((l) => [l.qty_micro, l.acquired_on, l.cost_cents, l.gain_cents, l.term, l.basis])).toEqual([
+      [2_000_000, '2026-01-05', $(600), 0, 'st', 'lot'],
+      [3_000_000, null, 0, $(900), 'st', 'none'],
+      [4_000_000, '2019-06-03', $(700), $(600), 'lt', 'entered'],
+    ])
+    expect(r.flags.no_basis).toBe(1)
+    const tax = getTax(db, TODAY)
+    expect([r.st.gain_cents, r.lt.gain_cents]).toEqual([tax.incomes.realizedStCents, tax.incomes.realizedLtCents])
+  })
+
+  it('flags a loss with a buy of the same asset within 30 days in any account — not a gain, not the lot it sold whole', () => {
+    const { db, t } = setup()
+    t(1, 2, '2026-02-15', 'buy', 10, $(3_000))
+    t(1, 2, '2026-03-02', 'sell', 10, $(2_500)) // loss; its own lot, bought 15 days before but sold whole, doesn't count
+    t(1, 1, '2026-01-05', 'buy', 10, $(3_000))
+    t(1, 1, '2026-05-01', 'sell', 5, $(1_200)) // loss…
+    t(3, 1, '2026-05-20', 'buy', 1, $(240)) // …and a buy in the IRA 19 days later
+    t(1, 3, '2026-02-02', 'buy', 2, $(100))
+    t(1, 3, '2026-06-01', 'sell', 1, $(90)) // a gain…
+    t(1, 3, '2026-06-10', 'buy', 1, $(50)) // …is never a wash, buy or no buy
+    const r = getRealizedReport(db, 2026, TODAY)
+    expect(r.lines.map((l) => [l.symbol, l.sold_on, l.wash_risk])).toEqual([
+      ['VTI', '2026-03-02', false],
+      ['QQQ', '2026-05-01', true],
+      ['ACME', '2026-06-01', false],
+    ])
+    expect(r.flags.wash_risk).toBe(1)
+  })
+
+  it('an earlier year runs to its December 31; the years list; a net-settled vest’s withheld shares are counted, never a line', () => {
+    const { db, t } = setup()
+    t(1, 2, '2024-01-10', 'buy', 10, $(1_000))
+    t(1, 2, '2025-12-31', 'sell', 2, $(500))
+    t(1, 2, '2026-02-01', 'sell', 1, $(260))
+    const plan = 1
+    putUnvested(db, { investAccountId: plan, symbol: 'ACME', qty: '20' }, TODAY)
+    vestUnvested(db, { investAccountId: plan, symbol: 'ACME', qty: '10', tradedOn: '2026-08-15', totalCents: $(4_000), withheldQty: '4' }, TODAY)
+    const y25 = getRealizedReport(db, '2025', TODAY)
+    expect(y25.lines.map((l) => [l.sold_on, l.gain_cents, l.term])).toEqual([['2025-12-31', $(300), 'lt']])
+    expect(y25.years).toEqual([2026, 2025])
+    const y26 = getRealizedReport(db, 2026, TODAY)
+    // The employer kept those shares to pay the tax: no sale of the household's, no 1099-B, no Form 8949 line.
+    expect(y26.lines.map((l) => l.symbol)).toEqual(['VTI'])
+    expect(y26.withheld).toEqual({ sales: 1, cents: $(1_600) })
+    expect(y26.st).toEqual({ proceeds_cents: 0, cost_cents: 0, gain_cents: 0, lines: 0 })
+    expect(y26.lt).toEqual({ proceeds_cents: $(260), cost_cents: $(100), gain_cents: $(160), lines: 1 })
+    const tax = getTax(db, TODAY)
+    expect([y26.st.gain_cents, y26.lt.gain_cents]).toEqual([tax.incomes.realizedStCents, tax.incomes.realizedLtCents])
+    // A year whose only "sale" is a vest's withholding isn't offered as a year with sales.
+    const onlyVest = setup()
+    putUnvested(onlyVest.db, { investAccountId: 1, symbol: 'ACME', qty: '20' }, TODAY)
+    vestUnvested(onlyVest.db, { investAccountId: 1, symbol: 'ACME', qty: '10', tradedOn: '2026-08-15', totalCents: $(4_000), withheldQty: '4' }, TODAY)
+    expect(getRealizedReport(onlyVest.db, 2026, TODAY)).toMatchObject({ lines: [], years: [2026], withheld: { sales: 1, cents: $(1_600) }, st: { lines: 0, proceeds_cents: 0 } })
+    // A year with no sales still answers, empty.
+    expect(getRealizedReport(db, 2019, TODAY)).toMatchObject({ year: 2019, lines: [], years: [2026, 2025, 2019], st: { lines: 0 }, lt: { lines: 0 } })
+  })
+
+  it('refuses a year that isn’t one, or hasn’t happened', () => {
+    const { db } = setup()
+    expect(status(() => getRealizedReport(db, '2027', TODAY))).toBe(400)
+    expect(status(() => getRealizedReport(db, 'soon', TODAY))).toBe(400)
+    expect(status(() => getRealizedReport(db, 1850, TODAY))).toBe(400)
+    expect(status(() => getRealizedReport(db, '2026.5', TODAY))).toBe(400)
   })
 })

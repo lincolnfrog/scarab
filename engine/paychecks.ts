@@ -1,3 +1,4 @@
+import { isRealIsoDay } from '../shared/dates'
 import type { DbLike } from './db'
 import { addMonths, ApiError } from './services'
 
@@ -102,7 +103,6 @@ export function listPaySources(db: DbLike): PaySource[] {
 const bad = (msg: string): never => {
   throw new ApiError(400, msg)
 }
-const isoDay = /^\d{4}-\d{2}-\d{2}$/
 
 export type PaySourceInput = {
   earner?: string
@@ -140,7 +140,7 @@ function validate(db: DbLike, b: PaySourceInput, cur: PaySource | null): Omit<Pa
   const cadence = (b.cadence ?? cur?.cadence) as PayCadence | undefined
   if (!cadence || !PAY_CADENCES.includes(cadence)) bad('cadence must be weekly, biweekly, semimonthly or monthly')
   const paidOn = b.paidOn ?? cur?.paidOn
-  if (!paidOn || !isoDay.test(paidOn)) bad('paidOn must be YYYY-MM-DD (the pay date on the stub)')
+  if (!isRealIsoDay(paidOn)) bad('paidOn must be a real YYYY-MM-DD day (the pay date on the stub)')
   const grossCents = cents(b.grossCents, 'grossCents', cur?.grossCents ?? -1)
   if (grossCents <= 0) bad('grossCents must be positive')
   const retirementCents = cents(b.retirementCents, 'retirementCents', cur?.retirementCents ?? 0)

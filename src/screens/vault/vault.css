@@ -1,0 +1,369 @@
+/* Stream Z — the vault screens, front door and session UI. Classes are .zk-*. */
+
+/* The typed confirmation before a stored vault is deleted and replaced. */
+.zk-replace { display: grid; gap: 8px; }
+.zk-replace p { margin: 0; }
+.zk-replace b { color: var(--ink); font-weight: 600; }
+
+/* Front door: a Marcellus heading per step; steps crossfade (a view transition of the card alone —
+   the root swaps instantly, styles.css). Reduced motion turns every animation off (styles.css). */
+.card.zk-door { view-transition-name: zk-door; }
+.card.zk-door h2 {
+  font-family: var(--disp);
+  font-weight: 400;
+  font-size: 26px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+::view-transition-old(zk-door) { animation: zk-door-out 120ms var(--ease-io) both; }
+::view-transition-new(zk-door) { animation: zk-door-in 200ms var(--ease-out) both; }
+@keyframes zk-door-out { to { opacity: 0; } }
+@keyframes zk-door-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* Waiting for the passkey: a gold ring that loops until the prompt is answered (a still arc under reduced motion). */
+.zk-door-wait { margin-top: 12px; display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.zk-ring { width: 26px; height: 26px; flex: none; animation: zk-ring-turn 1.4s linear infinite; }
+.zk-ring-track, .zk-ring-arc { fill: none; stroke-width: 2.6; }
+.zk-ring-track { stroke: var(--line); }
+.zk-ring-arc { stroke: var(--gold); stroke-linecap: round; stroke-dasharray: 30 70; transform-origin: center; animation: zk-ring-breathe 1.4s var(--ease-io) infinite; }
+@keyframes zk-ring-turn { to { transform: rotate(360deg); } }
+@keyframes zk-ring-breathe { 50% { stroke-dasharray: 62 38; } }
+.zk-door-note { margin-top: 10px; }
+.zk-door-field { margin-top: 12px; max-width: 320px; }
+
+/* Front door: an invitation into a household, waiting for a yes or a no. */
+.zk-invite + .zk-invite { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.zk-invite p { margin: 0; line-height: 1.55; }
+.zk-invite-warn { margin: 10px 0 0; padding: 8px 11px; border: 1px solid rgba(229, 96, 92, 0.45); border-radius: 8px; background: rgba(229, 96, 92, 0.08); color: var(--ink); line-height: 1.5; }
+.zk-door-lock.zk-door-invited { border-color: rgba(227, 178, 60, 0.45); background: var(--gold-dim); color: var(--ink); }
+
+/* The inline recovery code (front door): what "I've stored it" is waiting for. */
+.zk-rc-inline .zk-rc-check { margin: 10px 0 2px; }
+.zk-rc-hint { margin: 8px 0 0; }
+
+/* Vault screen: this device's memory of the stored copy (format v3 rollback detection). */
+.zk-seen { margin-top: 10px; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.zk-seen b { font-weight: 600; }
+.zk-seen b:not(.neg) { color: var(--ink); }
+.zk-seen-ok { color: var(--ink); }
+
+/* Vault screen: the recovery-code drill (checked in the tab against the session key). */
+.zk-drill { margin-top: 14px; }
+.zk-drill-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.zk-drill-row > :first-child { flex: 1 1 280px; max-width: 420px; }
+.zk-drill-input { font-family: var(--mono); width: 100%; }
+.zk-drill-ok, .zk-drill-bad { margin-top: 8px; font-size: 12.5px; line-height: 1.5; }
+.zk-drill-ok { color: var(--ink); }
+.zk-drill-bad { color: var(--down); }
+
+/* ---------- Sync chip, sidebar and popover: the states beyond the primitives' (ui.css) ----------
+   Offline is calm (ink-3); the other member's newer version is a call to action (gold);
+   a conflict is --down. Never --up, never a series colour. */
+:is(.zk-sync, .zk-sidestat, .zk-syncpop-head)[data-state='retrying'] > .ui-sync-dot { background: var(--ink-3); }
+:is(.zk-sync, .zk-sidestat, .zk-syncpop-head)[data-state='newer'] > .ui-sync-dot { background: var(--gold); }
+:is(.zk-sync, .zk-sidestat, .zk-syncpop-head)[data-state='conflict'] > .ui-sync-dot { background: var(--down); }
+.zk-sync[data-state='retrying'] { color: var(--ink-3); }
+.zk-sync[data-state='newer'] { color: var(--gold); border-color: rgba(227, 178, 60, 0.55); background: var(--gold-dim); }
+.zk-sync[data-state='newer']:hover,
+.zk-sync[data-state='newer'][aria-expanded='true'] { border-color: var(--gold); color: var(--gold); }
+.zk-sync[data-state='conflict'] { border-color: rgba(229, 96, 92, 0.45); }
+/* The chip carries margin-left: auto in the topbar; with avatars (or the sheet) after it, who's-signed-in must not. */
+.topbar:has(.zk-sync) .who { margin-left: 0; }
+.zk-syncpop-foot { display: flex; align-items: center; gap: 8px; }
+.zk-syncpop-foot > :last-child { margin-left: auto; }
+
+/* The household, as in the mockup's topbar: owner then members; the signed-in identity wears the gold ring. */
+.zk-avatars { display: flex; align-items: center; flex: none; }
+.zk-av {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  border: 2px solid var(--plane);
+  cursor: default;
+}
+.zk-av[data-tone='m'] { background: #3b4a75; color: #cdd9ff; }
+.zk-av[data-tone='n'] { background: #6d5330; color: #ffe9bd; }
+.zk-av + .zk-av { margin-left: -8px; }
+.zk-av[data-me] { z-index: 1; box-shadow: 0 0 0 1.5px var(--gold); }
+
+/* The banner under the topbar: something about the stored vault needs the person. */
+.zk-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 22px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.02);
+  animation: zk-banner-in var(--dur-2) var(--ease-out);
+}
+.zk-banner[data-tone='gold'] { background: var(--gold-dim); color: var(--ink); }
+.zk-banner[data-tone='down'] { background: rgba(229, 96, 92, 0.08); color: var(--ink); }
+.zk-banner-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+.zk-banner[data-tone='gold'] .zk-banner-dot { background: var(--gold); }
+.zk-banner[data-tone='down'] .zk-banner-dot { background: var(--down); }
+.zk-banner-text { min-width: 0; }
+.zk-banner > .btn { margin-left: auto; flex: none; }
+@keyframes zk-banner-in { from { opacity: 0; transform: translateY(-4px); } }
+
+/* The conflict sheet: one row per way out. */
+.zk-sheet-lead { margin: 0 0 14px; color: var(--ink-2); line-height: 1.55; }
+.zk-sheet-lead b { color: var(--ink); font-weight: 600; }
+.zk-sheet-opts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.zk-sheet-opt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--plane);
+}
+.zk-sheet-opt-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.zk-sheet-opt-text b { color: var(--ink); font-weight: 600; }
+.zk-sheet-opt-text span { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.zk-sheet-opt > .btn { flex: none; }
+.zk-link {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--gold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.zk-link:disabled { color: var(--ink-3); cursor: default; }
+.zk-link.zk-link-inline { margin-top: 0; font-size: inherit; }
+
+/* Sidebar footer: the price basket's date under the vault line. */
+.zk-side-prices { margin-top: 6px; padding-left: 14px; }
+
+/* Front door: why the last session ended on its own, or that another tab has one open. */
+.zk-door-lock { margin: 0 0 14px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--plane); line-height: 1.5; }
+
+/* ---------- Data & Vault: one card per concern (Session · Household · Recovery · Backups · Advanced) ---------- */
+.zk-vault { align-items: start; }
+/* position: relative contains .zk-sr's absolute spans: without it they are placed against the page, below the fold of
+   the .screens scroller, and make the whole document scroll (the shell slides up under scrollIntoView or a wheel). */
+.zk-card, .card.zk-door { min-width: 0; position: relative; }
+.card.zk-card p { max-width: none; }
+.card.zk-intro p { margin: 0; max-width: 92ch; }
+.zk-lead { margin: 0 0 10px; color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+.zk-lead b { color: var(--ink); font-weight: 600; }
+.zk-actions { margin-top: 12px; }
+.zk-foot { margin: 12px 0 0; line-height: 1.5; }
+.zk-h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+
+/* Whether this tab's work is in the vault. Saved is neutral ink, never green; trouble is --down. */
+.zk-state { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.zk-state[data-tone='down'] { color: var(--down); font-weight: 600; }
+.zk-state[data-tone='ok'] { color: var(--ink-2); }
+.zk-state[data-tone='ok']::before { content: '✓ '; color: var(--ink); }
+.zk-state .btn { margin-left: 4px; vertical-align: baseline; }
+.zk-via { margin: 6px 0 0; }
+.zk-create, .zk-recover { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+/* A button beside a Field lines up with the input, not with the hint under it: a Field label's height + gap. */
+:is(.zk-create, .zk-addmember, .zk-drill-row) > .btn { margin-top: 23px; }
+.zk-create > .ui-field { flex: 1 1 200px; max-width: 280px; }
+.zk-recover { display: grid; gap: 8px; }
+.zk-recover > .ui-field { max-width: 420px; }
+.zk-code-input { font-family: var(--mono); letter-spacing: 0.5px; }
+.zk-unlock { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* Something the person owes the vault: an unfinished removal (--down) or a new recovery code (gold: a call to action). */
+.zk-callout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--plane);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.zk-callout b { color: var(--ink); font-weight: 600; }
+.zk-callout > .btn { margin-left: auto; flex: none; }
+.zk-callout[data-tone='down'] { border-color: rgba(229, 96, 92, 0.45); background: rgba(229, 96, 92, 0.08); }
+.zk-callout[data-tone='gold'] { border-color: rgba(227, 178, 60, 0.45); background: var(--gold-dim); }
+
+/* The household: a row per person, their passkeys as chips. */
+.zk-people { list-style: none; margin: 0; padding: 0; display: grid; }
+.zk-person { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 0; }
+.zk-person + .zk-person { border-top: 1px solid var(--line); }
+.zk-person:first-child { padding-top: 2px; }
+.zk-person .zk-av { margin-top: 1px; }
+.zk-av[data-tone='x'] { background: var(--card-hi); color: var(--ink-3); }
+/* Invited, not yet answered: an outline, not yet one of the household's colours. */
+.zk-av[data-tone='i'] { background: transparent; color: var(--ink-3); border: 1.5px dashed var(--ink-3); }
+.zk-person[data-role='invited'] .zk-person-email { color: var(--ink-2); }
+.zk-person-main { min-width: 0; display: grid; gap: 7px; }
+.zk-person-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.zk-person-email { color: var(--ink); font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.zk-you {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  padding: 0 6px;
+}
+.zk-role { font-size: 12px; color: var(--ink-3); }
+.zk-person[data-role='former'] .zk-person-email { color: var(--ink-2); }
+.zk-person-actions { display: flex; align-items: center; gap: 4px; }
+.zk-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.zk-pk {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--plane);
+  font-size: 12.5px;
+  color: var(--ink);
+  max-width: 100%;
+}
+.zk-pk:not(:has(.ui-iconbtn)) { padding-right: 10px; }
+.zk-pk-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.zk-pk-date { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zk-pk-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.zk-pk-badge[data-tone='quiet'] { color: var(--ink-3); background: none; border: 1px solid var(--line); }
+.zk-pk .ui-iconbtn { width: 22px; height: 22px; border-radius: 999px; }
+.zk-pk-none { font-size: 12px; color: var(--ink-3); font-style: italic; min-height: 28px; display: inline-flex; align-items: center; }
+.zk-former { margin: 0; }
+.zk-addmember {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.zk-addmember > .ui-field { flex: 1 1 180px; }
+
+/* Confirm bodies with consequences, in order. */
+.zk-confirm { display: grid; gap: 8px; line-height: 1.55; }
+.zk-confirm p { margin: 0; }
+.zk-confirm b { color: var(--ink); font-weight: 600; }
+.zk-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+/* Advanced: a disclosure card. */
+.zk-adv-wrap { min-width: 0; scroll-margin-top: 16px; }
+.zk-adv-sum { display: flex; align-items: baseline; gap: 12px; cursor: pointer; list-style: none; flex-wrap: wrap; }
+.zk-adv-sum::-webkit-details-marker { display: none; }
+.zk-adv-sum h2 { margin: 0; }
+.zk-adv-sum h2::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 8px 1px 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.zk-adv[open] .zk-adv-sum h2::before { transform: rotate(45deg); }
+.zk-adv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 28px; margin-top: 14px; }
+.zk-adv-sec { min-width: 0; }
+.zk-adv-sec .sub2 { margin: 0 0 6px; line-height: 1.5; }
+/* A member's "only the owner re-keys" line, where the owner's Rotate key… button sits. */
+.zk-adv-sec .sub2.zk-rotate-note { margin-top: 12px; }
+.zk-engine { margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--ink-2); display: grid; gap: 2px; overflow-wrap: anywhere; }
+
+/* The recovery-code sheet. */
+.zk-rc { display: grid; gap: 8px; }
+.recoverycode.zk-rc-code { word-break: normal; overflow-wrap: normal; }
+.zk-rc .recoverycode { margin: 0; padding: 12px 14px; border: 1px solid rgba(227, 178, 60, 0.45); border-radius: 10px; background: var(--gold-dim); }
+.zk-rc-note { margin: 0; line-height: 1.55; }
+.zk-rc-check { margin-top: 2px; }
+.zk-rc-foot { display: flex; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
+.zk-rc-foot > :last-child { margin-left: auto; }
+
+@media (max-width: 900px) {
+  .zk-vault > .c5, .zk-vault > .c6, .zk-vault > .c7 { grid-column: span 12; }
+}
+
+/* ---------- History (Z8) and backups (Z10) ---------- */
+.zk-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* The History card: one row per kept version, the current one first. */
+/* Header cells keep the app's table look (styles.css); the rows are the card's. */
+.zk-hist { font-size: 12.5px; }
+.zk-hist th:first-child, .zk-hist td:first-child { padding-left: 0; }
+.zk-hist th:last-child, .zk-hist td:last-child { padding-right: 0; }
+.zk-hist td { padding: 6px 10px; color: var(--ink-2); vertical-align: middle; }
+.zk-hist tbody th { padding: 6px 10px; border-bottom: 1px solid var(--line); text-transform: none; letter-spacing: 0; font-size: 12.5px; font-family: var(--mono); color: var(--ink); font-weight: 600; white-space: nowrap; }
+.zk-hist tbody tr:last-child > * { border-bottom: 0; }
+.zk-hist-now th, .zk-hist-now td { background: rgba(255, 255, 255, 0.02); }
+.zk-hist-by { overflow-wrap: anywhere; }
+.zk-hist-skel { display: grid; gap: 10px; padding: 6px 0; }
+.zk-hist-empty { margin: 8px 0 0; }
+@media (max-width: 640px) {
+  .zk-hist thead th:nth-child(3), .zk-hist td:nth-child(3), .zk-hist thead th:nth-child(4), .zk-hist td:nth-child(4) { display: none; }
+}
+
+/* The preview of a version or a backup: rows per kind of record, then against now. */
+.zk-preview { display: grid; gap: 10px; }
+.zk-preview-note { margin: 0; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--plane); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.zk-preview-note[data-tone='down'] { border-color: rgba(229, 96, 92, 0.45); background: rgba(229, 96, 92, 0.08); color: var(--ink); }
+.zk-preview-sum { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.zk-preview-foot { display: flex; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
+.zk-preview-foot > :last-child { margin-left: auto; }
+.zk-counts { font-size: 12.5px; }
+.zk-counts th, .zk-counts td { padding: 5px 0; }
+.zk-counts th.r, .zk-counts td.r { padding-left: 14px; }
+.zk-counts tbody th { border-bottom: 1px solid var(--line); text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--ink-2); font-weight: 400; }
+.zk-counts td { color: var(--ink-2); font-family: var(--mono); font-size: 12.5px; }
+.zk-counts tr[data-changed] th, .zk-counts tr[data-changed] td { color: var(--ink); }
+.zk-counts tr[data-changed] th { font-weight: 600; }
+.zk-counts-delta { min-width: 3.5em; }
+.zk-counts tbody tr:last-child > * { border-bottom: 0; }
+/* Not interactive: no row hover (styles.css lights td only, which would split a row with a th in it). */
+.zk-counts tbody tr:hover td { background: none; }
+/* The history rows are: light the row header with its cells. */
+.zk-hist tbody tr:hover th { background: rgba(255, 255, 255, 0.02); }
+.zk-counts-empty { margin: 0; }
+
+/* Backups: the encrypted file under the plain export. Front door: what a backup holds. */
+.zk-backup-enc { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.zk-door-counts { margin-top: 12px; max-height: 280px; overflow: auto; }
+/* The front door's warning that this device saw the backup's vault move on (a restore as it was would undo that). */
+.zk-door-behind { margin: 10px 0 10px; align-items: flex-start; }
+
+/* Session card: idle auto-lock, per device. */
+.zk-idle { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.zk-idle-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.zk-idle-label { font-size: 12.5px; color: var(--ink-2); }
+.card.zk-card p.zk-idle-note { margin: 6px 0 0; }

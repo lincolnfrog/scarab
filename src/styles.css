@@ -33,6 +33,17 @@
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --disp: 'Marcellus', Optima, Georgia, serif;
+  /* motion — src/ui/motion.ts DUR mirrors the durations */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-io: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-1: 90ms; /* hover, press */
+  --dur-2: 180ms; /* popovers, dialogs, toasts */
+  --dur-3: 280ms; /* drawers, larger moves */
+  --dur-4: 600ms; /* chart reveals */
+  --focus-ring: 2px solid var(--gold);
+  /* control heights — src/ui text, select, date and number boxes (ui.css); mini selects and buttons */
+  --control-h: 34px;
+  --control-h-mini: 28px;
 }
 
 * {
@@ -43,10 +54,28 @@
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after {
+  *::after,
+  ::backdrop {
     transition: none !important;
     animation: none !important;
   }
+  /* The universal selector doesn't reach the view-transition tree. */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* One focus ring for everything interactive: 2px gold, offset from the edge.
+   Elements focused only programmatically (tabindex=-1: headings after a
+   navigation, dialog panels) don't show it. */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+[tabindex='-1']:focus {
+  outline: none;
 }
 
 html,
@@ -61,6 +90,24 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* No browser blue. Every anchor takes its text colour from where it sits, and
+   one with no class of its own (a bare router <Link>) gets the in-app link
+   look: a quiet underline that turns gold on hover — .ui-link (ui.css) is the
+   same thing as a class. Anything with a class (.btn, .skiplink, a tile)
+   styles itself; :where() keeps these at zero specificity so it always can. */
+:where(a) {
+  color: inherit;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+:where(a:not([class])) {
+  transition: color var(--dur-1) var(--ease-out), text-decoration-color var(--dur-1) var(--ease-out);
+}
+:where(a:not([class])):hover {
+  color: var(--gold);
+  text-decoration-color: currentColor;
 }
 
 .app {
@@ -114,13 +161,13 @@ body {
   border-radius: 8px;
   cursor: pointer;
   border-left: 2px solid transparent;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 .nav button:hover {
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink);
 }
 .nav button:focus-visible {
-  outline: 2px solid var(--gold);
   outline-offset: 1px;
 }
 .nav button.on {
@@ -128,6 +175,41 @@ body {
   color: var(--gold);
   border-left-color: var(--gold);
 }
+/* Once App has measured the nav, one indicator slides behind the items and
+   takes over the active item's wash and bar (without it, .on draws them). */
+.nav { position: relative; }
+.nav button { position: relative; } /* above the indicator */
+.nav-ind {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  border-radius: 8px;
+  background: var(--gold-dim);
+  border-left: 2px solid var(--gold);
+  pointer-events: none;
+}
+.nav-ind.ready { transition: transform var(--dur-3) var(--ease-out), height var(--dur-3) var(--ease-out); }
+.nav.has-ind button.on { background: none; border-left-color: transparent; }
+
+/* Keyboard users' first Tab: jump past the nav to the screen heading. */
+.skiplink {
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: #231a05;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.skiplink:focus { transform: none; }
+.skiplink:focus-visible { outline-color: var(--ink); }
 .side .foot {
   margin-top: auto;
   padding: 14px 8px 4px;
@@ -168,10 +250,17 @@ body {
   color: var(--ink-2);
   font-weight: 600;
 }
+/* The right-hand cluster starts at the ⌘K hint: then the session chip, then who's signed in. */
+.topbar .ui-cmdk-hint { margin-left: auto; }
+.topbar .ui-cmdk-hint ~ :is(.ui-sync, .who) { margin-left: 0; }
 
 .screens {
   padding: 22px;
   overflow-y: auto;
+  /* Screen changes crossfade as one unit (see "motion" at the end). */
+  view-transition-name: screen;
+  /* A modal locks this scroller (overflow: hidden); keep its gutter so the layout doesn't shift. */
+  scrollbar-gutter: stable;
 }
 .shead {
   display: flex;
@@ -189,6 +278,15 @@ body {
   font-size: 12.5px;
   color: var(--ink-3);
 }
+.shead .right {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+/* One slot per visited screen (HeaderSlot portals into it); only the showing screen's is laid out. */
+.shead-slot { display: contents; }
+.shead-slot[hidden] { display: none; }
 
 .card {
   background: var(--card);
@@ -267,6 +365,11 @@ body {
 .c8 { grid-column: span 8; }
 .c12 { grid-column: span 12; }
 
+/* A screen whose code is still loading (App's ScreenLoading) — shown only if the wait is long enough to notice. */
+.screen-loading { animation: screen-loading-in 400ms var(--ease-out) 250ms both; }
+.screen-loading .card { display: grid; gap: 12px; align-content: start; min-height: 170px; }
+@keyframes screen-loading-in { from { opacity: 0; } }
+
 .h4row {
   display: flex;
   align-items: center;
@@ -301,21 +404,31 @@ body {
   font: inherit;
   font-size: 12.5px;
   font-weight: 600;
+  line-height: 18px; /* 34px tall (--control-h), level with the inputs beside it; mini: 28px */
   padding: 7px 14px;
   border-radius: 8px;
   border: 1px solid var(--line-strong);
   background: var(--card-hi);
   color: var(--ink);
   cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
-.btn:hover { border-color: var(--gold); }
+.btn:hover:not(:disabled, [aria-disabled='true']) { border-color: var(--gold); background: #222a38; }
+.btn:active:not(:disabled, [aria-disabled='true']) { transform: translateY(1px); }
 .btn.gold { background: var(--gold); border-color: var(--gold); color: #231a05; }
-.btn.mini { padding: 4px 10px; font-size: 12px; }
+.btn.gold:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--gold) 84%, #fff);
+  border-color: color-mix(in srgb, var(--gold) 84%, #fff);
+}
+.btn.mini { padding: 4px 10px; font-size: 12px; min-height: var(--control-h-mini); }
 .btn.ghosty { background: none; }
 .btn.danger { border-color: rgba(229, 96, 92, 0.55); color: var(--down); }
-.btn.danger:hover { border-color: var(--down); }
+.btn.danger:hover:not(:disabled, [aria-disabled='true']) { border-color: var(--down); background: rgba(229, 96, 92, 0.1); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 .chipbtn {
   font: inherit;
@@ -326,13 +439,29 @@ body {
   background: var(--plane);
   color: var(--ink-2);
   cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
 }
+.chipbtn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.24); color: var(--ink); }
 .chipbtn.on { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
-.chipbtn:focus-visible { outline: 2px solid var(--gold); }
 
 .importbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .importmsg { margin-top: 10px; }
 .frontdoor { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+/* "Can't reach Scarab" (App boot): the front door's frame, with the reason set off below the explanation. */
+.card.bootfail { max-width: 480px; width: 100%; }
+.bootfail .logo { margin-bottom: 18px; }
+.bootfail p + .bootfail-why { margin-top: 12px; }
+.bootfail-why {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--plane);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  overflow-wrap: anywhere;
+}
 .recovery { border: 1px solid rgba(227, 178, 60, 0.45); background: var(--gold-dim); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
 .recoverycode {
   font-family: var(--mono);
@@ -366,9 +495,12 @@ input, select {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   padding: 6px 10px;
+  transition: border-color var(--dur-1) var(--ease-out);
 }
-input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
-select.mini { padding: 4px 8px; font-size: 12px; }
+input:hover:not(:disabled, :focus), select:hover:not(:disabled, :focus) { border-color: rgba(255, 255, 255, 0.22); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 1px; }
+input:disabled, select:disabled { opacity: 0.55; cursor: default; }
+select.mini { padding: 4px 8px; font-size: 12px; height: var(--control-h-mini); } /* level with .btn.mini; beats .ui-input's height */
 select.catsel.unset { color: var(--ink-3); border-style: dashed; }
 .budgetinput { width: 90px; text-align: right; font-family: var(--mono); font-size: 12.5px; padding: 3px 8px; }
 .search input { width: 220px; }
@@ -393,11 +525,14 @@ tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
 tbody tr:last-child td { border-bottom: 0; }
 
 /* charts */
-.chart { position: relative; }
+/* inline-size containment: the svg is drawn at the box's measured width, so it
+   must never be what holds a grid card open while the window narrows. */
+.chart { position: relative; contain: inline-size; }
 .chart svg { display: block; }
-.legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); align-items: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); align-items: center; }
 .legend .li { display: flex; align-items: center; gap: 6px; }
 .legend .sw { width: 9px; height: 9px; border-radius: 2.5px; }
+.legend .sw.ln { height: 3px; border-radius: 2px; width: 14px; }
 .tip {
   position: absolute;
   pointer-events: none;
@@ -416,13 +551,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .tip .r .nm { color: var(--ink-2); margin-right: auto; padding-right: 10px; }
 .tip .r .vl { font-family: var(--mono); font-size: 11.5px; }
 
+/* chart-specific rules (donut, legend toggles, tooltip fade) live in src/chart/chart.css */
+
 /* ---------- Phase II ---------- */
-.donutwrap { display: flex; align-items: center; }
-.donutlegend { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: grid; gap: 7px; font-size: 12px; }
-.donutlegend .r { display: flex; align-items: center; gap: 7px; cursor: default; }
-.donutlegend .sw { width: 9px; height: 9px; border-radius: 2.5px; }
-.donutlegend .nm { color: var(--ink-2); }
-.donutlegend .vl { margin-left: auto; padding-left: 12px; font-family: var(--mono); font-size: 11.5px; }
 .neg { color: var(--down); }
 .formrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .formrow input, .formrow select { font-size: 12.5px; padding: 5px 9px; }
@@ -442,3 +573,46 @@ tbody tr:last-child td { border-bottom: 0; }
 .pbar { height: 10px; border-radius: 999px; background: var(--card-hi); overflow: hidden; margin: 10px 0 12px; }
 .pbar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #8a6418, var(--gold)); }
 .selrow td { background: var(--gold-dim); }
+
+/* ---------- motion: screen changes & native dialogs ---------- */
+/* Screen changes run inside document.startViewTransition (src/ui/motion.ts
+   withViewTransition). Only the element named `screen` (.screens) animates:
+   the root snapshot swaps instantly, so the sidebar and topbar never blink. */
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(screen) { animation: vt-fade-out 120ms var(--ease-io) both; }
+::view-transition-new(screen) { animation: vt-rise-in 200ms var(--ease-out) both; }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-rise-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Every native <dialog> (src/ui/Dialog.tsx) fades and lifts in from
+   @starting-style, and fades out while display/overlay flip discretely —
+   Chromium keeps it in the top layer until the exit finishes; Safari cuts
+   the exit instantly, which is fine. Layout and skin live in src/ui/ui.css. */
+dialog {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out),
+    overlay var(--dur-2) allow-discrete,
+    display var(--dur-2) allow-discrete;
+}
+dialog:not([open]) { opacity: 0; transform: translateY(8px) scale(0.985); }
+@starting-style {
+  dialog[open] { opacity: 0; transform: translateY(8px) scale(0.985); }
+}
+dialog::backdrop {
+  background: rgba(4, 6, 9, 0.66);
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    overlay var(--dur-2) allow-discrete,
+    display var(--dur-2) allow-discrete;
+}
+dialog:not([open])::backdrop { background: rgba(4, 6, 9, 0); }
+@starting-style {
+  dialog[open]::backdrop { background: rgba(4, 6, 9, 0); }
+}
+/* While a modal is up the screen behind it holds still. */
+:root:has(dialog[open]:modal) .screens { overflow: hidden; }

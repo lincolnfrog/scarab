@@ -1,7 +1,10 @@
-import { parseQtyMicro } from '../shared/money'
+import { addMonthsIso, addMonthsToMonth, isRealIsoDay, monthsBetween, todayLocal } from '../shared/dates'
+import { OPENING_NOTE, RSU_VEST_NOTE, RSU_WITHHOLDING_NOTE } from '../shared/invest-api'
+import type { BudgetRow, CategorySpend, GoalDerived, MonthlyFlow, Tx, TxPage } from '../shared/types'
 import type { DbLike } from './db'
+import { ApiError, bad, isoMonth, notFound } from './errors'
+import { cashEffectCents, type CashTrade } from './holdings'
 import { categorize, extractMerchant, importStatement, type Rule } from './import'
-import { computePosition, positionValueCents, type TradeInput } from './lots'
 import { migrations } from './migrations'
 import { netWorthSeries } from './networth'
 
@@ -10,25 +13,19 @@ import { netWorthSeries } from './networth'
  * The server's Hono handlers and the browser's local dispatcher both call
  * these — one implementation, two runtimes, same rules as the rest of engine/:
  * isomorphic, synchronous, DbLike only.
+ *
+ * This module keeps accounts, cash, budget, property, goal and loans.
+ * Investments live in engine/invest.ts, prices in engine/prices.ts and the
+ * error vocabulary in engine/errors.ts; all three are re-exported here, so an
+ * importer of services sees one module.
  */
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message)
-  }
-}
-const bad = (msg: string): never => {
-  throw new ApiError(400, msg)
-}
-const notFound = (msg: string): never => {
-  throw new ApiError(404, msg)
-}
+export * from './errors'
+export * from './invest'
+export * from './prices'
 
-const isoDay = /^\d{4}-\d{2}-\d{2}$/
-const isoMonth = /^\d{4}-\d{2}$/
+/** Calendar-month arithmetic on ISO dates, clamping the day (shared/dates.ts); the name paychecks and tax import. */
+export const addMonths = addMonthsIso
 
 export const health = () => ({ ok: true, db: 'ready', schemaVersion: migrations.length })
 
@@ -106,43 +103,97 @@ export const listImports = (db: DbLike) =>
 
 /* ---------- transactions ---------- */
 
-export function listTransactions(
-  db: DbLike,
-  q: { q?: string; month?: string; categoryId?: string; accountId?: string; uncategorized?: boolean },
-) {
-  const where: string[] = []
+/** GET /api/transactions query, as both runtimes hand it over: strings from the URL (numbers are accepted too). */
+export type TxQuery = {
+  q?: string
+  month?: string
+  categoryId?: string | number
+  accountId?: string | number
+  uncategorized?: boolean
+  offset?: string | number
+  limit?: string | number
+}
+export const TX_PAGE_DEFAULT = 100
+export const TX_PAGE_MAX = 500
+
+/** An optional whole-number query value: absent → `dflt`; anything else must be an integer in [min, max]. */
+function intParam(v: string | number | undefined | null, name: string, dflt: number | undefined, min: number, max = Number.MAX_SAFE_INTEGER) {
+  if (v === undefined || v === null || v === '') return dflt
+  const n = typeof v === 'number' ? v : /^\d+$/.test(v) ? Number(v) : NaN
+  if (!Number.isSafeInteger(n) || n < min || n > max)
+    bad(max === Number.MAX_SAFE_INTEGER ? `${name} must be a whole number of at least ${min}` : `${name} must be a whole number from ${min} to ${max}`)
+  return n
+}
+
+/** A LIKE pattern that matches `s` literally anywhere (its own % and _ are not wildcards). Use with ESCAPE '\'. */
+const likeAnywhere = (s: string) => `%${s.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`
+
+/**
+ * One page of the ledger, newest first, with the counts the Cash screen's
+ * transaction list shows:
+ *   - `matching`: every row the filters select (the page is `limit` of them
+ *     from `offset`), so the header can read "N matching" and offer Load more;
+ *   - `uncategorized`: how many rows "Uncategorized" would select with the
+ *     other filters (search, month, account) as they are — the count beside
+ *     that option, whatever category is picked now;
+ *   - `total`: every transaction in the ledger.
+ * Order is (posted_on, id) descending, so pages never overlap or skip.
+ */
+export function listTransactions(db: DbLike, q: TxQuery): TxPage {
+  const offset = intParam(q.offset, 'offset', 0, 0)!
+  const limit = intParam(q.limit, 'limit', TX_PAGE_DEFAULT, 1, TX_PAGE_MAX)!
+  const categoryId = intParam(q.categoryId, 'category_id', undefined, 1)
+  const accountId = intParam(q.accountId, 'account_id', undefined, 1)
+  if (q.month !== undefined && q.month !== '' && !isoMonth.test(q.month)) bad('month must be YYYY-MM')
+  if (categoryId !== undefined && q.uncategorized) bad('category_id and uncategorized are exclusive')
+
+  // Every filter but the category one: the base the uncategorized count shares with the list.
+  const base: string[] = []
   const params: unknown[] = []
   const needle = q.q?.trim()
   if (needle) {
-    where.push('(t.description LIKE ? OR cat.name LIKE ?)')
-    params.push(`%${needle}%`, `%${needle}%`)
+    base.push("(t.description LIKE ? ESCAPE '\\' OR cat.name LIKE ? ESCAPE '\\')")
+    params.push(likeAnywhere(needle), likeAnywhere(needle))
   }
   if (q.month) {
-    where.push('t.posted_on LIKE ?')
-    params.push(`${q.month}%`)
+    base.push('t.posted_on LIKE ?')
+    params.push(`${q.month}-%`)
   }
-  if (q.categoryId) {
+  if (accountId !== undefined) {
+    base.push('t.account_id = ?')
+    params.push(accountId)
+  }
+  const where = [...base]
+  const whereParams = [...params]
+  if (categoryId !== undefined) {
     where.push('t.category_id = ?')
-    params.push(Number(q.categoryId))
-  }
-  if (q.accountId) {
-    where.push('t.account_id = ?')
-    params.push(Number(q.accountId))
+    whereParams.push(categoryId)
   }
   if (q.uncategorized) where.push('t.category_id IS NULL')
+
+  const from = `FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+       LEFT JOIN categories cat ON cat.id = t.category_id`
+  const clause = (w: string[]) => (w.length ? `WHERE ${w.join(' AND ')}` : '')
+  const count = (w: string[], p: unknown[]) => (db.prepare(`SELECT count(*) AS n ${from} ${clause(w)}`).get(...p) as { n: number }).n
+
   const rows = db
     .prepare(
       `SELECT t.id, t.account_id, a.name AS account_name, t.posted_on, t.amount_cents,
               t.description, t.category_id, cat.name AS category_name, t.categorized_by
-       FROM transactions t
-       JOIN accounts a ON a.id = t.account_id
-       LEFT JOIN categories cat ON cat.id = t.category_id
-       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-       ORDER BY t.posted_on DESC, t.id DESC LIMIT 300`,
+       ${from}
+       ${clause(where)}
+       ORDER BY t.posted_on DESC, t.id DESC LIMIT ? OFFSET ?`,
     )
-    .all(...params)
-  const total = (db.prepare('SELECT count(*) AS n FROM transactions').get() as { n: number }).n
-  return { rows, total }
+    .all(...whereParams, limit, offset) as Tx[]
+  return {
+    rows,
+    total: (db.prepare('SELECT count(*) AS n FROM transactions').get() as { n: number }).n,
+    matching: count(where, whereParams),
+    uncategorized: count([...base, 't.category_id IS NULL'], params),
+    offset,
+    limit,
+  }
 }
 
 export function patchTransaction(db: DbLike, id: number, body: { categoryId: number | null; rulePattern?: string }) {
@@ -194,349 +245,133 @@ export function patchTransaction(db: DbLike, id: number, body: { categoryId: num
 
 /* ---------- cash flow & budget ---------- */
 
-export const cashflowMonthly = (db: DbLike) =>
-  (
-    db
-      .prepare(
-        `SELECT substr(t.posted_on, 1, 7) AS month,
-                SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END) AS income_cents,
-                SUM(CASE WHEN t.amount_cents < 0 THEN -t.amount_cents ELSE 0 END) AS spend_cents
-         FROM transactions t
-         LEFT JOIN categories cat ON cat.id = t.category_id
-         WHERE cat.kind IS NULL OR cat.kind != 'transfer'
-         GROUP BY month ORDER BY month DESC LIMIT 12`,
-      )
-      .all() as { month: string }[]
-  ).reverse()
-
-export function cashflowCategories(db: DbLike, month?: string) {
-  if (!isoMonth.test(month ?? '')) bad('month=YYYY-MM required')
+/**
+ * The one definition of income and spending that every Cash number shares:
+ * the Income vs. spending bars, Spending by category, Plan vs. actual and the
+ * Savings card.
+ *   - Transfers between your own accounts are neither.
+ *   - A categorized row counts toward its category's net for the month, and a
+ *     category counts only in its own direction, never below zero. A refund
+ *     filed under Groceries lowers Groceries spending (to zero at most); it is
+ *     not income. A reversed paycheck lowers Salary income.
+ *   - Uncategorized money has no category to net against, so its inflows are
+ *     income and its outflows spending, as they come.
+ * One row per (month, category) with transactions; `kind` null = uncategorized.
+ */
+type CategoryFlow = {
+  month: string
+  category_id: number | null
+  name: string
+  kind: 'income' | 'expense' | null
+  net: number
+  inflow: number
+  outflow: number
+}
+function categoryFlows(db: DbLike, month?: string): CategoryFlow[] {
   return db
     .prepare(
-      `SELECT t.category_id, COALESCE(cat.name, 'Uncategorized') AS name,
-              SUM(-t.amount_cents) AS spend_cents
+      `SELECT substr(t.posted_on, 1, 7) AS month, cat.id AS category_id,
+              COALESCE(cat.name, 'Uncategorized') AS name, cat.kind AS kind,
+              SUM(t.amount_cents) AS net,
+              SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END) AS inflow,
+              SUM(CASE WHEN t.amount_cents < 0 THEN -t.amount_cents ELSE 0 END) AS outflow
        FROM transactions t
        LEFT JOIN categories cat ON cat.id = t.category_id
-       WHERE t.posted_on LIKE ? AND t.amount_cents < 0 AND (cat.kind IS NULL OR cat.kind = 'expense')
-       GROUP BY t.category_id ORDER BY spend_cents DESC`,
+       WHERE (cat.kind IS NULL OR cat.kind != 'transfer') ${month ? 'AND t.posted_on LIKE ?' : ''}
+       GROUP BY month, cat.id
+       ORDER BY month`,
     )
-    .all(`${month}%`)
+    .all(...(month ? [`${month}-%`] : [])) as CategoryFlow[]
+}
+const flowIncome = (f: CategoryFlow) => (f.kind === 'income' ? Math.max(0, f.net) : f.kind === null ? f.inflow : 0)
+const flowSpend = (f: CategoryFlow) => (f.kind === 'expense' ? Math.max(0, -f.net) : f.kind === null ? f.outflow : 0)
+
+/**
+ * Income and spending for every month that has a non-transfer transaction,
+ * oldest first (months with none are absent — cashflowMonthly fills them).
+ * Exported so other monthly cash-flow views can share the definition above.
+ */
+export function cashflowByMonth(db: DbLike): MonthlyFlow[] {
+  const out = new Map<string, MonthlyFlow>()
+  for (const f of categoryFlows(db)) {
+    const m = out.get(f.month) ?? { month: f.month, income_cents: 0, spend_cents: 0 }
+    m.income_cents += flowIncome(f)
+    m.spend_cents += flowSpend(f)
+    out.set(f.month, m)
+  }
+  return [...out.values()]
 }
 
-export function getBudget(db: DbLike, month?: string) {
+export const CASHFLOW_MONTHS_DEFAULT = 12
+export const CASHFLOW_MONTHS_MAX = 120
+
+/**
+ * GET /api/cashflow/monthly?months=N: contiguous months ending at the latest
+ * month with a transaction, at most N of them (default 12) and none before
+ * the first. A month without transactions is there, at zero, so the bars keep
+ * calendar spacing. An empty ledger is [].
+ */
+export function cashflowMonthly(db: DbLike, o: { months?: string | number | null } = {}): MonthlyFlow[] {
+  const n = intParam(o.months, 'months', CASHFLOW_MONTHS_DEFAULT, 1, CASHFLOW_MONTHS_MAX)!
+  const flows = cashflowByMonth(db)
+  const last = flows[flows.length - 1]?.month
+  if (!last) return []
+  const first = flows[0]!.month
+  const start = addMonthsToMonth(last, 1 - n)
+  const byMonth = new Map(flows.map((f) => [f.month, f]))
+  return monthsBetween(start > first ? start : first, last).map(
+    (month) => byMonth.get(month) ?? { month, income_cents: 0, spend_cents: 0 },
+  )
+}
+
+/** GET /api/cashflow/categories?month=: the month's spending per category (see the definition above), largest first; zero rows left out. */
+export function cashflowCategories(db: DbLike, month?: string): CategorySpend[] {
   if (!isoMonth.test(month ?? '')) bad('month=YYYY-MM required')
-  const rows = db
+  return categoryFlows(db, month)
+    .map((f) => ({ category_id: f.category_id, name: f.name, spend_cents: flowSpend(f) }))
+    .filter((r) => r.spend_cents > 0)
+    .sort((a, b) => b.spend_cents - a.spend_cents || a.name.localeCompare(b.name))
+}
+
+/**
+ * GET /api/budget?month=: every income and expense category with its monthly
+ * budget and the month's actual, by the definition above — an expense row's
+ * actual is exactly its Spending-by-category bar. Uncategorized money follows
+ * as up to two rows (inflows as income, outflows as spending), when there is any.
+ */
+export function getBudget(db: DbLike, month?: string): BudgetRow[] {
+  if (!isoMonth.test(month ?? '')) bad('month=YYYY-MM required')
+  const flows = categoryFlows(db, month)
+  const byCategory = new Map(flows.filter((f) => f.category_id !== null).map((f) => [f.category_id, f]))
+  const cats = db
     .prepare(
-      `SELECT cat.id AS category_id, cat.name, cat.kind,
-              COALESCE(b.monthly_cents, 0) AS monthly_cents,
-              COALESCE((SELECT SUM(CASE WHEN cat.kind = 'income' THEN t.amount_cents ELSE -t.amount_cents END)
-                        FROM transactions t
-                        WHERE t.category_id = cat.id AND t.posted_on LIKE ?), 0) AS actual_cents
+      `SELECT cat.id AS category_id, cat.name, cat.kind, COALESCE(b.monthly_cents, 0) AS monthly_cents
        FROM categories cat
        LEFT JOIN budgets b ON b.category_id = cat.id
        WHERE cat.kind IN ('income', 'expense')
        ORDER BY cat.sort, cat.name`,
     )
-    .all(`${month}%`) as object[]
-  const un = db
-    .prepare(
-      `SELECT SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END) AS inc,
-              SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END) AS spend
-       FROM transactions WHERE category_id IS NULL AND posted_on LIKE ?`,
-    )
-    .get(`${month}%`) as { inc: number | null; spend: number | null }
-  if (un.inc)
-    rows.push({ category_id: null, name: 'Uncategorized', kind: 'income', monthly_cents: 0, actual_cents: un.inc })
-  if (un.spend)
-    rows.push({ category_id: null, name: 'Uncategorized', kind: 'expense', monthly_cents: 0, actual_cents: un.spend })
+    .all() as Omit<BudgetRow, 'actual_cents'>[]
+  const rows: BudgetRow[] = cats.map((c) => {
+    const f = byCategory.get(c.category_id)
+    return { ...c, actual_cents: f ? (c.kind === 'income' ? flowIncome(f) : flowSpend(f)) : 0 }
+  })
+  const un = flows.find((f) => f.kind === null)
+  if (un?.inflow)
+    rows.push({ category_id: null, name: 'Uncategorized', kind: 'income', monthly_cents: 0, actual_cents: un.inflow })
+  if (un?.outflow)
+    rows.push({ category_id: null, name: 'Uncategorized', kind: 'expense', monthly_cents: 0, actual_cents: un.outflow })
   return rows
 }
 
 export function putBudget(db: DbLike, b: { categoryId?: number; monthlyCents?: number }) {
   if (!b.categoryId || !Number.isSafeInteger(b.monthlyCents)) bad('categoryId and integer monthlyCents required')
+  if ((b.monthlyCents as number) < 0) bad('monthlyCents must not be negative')
   db.prepare(
     `INSERT INTO budgets (category_id, monthly_cents) VALUES (?, ?)
      ON CONFLICT (category_id) DO UPDATE SET monthly_cents = excluded.monthly_cents`,
   ).run(b.categoryId, b.monthlyCents)
   return { ok: true as const }
-}
-
-/* ---------- investments ---------- */
-
-export function listInvestAccounts(db: DbLike) {
-  const rows = db
-    .prepare('SELECT id, name, kind, tracking, stock_plan FROM invest_accounts ORDER BY id')
-    .all() as { id: number }[]
-  const latest = db.prepare(
-    'SELECT balanced_on, balance_cents FROM balance_snapshots WHERE invest_account_id = ? ORDER BY balanced_on DESC LIMIT 1',
-  )
-  // Counts so a delete can say out loud what it is about to take with it.
-  const counts = db.prepare(
-    `SELECT (SELECT count(*) FROM trades WHERE invest_account_id = ?) AS trades,
-            (SELECT count(*) FROM balance_snapshots WHERE invest_account_id = ?) AS balances,
-            (SELECT count(*) FROM unvested_positions WHERE invest_account_id = ?) AS unvested,
-            (SELECT count(*) FROM pay_sources WHERE invest_account_id = ?) AS paychecks`,
-  )
-  return rows.map((r) => ({ ...r, latest_snapshot: latest.get(r.id) ?? null, counts: counts.get(r.id, r.id, r.id, r.id) }))
-}
-
-/** Unvested RSUs need somewhere to vest into: a lot-tracked account. */
-const stockPlanOk = (tracking: string | undefined, stockPlan: boolean) => {
-  if (stockPlan && tracking !== 'lots') bad('an employee stock plan has to track trades (vests land as buys)')
-}
-
-export function createInvestAccount(db: DbLike, b: { name?: string; kind?: string; tracking?: string; stockPlan?: boolean }) {
-  if (
-    !b.name?.trim() ||
-    !['brokerage', 'retirement', 'crypto'].includes(b.kind ?? '') ||
-    !['lots', 'balance'].includes(b.tracking ?? '')
-  )
-    bad('name, kind (brokerage|retirement|crypto), tracking (lots|balance) required')
-  const stockPlan = b.stockPlan === true
-  stockPlanOk(b.tracking, stockPlan)
-  const r = db
-    .prepare('INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES (?, ?, ?, ?)')
-    .run(b.name!.trim(), b.kind, b.tracking, stockPlan ? 1 : 0)
-  return { id: Number(r.lastInsertRowid), name: b.name!.trim(), kind: b.kind, tracking: b.tracking, stock_plan: stockPlan ? 1 : 0 }
-}
-
-/**
- * Rename an account or flip its employee-stock-plan flag. Kind and tracking
- * stay put — trades and balance snapshots are recorded against them.
- */
-export function updateInvestAccount(db: DbLike, id: number, b: { name?: string; stockPlan?: boolean }) {
-  const row = db.prepare('SELECT id, name, tracking, stock_plan FROM invest_accounts WHERE id = ?').get(id) as
-    | { id: number; name: string; tracking: string; stock_plan: number }
-    | undefined
-  if (!row) notFound('no such investment account')
-  const name = b.name === undefined ? row!.name : b.name.trim()
-  if (!name) bad('name required')
-  const stockPlan = b.stockPlan === undefined ? row!.stock_plan === 1 : b.stockPlan === true
-  stockPlanOk(row!.tracking, stockPlan)
-  if (!stockPlan && row!.stock_plan === 1) {
-    const held = (db.prepare('SELECT count(*) AS n FROM unvested_positions WHERE invest_account_id = ?').get(id) as { n: number }).n
-    if (held > 0) bad('clear the unvested shares on this account before turning off its stock plan')
-    const linked = (db.prepare('SELECT count(*) AS n FROM pay_sources WHERE invest_account_id = ?').get(id) as { n: number }).n
-    if (linked > 0) bad('a paycheck still vests stock comp into this account — unlink it on Taxes first')
-  }
-  db.prepare('UPDATE invest_accounts SET name = ?, stock_plan = ? WHERE id = ?').run(name, stockPlan ? 1 : 0, id)
-  return { ok: true as const, id, name, stock_plan: stockPlan ? 1 : 0 }
-}
-
-/**
- * Delete an account and every dated fact recorded against it — trades, balance
- * snapshots, unvested shares. Nothing is derived-and-stored, so holdings, net
- * worth and the tax picture simply recompute without it. Paychecks that named
- * it as their stock-comp destination lose only that link. Assets left with no
- * trades and no unvested shares go too, along with their price history.
- */
-export function deleteInvestAccount(db: DbLike, id: number) {
-  const row = db.prepare('SELECT id, name FROM invest_accounts WHERE id = ?').get(id) as
-    | { id: number; name: string }
-    | undefined
-  if (!row) notFound('no such investment account')
-  const n = (t: string) =>
-    (db.prepare(`SELECT count(*) AS n FROM ${t} WHERE invest_account_id = ?`).get(id) as { n: number }).n
-  const removed = { trades: n('trades'), balances: n('balance_snapshots'), unvested: n('unvested_positions') }
-  const unlinkedPaychecks = n('pay_sources')
-  db.transaction(() => {
-    // A sell in another account can point at a lot that lived here; it keeps
-    // its own acquisition date and basis, so drop the dangling pointer only.
-    db.prepare(
-      'UPDATE trades SET sold_lot_trade_id = NULL WHERE sold_lot_trade_id IN (SELECT id FROM trades WHERE invest_account_id = ?)',
-    ).run(id)
-    db.prepare('UPDATE pay_sources SET invest_account_id = NULL WHERE invest_account_id = ?').run(id)
-    for (const t of ['rsu_vests', 'unvested_positions', 'balance_snapshots', 'trades'])
-      db.prepare(`DELETE FROM ${t} WHERE invest_account_id = ?`).run(id)
-    db.prepare('DELETE FROM invest_accounts WHERE id = ?').run(id)
-
-    const orphanWhere = `id NOT IN (SELECT asset_id FROM trades)
-       AND id NOT IN (SELECT asset_id FROM unvested_positions)
-       AND id NOT IN (SELECT asset_id FROM rsu_vests)`
-    const orphans = db.prepare(`SELECT id, symbol FROM assets WHERE ${orphanWhere}`).all() as
-      { id: number; symbol: string }[]
-    for (const a of orphans) {
-      db.prepare('DELETE FROM prices WHERE asset_id = ?').run(a.id)
-      db.prepare('DELETE FROM prices_daily WHERE asset_id = ?').run(a.id)
-      // So a symbol added back later backfills its history again.
-      db.prepare('DELETE FROM app_meta WHERE key = ?').run(`backfilled:${a.symbol}`)
-      db.prepare('DELETE FROM assets WHERE id = ?').run(a.id)
-    }
-  })()
-  return { ok: true as const, name: row!.name, removed, unlinkedPaychecks }
-}
-
-export function putBalanceSnapshot(db: DbLike, b: { investAccountId?: number; balancedOn?: string; balanceCents?: number }) {
-  if (!b.investAccountId || !isoDay.test(b.balancedOn ?? '') || !Number.isSafeInteger(b.balanceCents))
-    bad('investAccountId, balancedOn (yyyy-mm-dd), integer balanceCents required')
-  db.prepare(
-    `INSERT INTO balance_snapshots (invest_account_id, balanced_on, balance_cents) VALUES (?, ?, ?)
-     ON CONFLICT (invest_account_id, balanced_on) DO UPDATE SET balance_cents = excluded.balance_cents`,
-  ).run(b.investAccountId, b.balancedOn, b.balanceCents)
-  return { ok: true as const }
-}
-
-export function createTrade(
-  db: DbLike,
-  b: {
-    investAccountId?: number
-    symbol?: string
-    assetKind?: string
-    side?: string
-    tradedOn?: string
-    qty?: string
-    totalCents?: number
-    soldLotTradeId?: number
-    acquiredOn?: string
-    basisCents?: number
-  },
-) {
-  if (
-    !b.investAccountId ||
-    !b.symbol?.trim() ||
-    !['stock', 'crypto'].includes(b.assetKind ?? '') ||
-    !['buy', 'sell'].includes(b.side ?? '') ||
-    !isoDay.test(b.tradedOn ?? '') ||
-    !b.qty ||
-    !Number.isSafeInteger(b.totalCents) ||
-    (b.totalCents as number) < 0
-  )
-    bad('investAccountId, symbol, assetKind, side, tradedOn, qty, totalCents required')
-  if (!db.prepare("SELECT id FROM invest_accounts WHERE id = ? AND tracking = 'lots'").get(b.investAccountId))
-    notFound('no such lots-tracked investment account')
-  let qtyMicro: number
-  try {
-    qtyMicro = parseQtyMicro(b.qty!)
-  } catch (e) {
-    throw new ApiError(400, e instanceof Error ? e.message : 'bad qty')
-  }
-  const isSell = b.side === 'sell'
-  const explicit = b.acquiredOn != null || b.basisCents != null
-  if (
-    explicit &&
-    (!isSell || !isoDay.test(b.acquiredOn ?? '') || !Number.isSafeInteger(b.basisCents) || (b.basisCents as number) < 0)
-  )
-    bad('explicit basis needs side=sell, acquiredOn (yyyy-mm-dd), integer basisCents')
-  if (b.soldLotTradeId != null && (!isSell || explicit)) bad('soldLotTradeId is for sells and excludes explicit basis')
-  if (b.soldLotTradeId != null && !db.prepare("SELECT id FROM trades WHERE id = ? AND side = 'buy'").get(b.soldLotTradeId))
-    bad('soldLotTradeId does not reference a buy')
-  const symbol = b.symbol!.trim().toUpperCase()
-  db.prepare('INSERT INTO assets (symbol, kind) VALUES (?, ?) ON CONFLICT (symbol) DO NOTHING').run(symbol, b.assetKind)
-  const asset = db.prepare('SELECT id FROM assets WHERE symbol = ?').get(symbol) as { id: number }
-  const r = db
-    .prepare(
-      `INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents,
-                           sold_lot_trade_id, acquired_on, basis_cents)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      b.investAccountId,
-      asset.id,
-      b.tradedOn,
-      b.side,
-      qtyMicro,
-      b.totalCents,
-      b.soldLotTradeId ?? null,
-      b.acquiredOn ?? null,
-      b.basisCents ?? null,
-    )
-  return { id: Number(r.lastInsertRowid) }
-}
-
-export const listTrades = (db: DbLike) =>
-  db
-    .prepare(
-      `SELECT t.id, t.traded_on, t.side, t.qty_micro, t.total_cents, a.symbol, ia.name AS account_name
-       FROM trades t JOIN assets a ON a.id = t.asset_id JOIN invest_accounts ia ON ia.id = t.invest_account_id
-       ORDER BY t.traded_on DESC, t.id DESC LIMIT 50`,
-    )
-    .all()
-
-export function getPortfolio(db: DbLike, today: string) {
-  const assets = db.prepare('SELECT id, symbol, name, kind FROM assets ORDER BY symbol').all() as {
-    id: number
-    symbol: string
-    name: string | null
-    kind: 'stock' | 'crypto'
-  }[]
-  const latestPrice = db.prepare(
-    'SELECT close_cents, priced_on FROM prices WHERE asset_id = ? ORDER BY priced_on DESC LIMIT 1',
-  )
-  const tradesFor = db.prepare(
-    'SELECT id, traded_on, side, qty_micro, total_cents, sold_lot_trade_id, acquired_on, basis_cents FROM trades WHERE asset_id = ? ORDER BY traded_on',
-  )
-  const out = []
-  const totals = { value: 0, cost: 0, unrealized: 0, ytd_st: 0, ytd_lt: 0 }
-  const warnings: string[] = []
-  for (const a of assets) {
-    const pos = computePosition(tradesFor.all(a.id) as TradeInput[], today)
-    warnings.push(...pos.warnings.map((w) => `${a.symbol}: ${w}`))
-    totals.ytd_st += pos.realized_ytd_st_cents
-    totals.ytd_lt += pos.realized_ytd_lt_cents
-    if (pos.qty_micro === 0) continue
-    const price = latestPrice.get(a.id) as { close_cents: number; priced_on: string } | undefined
-    const value = price ? positionValueCents(pos.qty_micro, price.close_cents) : pos.cost_cents
-    totals.value += value
-    totals.cost += pos.cost_cents
-    totals.unrealized += value - pos.cost_cents
-    out.push({
-      symbol: a.symbol,
-      kind: a.kind,
-      qty_micro: pos.qty_micro,
-      cost_cents: pos.cost_cents,
-      price_cents: price?.close_cents ?? null,
-      priced_on: price?.priced_on ?? null,
-      value_cents: value,
-      unrealized_cents: value - pos.cost_cents,
-      lots: pos.lots,
-    })
-  }
-  out.sort((a, b) => b.value_cents - a.value_cents)
-  return { positions: out, totals, warnings }
-}
-
-export function upsertPrices(db: DbLike, quotes: { symbol: string; cents: number; pricedOn: string }[]) {
-  const assets = db.prepare('SELECT id, symbol FROM assets').all() as { id: number; symbol: string }[]
-  const byId = new Map(assets.map((a) => [a.symbol, a.id]))
-  const upsert = db.prepare(
-    `INSERT INTO prices (asset_id, priced_on, close_cents) VALUES (?, ?, ?)
-     ON CONFLICT (asset_id, priced_on) DO UPDATE SET close_cents = excluded.close_cents`,
-  )
-  let updated = 0
-  for (const q of quotes) {
-    const id = byId.get(q.symbol)
-    if (!id) continue
-    upsert.run(id, q.pricedOn, q.cents)
-    updated++
-  }
-  return updated
-}
-
-/**
- * Price this household's assets from the shared daily basket (server/basket.ts).
- * The basket is the same list for everyone; the matching happens here, on the
- * engine's side of the seam, so in a zero-knowledge session the symbols never
- * leave the tab. Stocks match on Yahoo spelling (BRK.B → BRK-B), crypto on
- * the bare ticker.
- */
-export function applyBasket(
-  db: DbLike,
-  basket: { builtAt: string | null; quotes: { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string }[] },
-) {
-  const assets = db.prepare('SELECT symbol, kind FROM assets').all() as { symbol: string; kind: 'stock' | 'crypto' }[]
-  if (assets.length === 0) return { updated: 0, backfilled: 0, errors: ['no assets yet — record a trade first'], basketBuiltAt: basket.builtAt }
-  if (basket.quotes.length === 0)
-    return { updated: 0, backfilled: 0, errors: ['the price basket is empty — rebuild it from Data & Vault, or wait for today’s build'], basketBuiltAt: basket.builtAt }
-  const byKey = new Map(basket.quotes.map((q) => [`${q.kind}:${q.symbol}`, q]))
-  const quotes: { symbol: string; cents: number; pricedOn: string }[] = []
-  const errors: string[] = []
-  for (const a of assets) {
-    const key = `${a.kind}:${a.kind === 'stock' ? a.symbol.toUpperCase().replace(/\./g, '-') : a.symbol.toUpperCase()}`
-    const q = byKey.get(key)
-    if (q) quotes.push({ symbol: a.symbol, cents: q.cents, pricedOn: q.pricedOn })
-    else errors.push(`${a.symbol}: not in today’s basket`)
-  }
-  return { updated: upsertPrices(db, quotes), backfilled: 0, errors, basketBuiltAt: basket.builtAt }
 }
 
 /* ---------- properties & liabilities ---------- */
@@ -570,17 +405,24 @@ export function listProperties(db: DbLike) {
   }))
 }
 
-export function createProperty(db: DbLike, b: { name?: string; purchasedOn?: string; purchaseCents?: number }) {
+/** An optional field is absent when undefined, null or ''. */
+const absent = (v: unknown) => v === undefined || v === null || v === ''
+const isCents = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0
+const isMicroPct = (v: unknown): v is number => isCents(v) && (v as number) <= 1_000_000
+
+export function createProperty(db: DbLike, b: { name?: string; purchasedOn?: string | null; purchaseCents?: number | null }) {
   if (!b.name?.trim()) bad('name required')
+  if (!absent(b.purchasedOn) && !isRealIsoDay(b.purchasedOn)) bad('purchasedOn must be a real yyyy-mm-dd day')
+  if (!absent(b.purchaseCents) && !isCents(b.purchaseCents)) bad('purchaseCents must be a non-negative integer')
   const r = db
     .prepare('INSERT INTO properties (name, purchased_on, purchase_cents) VALUES (?, ?, ?)')
-    .run(b.name!.trim(), b.purchasedOn ?? null, b.purchaseCents ?? null)
+    .run(b.name!.trim(), absent(b.purchasedOn) ? null : b.purchasedOn, absent(b.purchaseCents) ? null : b.purchaseCents)
   return { id: Number(r.lastInsertRowid) }
 }
 
 export function putValuation(db: DbLike, id: number, b: { valuedOn?: string; valueCents?: number }) {
-  if (!isoDay.test(b.valuedOn ?? '') || !Number.isSafeInteger(b.valueCents))
-    bad('valuedOn (yyyy-mm-dd) and integer valueCents required')
+  if (!isRealIsoDay(b.valuedOn) || !Number.isSafeInteger(b.valueCents))
+    bad('valuedOn (a real yyyy-mm-dd day) and integer valueCents required')
   if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(id)) notFound('no such property')
   db.prepare(
     `INSERT INTO property_valuations (property_id, valued_on, value_cents) VALUES (?, ?, ?)
@@ -589,17 +431,43 @@ export function putValuation(db: DbLike, id: number, b: { valuedOn?: string; val
   return { ok: true as const }
 }
 
-export function createLiability(db: DbLike, b: { propertyId?: number; name?: string; rateMicro?: number }) {
+/**
+ * A loan against a property. With `balanceCents` (and its `balancedOn`) the
+ * first balance is recorded in the same transaction, so "Add mortgage" is one
+ * write that either lands whole or not at all.
+ */
+export function createLiability(
+  db: DbLike,
+  b: { propertyId?: number | null; name?: string; rateMicro?: number | null; balanceCents?: number | null; balancedOn?: string | null },
+) {
   if (!b.name?.trim()) bad('name required')
-  const r = db
-    .prepare('INSERT INTO liabilities (property_id, name, rate_micro) VALUES (?, ?, ?)')
-    .run(b.propertyId ?? null, b.name!.trim(), b.rateMicro ?? null)
-  return { id: Number(r.lastInsertRowid) }
+  if (!absent(b.rateMicro) && !isMicroPct(b.rateMicro)) bad('rateMicro must be an integer from 0 to 1000000 (100%)')
+  const withBalance = !absent(b.balanceCents)
+  if (withBalance && !isCents(b.balanceCents)) bad('balanceCents must be a non-negative integer')
+  if (withBalance && !isRealIsoDay(b.balancedOn)) bad('balancedOn (a real yyyy-mm-dd day) required with balanceCents')
+  if (!absent(b.propertyId)) {
+    if (!Number.isSafeInteger(b.propertyId)) bad('propertyId must be an integer')
+    if (!db.prepare('SELECT id FROM properties WHERE id = ?').get(b.propertyId)) notFound('no such property')
+  }
+  let id = 0
+  db.transaction(() => {
+    const r = db
+      .prepare('INSERT INTO liabilities (property_id, name, rate_micro) VALUES (?, ?, ?)')
+      .run(absent(b.propertyId) ? null : b.propertyId, b.name!.trim(), absent(b.rateMicro) ? null : b.rateMicro)
+    id = Number(r.lastInsertRowid)
+    if (withBalance)
+      db.prepare('INSERT INTO liability_balances (liability_id, balanced_on, balance_cents) VALUES (?, ?, ?)').run(
+        id,
+        b.balancedOn,
+        b.balanceCents,
+      )
+  })()
+  return { id }
 }
 
 export function putLiabilityBalance(db: DbLike, id: number, b: { balancedOn?: string; balanceCents?: number }) {
-  if (!isoDay.test(b.balancedOn ?? '') || !Number.isSafeInteger(b.balanceCents))
-    bad('balancedOn (yyyy-mm-dd) and integer balanceCents required')
+  if (!isRealIsoDay(b.balancedOn) || !Number.isSafeInteger(b.balanceCents))
+    bad('balancedOn (a real yyyy-mm-dd day) and integer balanceCents required')
   if (!db.prepare('SELECT id FROM liabilities WHERE id = ?').get(id)) notFound('no such liability')
   db.prepare(
     `INSERT INTO liability_balances (liability_id, balanced_on, balance_cents) VALUES (?, ?, ?)
@@ -615,190 +483,43 @@ export function getNetworth(db: DbLike, today: string) {
   return { series, current: series[series.length - 1] ?? null, prev: series[series.length - 2] ?? null }
 }
 
-export function getActivity(db: DbLike) {
+/** One row of GET /api/activity: a bank transaction (tag = its category, '—' when none) or a trade (tag = its account). */
+export type ActivityItem = { on_date: string; description: string; cents: number; tag: string; kind: 'tx' | 'trade' }
+
+/** A trade in the feed's words: bought or sold — or, when no cash changed hands, what it was instead (the Investments activity's tags). */
+function tradeLabel(t: CashTrade & { symbol: string }): string {
+  if (t.side === 'sell') return t.note === RSU_WITHHOLDING_NOTE ? `withheld for tax ${t.symbol}` : `sell ${t.symbol}`
+  if (t.note === OPENING_NOTE) return `starting position ${t.symbol}`
+  if (t.note === RSU_VEST_NOTE) return `vest ${t.symbol}`
+  return t.acquired_on != null && t.acquired_on < t.traded_on ? `transfer in ${t.symbol}` : `buy ${t.symbol}`
+}
+
+/**
+ * The eight most recent transactions and trades, newest first. `cents` is
+ * the cash that moved: a transaction's amount; a trade's effect on its
+ * account's cash (engine/holdings.ts cashEffectCents), so a starting
+ * position, a vest and the shares withheld at one read 0 — they were booked,
+ * paid in shares, or paid to the tax authorities, never bought or sold with
+ * cash — and say which they were.
+ */
+export function getActivity(db: DbLike): ActivityItem[] {
   const tx = db
     .prepare(
       `SELECT t.posted_on AS on_date, t.description, t.amount_cents AS cents, COALESCE(c.name,'—') AS tag, 'tx' AS kind
        FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
        ORDER BY t.posted_on DESC, t.id DESC LIMIT 8`,
     )
-    .all()
-  const trades = db
-    .prepare(
-      `SELECT tr.traded_on AS on_date, (tr.side || ' ' || a.symbol) AS description,
-              (CASE tr.side WHEN 'buy' THEN -tr.total_cents ELSE tr.total_cents END) AS cents,
-              ia.name AS tag, 'trade' AS kind
-       FROM trades tr JOIN assets a ON a.id = tr.asset_id JOIN invest_accounts ia ON ia.id = tr.invest_account_id
-       ORDER BY tr.traded_on DESC, tr.id DESC LIMIT 8`,
-    )
-    .all()
-  return [...(tx as { on_date: string }[]), ...(trades as { on_date: string }[])]
-    .sort((a, b) => b.on_date.localeCompare(a.on_date))
-    .slice(0, 8)
-}
-
-/* ---------- unvested RSUs ---------- */
-
-/** Calendar-month arithmetic on ISO dates; the day clamps to the target month's end (Jan 31 + 1 → Feb 28). */
-export function addMonths(iso: string, months: number): string {
-  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
-  const t = new Date(Date.UTC(y, m - 1 + months, 1))
-  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate()
-  t.setUTCDate(Math.min(d, last))
-  return t.toISOString().slice(0, 10)
-}
-
-export function getUnvested(db: DbLike) {
-  const rows = db
-    .prepare(
-      `SELECT u.invest_account_id, u.qty_micro, u.updated_on, u.next_vest_on, u.vest_every_months, u.vest_qty_micro,
-              a.symbol, a.id AS asset_id, ia.name AS account_name,
-              (SELECT close_cents FROM prices WHERE asset_id = a.id ORDER BY priced_on DESC LIMIT 1) AS price_cents
-       FROM unvested_positions u
-       JOIN assets a ON a.id = u.asset_id
-       JOIN invest_accounts ia ON ia.id = u.invest_account_id
-       ORDER BY a.symbol`,
-    )
-    .all() as { qty_micro: number; price_cents: number | null }[]
-  const est = (r: { qty_micro: number; price_cents: number | null }) =>
-    r.price_cents === null ? null : positionValueCents(r.qty_micro, r.price_cents)
-  return {
-    rows: rows.map((r) => ({ ...r, est_cents: est(r) })),
-    total_est_cents: rows.reduce((s, r) => s + (est(r) ?? 0), 0),
-  }
-}
-
-export type VestScheduleInput = { nextVestOn?: string; vestEveryMonths?: number | string; vestQty?: string }
-
-/** Validate an optional vest cadence. `nextVestOn` absent → leave the stored
- *  schedule alone; empty → clear it; otherwise all three fields are required. */
-function parseVestSchedule(b: VestScheduleInput) {
-  if (b.nextVestOn === undefined) return undefined
-  if (!b.nextVestOn) return null
-  if (!isoDay.test(b.nextVestOn)) bad('nextVestOn must be YYYY-MM-DD')
-  const every = Number(b.vestEveryMonths)
-  if (!Number.isInteger(every) || every < 1 || every > 24) bad('vestEveryMonths must be a whole number of months, 1–24')
-  let qtyMicro: number
-  try {
-    qtyMicro = parseQtyMicro(b.vestQty ?? '')
-  } catch (e) {
-    throw new ApiError(400, `vestQty: ${e instanceof Error ? e.message : 'bad qty'}`)
-  }
-  if (qtyMicro <= 0) bad('vestQty must be positive')
-  return { nextVestOn: b.nextVestOn, every, qtyMicro }
-}
-
-export function putUnvested(
-  db: DbLike,
-  b: { investAccountId?: number; symbol?: string; qty?: string } & VestScheduleInput,
-  today: string,
-) {
-  if (!b.investAccountId || !b.symbol?.trim() || b.qty == null) bad('investAccountId, symbol, qty required')
-  if (!db.prepare("SELECT id FROM invest_accounts WHERE id = ? AND tracking = 'lots' AND stock_plan = 1").get(b.investAccountId))
-    notFound('no such employee stock plan — mark the account as one on Investments')
-  const schedule = parseVestSchedule(b)
-  const symbol = b.symbol!.trim().toUpperCase()
-  db.prepare("INSERT INTO assets (symbol, kind) VALUES (?, 'stock') ON CONFLICT (symbol) DO NOTHING").run(symbol)
-  const asset = db.prepare('SELECT id FROM assets WHERE symbol = ?').get(symbol) as { id: number }
-  if (b.qty!.trim() === '0') {
-    db.prepare('DELETE FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?').run(
-      b.investAccountId,
-      asset.id,
-    )
-    return { ok: true as const, qtyMicro: 0 }
-  }
-  let qtyMicro: number
-  try {
-    qtyMicro = parseQtyMicro(b.qty!)
-  } catch (e) {
-    throw new ApiError(400, e instanceof Error ? e.message : 'bad qty')
-  }
-  db.prepare(
-    `INSERT INTO unvested_positions (invest_account_id, asset_id, qty_micro, updated_on)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (invest_account_id, asset_id)
-     DO UPDATE SET qty_micro = excluded.qty_micro, updated_on = excluded.updated_on`,
-  ).run(b.investAccountId, asset.id, qtyMicro, today)
-  if (schedule !== undefined)
-    db.prepare(
-      'UPDATE unvested_positions SET next_vest_on = ?, vest_every_months = ?, vest_qty_micro = ? WHERE invest_account_id = ? AND asset_id = ?',
-    ).run(schedule?.nextVestOn ?? null, schedule?.every ?? null, schedule?.qtyMicro ?? null, b.investAccountId, asset.id)
-  return { ok: true as const, qtyMicro }
-}
-
-export function vestUnvested(
-  db: DbLike,
-  b: { investAccountId?: number; symbol?: string; qty?: string; tradedOn?: string; totalCents?: number },
-  today: string,
-) {
-  if (
-    !b.investAccountId ||
-    !b.symbol?.trim() ||
-    !b.qty ||
-    !isoDay.test(b.tradedOn ?? '') ||
-    !Number.isSafeInteger(b.totalCents) ||
-    (b.totalCents as number) <= 0
-  )
-    bad('investAccountId, symbol, qty, tradedOn, totalCents required')
-  let qtyMicro: number
-  try {
-    qtyMicro = parseQtyMicro(b.qty!)
-  } catch (e) {
-    throw new ApiError(400, e instanceof Error ? e.message : 'bad qty')
-  }
-  const symbol = b.symbol!.trim().toUpperCase()
-  const asset = db.prepare('SELECT id FROM assets WHERE symbol = ?').get(symbol) as { id: number } | undefined
-  if (!asset) notFound('no such asset')
-  const trade = db
-    .prepare(
-      `INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents, note)
-       VALUES (?, ?, ?, 'buy', ?, ?, 'RSU vest')`,
-    )
-    .run(b.investAccountId, asset!.id, b.tradedOn, qtyMicro, b.totalCents)
-  const cur = db
-    .prepare(
-      'SELECT qty_micro, next_vest_on, vest_every_months FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?',
-    )
-    .get(b.investAccountId, asset!.id) as
-    | { qty_micro: number; next_vest_on: string | null; vest_every_months: number | null }
-    | undefined
-  let remaining = 0
-  if (cur) {
-    remaining = Math.max(0, cur.qty_micro - qtyMicro)
-    if (remaining === 0)
-      db.prepare('DELETE FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?').run(
-        b.investAccountId,
-        asset!.id,
+    .all() as ActivityItem[]
+  const trades = (
+    db
+      .prepare(
+        `SELECT tr.traded_on, tr.side, tr.total_cents, tr.acquired_on, tr.note, a.symbol, ia.name AS account
+         FROM trades tr JOIN assets a ON a.id = tr.asset_id JOIN invest_accounts ia ON ia.id = tr.invest_account_id
+         ORDER BY tr.traded_on DESC, tr.id DESC LIMIT 8`,
       )
-    else {
-      // A recorded vest consumes the scheduled event it corresponds to: roll
-      // the cadence forward past the vest date so the projection never counts
-      // the same tranche twice.
-      let next = cur.next_vest_on
-      if (next && cur.vest_every_months) {
-        let guard = 0
-        while (next <= b.tradedOn! && guard++ < 400) next = addMonths(next, cur.vest_every_months)
-      }
-      db.prepare(
-        'UPDATE unvested_positions SET qty_micro = ?, updated_on = ?, next_vest_on = ? WHERE invest_account_id = ? AND asset_id = ?',
-      ).run(remaining, today, next, b.investAccountId, asset!.id)
-    }
-  }
-  return { ok: true as const, tradeId: Number(trade.lastInsertRowid), remainingQtyMicro: remaining }
-}
-
-/* ---------- charts (reads only — fetching stays with the caller) ---------- */
-
-export function getChartData(db: DbLike, symbolRaw: string, errors: string[] = []) {
-  const symbol = symbolRaw.toUpperCase()
-  const asset = db.prepare('SELECT id, symbol, kind FROM assets WHERE symbol = ?').get(symbol) as
-    | { id: number; symbol: string; kind: 'stock' | 'crypto' }
-    | undefined
-  if (!asset) notFound('no such asset')
-  const closes = db
-    .prepare('SELECT priced_on AS d, close_cents AS c FROM prices_daily WHERE asset_id = ? ORDER BY priced_on')
-    .all(asset!.id)
-  return { symbol, kind: asset!.kind, closes, errors } as Record<string, unknown>
+      .all() as (CashTrade & { symbol: string; account: string })[]
+  ).map((t): ActivityItem => ({ on_date: t.traded_on, description: tradeLabel(t), cents: cashEffectCents(t), tag: t.account, kind: 'trade' }))
+  return [...tx, ...trades].sort((a, b) => b.on_date.localeCompare(a.on_date)).slice(0, 8)
 }
 
 /* ---------- goal & loans ---------- */
@@ -860,13 +581,52 @@ function readSetting<T>(db: DbLike, key: string, defaults: T): T {
     return defaults
   }
 }
-function writeSetting(db: DbLike, key: string, value: unknown) {
-  db.prepare(
-    'INSERT INTO goal_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
-  ).run(key, JSON.stringify(value))
+
+/** A stored integer, or the fallback when an old row holds something else (settings are merged JSON). */
+const intOr = (v: unknown, fallback: number) => (Number.isSafeInteger(v) ? (v as number) : fallback)
+
+/** a·b / d for non-negative integers, exact at any size (BigInt), rounded half up or floored. */
+function mulDiv(a: number, b: number, d: number, mode: 'round' | 'floor'): number {
+  const p = BigInt(a) * BigInt(b)
+  const D = BigInt(d)
+  const q = p / D
+  return Number(mode === 'round' && (p % D) * 2n >= D ? q + 1n : q)
 }
 
-export function getGoal(db: DbLike) {
+/** An ETA further out than this is no ETA: the plan doesn't close the gap in any horizon worth a month name. */
+const MAX_ETA_MONTHS = 1200
+
+/**
+ * The goal's headline numbers, from the stored settings and the fund's
+ * balance — integer cents and micro only. The target is the cash to close
+ * (down payment + closing costs). `etaMonth` counts whole months of the
+ * monthly plan from today's month with integer (year, month) arithmetic, so a
+ * 31st or an evening in a US time zone can't shift it.
+ */
+export function goalDerived(goal: GoalSettings, fundCents: number, today: string): GoalDerived {
+  const price = Math.max(0, intOr(goal.targetPriceCents, GOAL_DEFAULTS.targetPriceCents))
+  const downMicro = Math.min(1_000_000, Math.max(0, intOr(goal.downPctMicro, GOAL_DEFAULTS.downPctMicro)))
+  const closing = Math.max(0, intOr(goal.closingCents, GOAL_DEFAULTS.closingCents))
+  const plan = Math.max(0, intOr(goal.monthlyPlanCents, 0))
+  const targetCents = mulDiv(price, downMicro, 1_000_000, 'round') + closing
+  const remainingCents = Math.max(0, targetCents - fundCents)
+  const pctMicro =
+    remainingCents === 0 ? 1_000_000 : fundCents <= 0 ? 0 : mulDiv(fundCents, 1_000_000, targetCents, 'floor')
+  let etaMonth: string | null = null
+  if (remainingCents > 0 && plan > 0) {
+    const months = Math.floor(remainingCents / plan) + (remainingCents % plan === 0 ? 0 : 1)
+    if (months <= MAX_ETA_MONTHS) etaMonth = addMonthsToMonth(today.slice(0, 7), months)
+  }
+  return { targetCents, fundCents, remainingCents, monthlyPlanCents: plan, etaMonth, pctMicro }
+}
+
+/**
+ * Everything the Dream Home screen reads, plus `derived` (GoalDerived): the
+ * target, fund, gap, percent and ETA computed here rather than in each client.
+ * `today` (yyyy-mm-dd) anchors the ETA; the server passes its day, the tab
+ * its local day.
+ */
+export function getGoal(db: DbLike, today: string = todayLocal()) {
   const goal = readSetting(db, 'goal', GOAL_DEFAULTS)
   const rental = readSetting(db, 'rental', RENTAL_DEFAULTS)
   const accounts = db
@@ -899,18 +659,87 @@ export function getGoal(db: DbLike) {
     .prepare('SELECT id, name, rate_micro, term_months, points_micro, note FROM loan_options ORDER BY id')
     .all()
   const properties = db.prepare('SELECT id, name FROM properties ORDER BY id').all()
-  return { goal, rental, accounts, fundTotal, series, monthlySuggest, loans, properties }
+  const derived = goalDerived(goal, fundTotal, today)
+  return { goal, rental, accounts, fundTotal, series, monthlySuggest, loans, properties, derived }
+}
+
+/**
+ * What each stored setting may hold: whole cents ≥ 0, a rate in micro
+ * (0 … 1e6 = 100%), a row id or null, or a list of row ids. putGoal checks a
+ * patch against these before anything is written, so a bad value is a 400 —
+ * never a NaN or a string quietly stored and read back as a number.
+ */
+type SettingRule = 'cents' | 'micro' | 'idOrNull' | 'ids'
+const GOAL_RULES: Record<keyof GoalSettings, SettingRule> = {
+  targetPriceCents: 'cents',
+  downPctMicro: 'micro',
+  closingCents: 'cents',
+  fundAccountIds: 'ids',
+  fundExtraCents: 'cents',
+  monthlyPlanCents: 'cents',
+  selectedLoanId: 'idOrNull',
+  taxPctMicro: 'micro',
+  insMonthlyCents: 'cents',
+  capGainsRateMicro: 'micro',
+  lossCarryforwardCents: 'cents',
+  saleBasisPctMicro: 'micro',
+}
+const RENTAL_RULES: Record<keyof RentalSettings, SettingRule> = {
+  propertyId: 'idOrNull',
+  rentCents: 'cents',
+  piCents: 'cents',
+  taxCents: 'cents',
+  insCents: 'cents',
+  maintPctMicro: 'micro',
+  vacancyPctMicro: 'micro',
+}
+const isId = (v: unknown) => Number.isSafeInteger(v) && (v as number) > 0
+
+function checkSettings<T>(what: string, patch: unknown, rules: Record<string, SettingRule>): Partial<T> {
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) bad(`${what} must be an object`)
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+    const rule = Object.hasOwn(rules, k) ? rules[k] : undefined
+    if (!rule) bad(`unknown ${what} setting: ${k}`)
+    const ok =
+      rule === 'cents' ? isCents(v)
+      : rule === 'micro' ? isMicroPct(v)
+      : rule === 'idOrNull' ? v === null || isId(v)
+      : Array.isArray(v) && v.every(isId)
+    if (!ok)
+      bad(
+        rule === 'cents' ? `${k} must be a non-negative integer (cents)`
+        : rule === 'micro' ? `${k} must be an integer from 0 to 1000000 (100%)`
+        : rule === 'idOrNull' ? `${k} must be an id or null`
+        : `${k} must be a list of ids`,
+      )
+  }
+  return patch as Partial<T>
+}
+
+/** Store a setting only when it changes: a no-op save writes nothing, so it never dirties a vault session. */
+function writeSettingIfChanged(db: DbLike, key: string, value: unknown) {
+  const next = JSON.stringify(value)
+  const row = db.prepare('SELECT value FROM goal_settings WHERE key = ?').get(key) as { value: string } | undefined
+  if (row?.value === next) return
+  db.prepare(
+    'INSERT INTO goal_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
+  ).run(key, next)
 }
 
 export function putGoal(db: DbLike, b: { goal?: Partial<GoalSettings>; rental?: Partial<RentalSettings> }) {
-  if (b.goal) writeSetting(db, 'goal', { ...readSetting(db, 'goal', GOAL_DEFAULTS), ...b.goal })
-  if (b.rental) writeSetting(db, 'rental', { ...readSetting(db, 'rental', RENTAL_DEFAULTS), ...b.rental })
+  // Validate both halves before writing either.
+  const goal = b.goal === undefined ? null : checkSettings<GoalSettings>('goal', b.goal, GOAL_RULES)
+  const rental = b.rental === undefined ? null : checkSettings<RentalSettings>('rental', b.rental, RENTAL_RULES)
+  if (goal && Object.keys(goal).length > 0)
+    writeSettingIfChanged(db, 'goal', { ...readSetting(db, 'goal', GOAL_DEFAULTS), ...goal })
+  if (rental && Object.keys(rental).length > 0)
+    writeSettingIfChanged(db, 'rental', { ...readSetting(db, 'rental', RENTAL_DEFAULTS), ...rental })
   return { ok: true as const }
 }
 
 export function createLoan(
   db: DbLike,
-  b: { name?: string; rateMicro?: number; termMonths?: number; pointsMicro?: number; note?: string },
+  b: { name?: string; rateMicro?: number; termMonths?: number; pointsMicro?: number; note?: string | null },
 ) {
   if (
     !b.name?.trim() ||
@@ -920,9 +749,13 @@ export function createLoan(
     (b.termMonths as number) <= 0
   )
     bad('name, rateMicro, termMonths required')
+  if ((b.rateMicro as number) > 1_000_000) bad('rateMicro must be at most 1000000 (100%)')
+  if ((b.termMonths as number) > 600) bad('termMonths must be at most 600 (50 years)')
+  if (b.pointsMicro !== undefined && !isMicroPct(b.pointsMicro)) bad('pointsMicro must be an integer from 0 to 1000000')
+  if (!absent(b.note) && typeof b.note !== 'string') bad('note must be text')
   const r = db
     .prepare('INSERT INTO loan_options (name, rate_micro, term_months, points_micro, note) VALUES (?, ?, ?, ?, ?)')
-    .run(b.name!.trim(), b.rateMicro, b.termMonths, b.pointsMicro ?? 0, b.note ?? null)
+    .run(b.name!.trim(), b.rateMicro, b.termMonths, b.pointsMicro ?? 0, absent(b.note) ? null : b.note!.trim() || null)
   return { id: Number(r.lastInsertRowid) }
 }
 

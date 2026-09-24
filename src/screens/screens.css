@@ -1,0 +1,252 @@
+/* Stream U — layout for the Cash, Dream Home, Real estate, Taxes and Future
+   screens. Every class is .scr-*; the screens import this file themselves.
+   Tokens only (src/styles.css :root) — no new colours. The field chrome
+   itself (label, hint, error, affixed number box) is src/ui's .ui-field. */
+
+/* ---------- labelled field rows ---------- */
+
+/* Fields in a wrapping row, each at the width its wrapper asks for. */
+.scr-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; }
+.scr-f { width: 150px; min-width: 0; }
+.scr-f.xs { width: 96px; }
+.scr-f.sm { width: 124px; }
+.scr-f.rate { width: 104px; } /* a percent knob: six knobs fit one row of a c12 card at 1100px */
+.scr-f.lg { width: 200px; }
+.scr-f.grow { flex: 1 1 220px; width: auto; }
+.scr-f.fill { flex: 1 1 110px; width: auto; }
+
+/* One control height across text, select and number boxes, so a row of fields lines up. */
+:is(.scr-fields, .scr-group) :is(.ui-input, .ui-affix) { min-height: 34px; }
+
+/* A checkbox that sits in a field row, level with the inputs beside it. */
+.scr-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin-top: 22px; /* a Field label's height + gap */
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.scr-check input { accent-color: var(--gold); width: 14px; height: 14px; padding: 0; }
+
+/* A titled group of fields inside a card: "This paycheck", "Year to date". */
+.scr-group + .scr-group { margin-top: 16px; }
+.scr-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.scr-group-head .muted { font-weight: 400; }
+
+/* An inline editor inside a card (the paycheck editor): set off from the table above it. */
+.scr-editor {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--plane);
+}
+
+/* Actions under a form, with an optional status on the left. */
+.scr-formfoot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.scr-formfoot .scr-note { margin-right: auto; }
+
+/* ---------- save state ---------- */
+
+/* "Unsaved changes": the sync chip's hollow ring, in ink — not gold, not --down. */
+.scr-dirty { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.scr-dirty::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ink-2);
+}
+
+/* ---------- tables ---------- */
+
+/* A wide table scrolls inside its card instead of widening the screen. */
+.scr-tablewrap { overflow-x: auto; }
+.scr-tablewrap > table { min-width: 640px; }
+td .scr-cellsub { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
+td.scr-act { width: 1%; white-space: nowrap; text-align: right; padding-top: 3px; padding-bottom: 3px; }
+
+/* ---------- small pieces ---------- */
+
+/* The Cash import bar's inline "+ account" form. */
+.scr-addacct { display: inline-flex; gap: 6px; align-items: center; }
+.scr-addacct .ui-input { width: 210px; }
+.scr-addacct select.ui-input { width: auto; }
+
+/* The budget editor's number boxes: right-aligned with the amounts. */
+.scr-budget .ui-numwrap { justify-items: end; }
+
+/* The Taxes paychecks table: the earner cell carries cadence and stub date on a second line. */
+td.scr-who { min-width: 156px; }
+
+/* The Future "Crossing at __ % odds" box: two digits, in the rail beside the draw pills. */
+.scr-threshold.ui-input { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+/* The rail's right end — draw mode and threshold — wraps as one group, never splitting a label from its control. */
+.scr-railopts { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+
+/* ---------- links and hints ---------- */
+
+/* An in-app link (router <Link>) or a link-like button (an in-screen jump): ink with an underline, gold on hover. */
+.scr-link {
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  transition: color var(--dur-1) var(--ease-out), text-decoration-color var(--dur-1) var(--ease-out);
+}
+.scr-link:hover { color: var(--gold); text-decoration-color: currentColor; }
+.muted .scr-link, .sub2 .scr-link { color: inherit; }
+
+/* A table row's ●/○ choice as a real button (Dream Home loan options), so the keyboard can make it. */
+.scr-pick {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+/* Text with a Tooltip behind it: a dotted underline says there's more on hover or focus. */
+.scr-tipped { text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px; cursor: help; }
+.scr-warn { color: var(--ink-2); cursor: help; padding: 0 2px; }
+
+/* ---------- page header (HeaderSlot) ---------- */
+
+/* The mockup's assumption pills (Future: "Real return 5.0%", "σ 12%"): quiet, never gold. */
+.scr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--card-hi);
+  border: 1px solid var(--line);
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.scr-pill .sw { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+/* The header's pills take the squeeze and wrap; the button beside them never does (F29: '+ Scenario' broke onto two lines). */
+.scr-pills { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 0; flex: 0 1 auto; }
+.shead .right > .btn { white-space: nowrap; flex-shrink: 0; }
+
+/* ---------- Cash transactions ---------- */
+
+/* The list's filters wrap under the title on a narrow card instead of squeezing it. */
+.scr-txhead { flex-wrap: wrap; }
+.scr-txhead .right { flex-wrap: wrap; justify-content: flex-end; }
+td.scr-none { padding: 18px 10px; text-align: center; }
+.scr-more { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.scr-tipline { display: block; }
+
+/* ---------- ⌘K command palette (src/ui/CommandPalette.tsx) ---------- */
+
+/* It hangs from the upper part of the window instead of centring, so filtering shrinks it from the bottom and
+   the search field never moves under the typing. */
+.ui-dialog:has(.scr-cmdk) {
+  margin: min(12vh, 120px) auto auto;
+  max-height: calc(100dvh - min(12vh, 120px) - 24px);
+}
+.ui-dialog:has(.scr-cmdk) .ui-dialog-head { padding-bottom: 10px; }
+/* A subtle drop-in from just above (the default dialog lifts from below); reduced motion gets none. */
+.ui-dialog:not([open]):has(.scr-cmdk) { transform: translateY(-6px) scale(0.99); }
+@starting-style {
+  .ui-dialog[open]:has(.scr-cmdk) { opacity: 0; transform: translateY(-8px) scale(0.985); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-dialog:has(.scr-cmdk),
+  .ui-dialog:not([open]):has(.scr-cmdk) { transform: none; }
+}
+
+.scr-cmdk-input.ui-input { width: 100%; font-size: 15px; padding: 9px 12px; min-height: 40px; }
+.scr-cmdk-list {
+  margin: 10px -10px 0;
+  padding: 0 4px 2px;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding: 30px 0 4px; /* keep the active row clear of the sticky group heading */
+}
+.scr-cmdk-group + .scr-cmdk-group { margin-top: 6px; }
+.scr-cmdk-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.scr-cmdk-opt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+.scr-cmdk-opt[aria-selected='true'] { background: rgba(255, 255, 255, 0.06); }
+/* The nav's gold marker, on the row Enter opens. */
+.scr-cmdk-opt[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--gold);
+}
+.scr-cmdk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scr-cmdk-label mark {
+  background: none;
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: var(--ink-3);
+  text-underline-offset: 3px;
+}
+.scr-cmdk-hint { flex: none; font-size: 12px; color: var(--ink-3); }
+.scr-cmdk .ui-empty { padding: 24px 8px 12px; }
+.scr-cmdk-keys { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--ink-3); }
+.scr-cmdk-keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-right: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--card-hi);
+  color: var(--ink-2);
+  font: 11px var(--mono);
+}

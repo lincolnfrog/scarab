@@ -55,4 +55,16 @@ describe('snapshot boundaries', () => {
     expect(count(db, 'accounts')).toBe(1)
     expect(count(db, 'vault_blobs')).toBe(0)
   })
+
+  it('never carries courier, membership or basket tables', () => {
+    const excluded = ['vault_history', 'vault_invites', 'vault_blobs', 'household_members', 'basket_quotes']
+    // They all exist in the schema — the exclusion is a decision, not an absence.
+    const tables = (mem().prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(
+      (r) => r.name,
+    )
+    for (const t of excluded) {
+      expect(tables, t).toContain(t)
+      expect(TABLES, t).not.toContain(t)
+    }
+  })
 })

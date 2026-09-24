@@ -1,8 +1,8 @@
 # Scarab — project conventions
 
 Private 2-user household finance app. Cloud Run + IAP, SQLite +
-Litestream, React + TS + Vite client, Hono server. See README for architecture
-and roadmap phases.
+Litestream, React + TS + Vite client, Hono server. See DESIGN.md for the
+architecture map, data model and roadmap; PRIVACY.md for what the server sees.
 
 **Design spec**: the interactive mockup artifact —
 https://claude.ai/code/artifact/120f3c00-029a-4a63-bc14-139bbb6468ec
@@ -14,22 +14,44 @@ Match it when building screens (layout, copy tone, chart anatomy).
   no `node:*` imports, no `fetch` to CORS-blocked hosts, sync code only
   (WebCrypto's async digest is why `engine/hash.ts` exists). Database access
   goes through the `DbLike` seam (`engine/db.ts`); better-sqlite3 and sql.js
-  must stay interchangeable — `engine/parity.test.ts` enforces it.
+  must stay interchangeable — `engine/parity.test.ts` and the per-area
+  `parity-*.test.ts` suites (on `engine/test/parity.ts`) enforce it.
 
 - **Money is integer cents** (`shared/money.ts`). Floats never touch monetary
   values — not in the DB, the API, or app state.
 - **Migrations are append-only** — the `migrations` array in
   `engine/migrations.ts`. Never edit a shipped entry.
 - **Snapshots hold household data only.** `engine/snapshot.ts` TABLES excludes
-  `vault_blobs` (ciphertext) and the price basket (`basket_quotes`, `basket:*`
-  keys in app_meta). Don't add them back.
+  the courier's tables (`vault_blobs`, `vault_history`, `household_members`,
+  `vault_invites`) and the shared price data (`basket_quotes`, `basket:*` keys
+  in app_meta, which include the market history). Don't add them back.
 - **Single writer**: Cloud Run runs with `--max-instances 1` (SQLite). Don't
   "fix" that flag.
 - **No auth code in the app.** Identity is IAP's header
   (`x-goog-authenticated-user-email`); dev fallback is `dev@localhost`.
-- **`SCARAB_ZK_ONLY=1` is the vault-only server.** `server/app.ts` ZK_ROUTES is
-  the complete list of what it answers; every new route is plaintext-only
-  unless it is deliberately added there.
+- **`SCARAB_ZK_ONLY=1` is the vault-only server.** `server/zk-routes.ts`
+  (re-exported by `server/app.ts`) is the complete list of what it answers;
+  every new route is plaintext-only unless it is deliberately added there, and
+  adding one means saying in PRIVACY.md what the server then sees.
+- **The tab answers the same API.** Local mode serves every `/api` route but
+  the network-only `/vault`, `/basket` and `/mode` from
+  `src/local/routes-{core,invest,analytics}.ts`, each calling the
+  same engine function as its server route; `src/local/drift.test.ts` fails
+  when the two tables disagree. A tab write is `'auto'` (dirty only if the DB
+  changed) unless it is read-like or public quotes (`'never'`): browsing must
+  never create a vault version.
+- **URL fragments carry only screen ids, numeric ids, enums and YYYY-MM
+  months** — never tickers, search text or amounts (browsers sync fragments to
+  account history). Those go in route state (`useRouteState`). `formatRoute`
+  throws in dev on anything but 1–24 letters, digits and dashes, or on a
+  non-integer number; it can't tell a ticker from an enum, so that part is on
+  you.
+- **UI goes through the `src/ui` primitives** — Dialog/Drawer, `confirm()` /
+  `prompt()`, Field + Money/Percent/Qty/DateInput, Toast, `useAction`,
+  Tooltip, Popover, Menu, Segmented, Skeleton, EmptyState, HeaderSlot. No
+  native `confirm`/`prompt`/`alert`, explanations in Tooltip rather than
+  `title=`, and no mutation without `useAction` (busy state + toast). Motion
+  uses the `--dur-*`/`--ease-*` tokens and honours reduced motion.
 - **Derived numbers come from the ledger.** Store facts (transactions, lots,
   valuations); compute charts/balances from them, never store both.
 

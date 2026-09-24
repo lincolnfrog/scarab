@@ -11,10 +11,49 @@ import { b64decode, b64urlDecode, b64urlEncode } from '../shared/vault'
  * Browser-only. The pure crypto it feeds is in shared/vault.ts.
  */
 
-export type PasskeyResult = { credentialId: string; prfOutput: Uint8Array }
+/**
+ * `attachment`: where the authenticator that answered lives, as the browser
+ * reports it — 'platform' is this device (its own passkey store, Touch ID,
+ * Windows Hello, a synced keychain present here); 'cross-platform' is a
+ * security key or a phone over the QR prompt. Null when the browser doesn't
+ * say. Only a 'platform' answer earns a passkey the "this device" badge.
+ */
+export type PasskeyResult = { credentialId: string; prfOutput: Uint8Array; attachment: 'platform' | 'cross-platform' | null }
+
+const attachmentOf = (cred: PublicKeyCredential): PasskeyResult['attachment'] => {
+  const a = (cred as { authenticatorAttachment?: string | null }).authenticatorAttachment
+  return a === 'platform' || a === 'cross-platform' ? a : null
+}
 
 const RP_NAME = 'Scarab'
-const rpId = () => window.location.hostname
+
+/**
+ * The production domain. Passkeys are bound to an RP ID for life, so every
+ * page under it — scarab.one itself or any subdomain (www., a staging
+ * host) — registers and asserts against the one registrable domain, and a
+ * passkey made on one of them works on all of them.
+ */
+export const PRODUCTION_RP_ID = 'scarab.one'
+
+/**
+ * The WebAuthn RP ID to use on `hostname`: scarab.one for scarab.one and its
+ * subdomains; anything else (localhost, a run.app host, a self-hosted
+ * domain) uses its own hostname, as before. Pure, for the table test.
+ */
+export function rpIdFor(hostname: string): string {
+  const h = hostname.toLowerCase().replace(/\.$/, '')
+  return h === PRODUCTION_RP_ID || h.endsWith(`.${PRODUCTION_RP_ID}`) ? PRODUCTION_RP_ID : hostname
+}
+
+/** This page's RP ID. A vault's header records the one its passkeys belong to. */
+export const rpId = (): string => rpIdFor(window.location.hostname)
+
+/** Passkeys registered under `vaultRpId` can be used on this page. */
+export const passkeysWorkHere = (vaultRpId: string): boolean => vaultRpId === rpId()
+
+/** What to tell someone whose vault's passkeys belong to another domain than this page. */
+export const wrongOriginMessage = (vaultRpId: string): string =>
+  `This vault’s passkeys belong to ${vaultRpId} — open it there, or use the recovery code.`
 
 /** Can this browser do passkeys with PRF at all? Null means "unknown until we try". */
 export async function passkeySupport(): Promise<boolean | null> {
@@ -92,8 +131,10 @@ export async function registerPasskey(opts: {
     throw new Error('this passkey provider does not support the PRF extension — Scarab needs it to derive the vault key')
   const credentialId = b64urlEncode(new Uint8Array(cred.rawId))
   const atCreate = prfFrom(cred)
-  if (atCreate) return { credentialId, prfOutput: atCreate }
-  return assertPasskey({ prfSaltB64: opts.prfSaltB64, credentialIds: [credentialId] })
+  // Where it was made is what the creation reported — the follow-up assertion runs wherever the new credential lives.
+  if (atCreate) return { credentialId, prfOutput: atCreate, attachment: attachmentOf(cred) }
+  const asserted = await assertPasskey({ prfSaltB64: opts.prfSaltB64, credentialIds: [credentialId] })
+  return { ...asserted, attachment: attachmentOf(cred) ?? asserted.attachment }
 }
 
 /** Ask the authenticator for the PRF secret of one of the vault's passkeys. The browser picks the prompt. */
@@ -118,5 +159,5 @@ export async function assertPasskey(opts: { prfSaltB64: string; credentialIds: s
   const prfOutput = prfFrom(cred)
   if (!prfOutput)
     throw new Error('the passkey answered without a PRF secret — this browser or provider cannot unlock the vault')
-  return { credentialId: b64urlEncode(new Uint8Array(cred.rawId)), prfOutput }
+  return { credentialId: b64urlEncode(new Uint8Array(cred.rawId)), prfOutput, attachment: attachmentOf(cred) }
 }

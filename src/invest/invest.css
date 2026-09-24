@@ -1,0 +1,523 @@
+/* Investments (stream B). Every class is .inv-*; tokens come from src/styles.css. */
+
+/* ---------- holdings: symbol → account → lot ---------- */
+.inv-holdings td { vertical-align: middle; }
+.inv-toggle {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.inv-toggle:hover { background: var(--card-hi); color: var(--ink); }
+.inv-acctrow td { background: rgba(255, 255, 255, 0.025); font-size: 12px; }
+/* Name and tag wrap (the tag under the name) before the Asset column widens the table past a two-thirds card. */
+/* An account starts under its symbol's badge (toggle 22 + gap 7), a lot one step further in. */
+.inv-acctrow .inv-acct { padding-left: 29px; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; color: var(--ink); }
+.inv-lotrow td { background: rgba(255, 255, 255, 0.012); font-size: 12px; }
+.inv-lotrow .inv-lot { padding-left: 44px; display: inline-flex; align-items: center; gap: 4px 8px; color: var(--ink-3); flex-wrap: wrap; }
+/* A lot's holding-term tag may break onto two lines ("short-term · / long-term in 235d") rather than widen the column. */
+.inv-lot .inv-tag { display: inline-block; height: auto; min-height: 18px; padding: 1px 5px; font-size: 10px; line-height: 1.3; white-space: normal; }
+/* "/sh" after a lot's cost per share: small, so the Price column stays narrow. */
+.inv-persh { font-family: var(--sans); font-size: 10px; margin-left: 1px; }
+/* Two-line columns: the header's second line names the figure under each cell's first (Value / cost basis, Unrealized / %). */
+.inv-thsub { display: block; margin-top: 2px; font-size: 10px; font-weight: 500; letter-spacing: 0.02em; text-transform: none; color: var(--ink-3); }
+.inv-holdings .inv-subline { font-weight: 400; }
+/* The percent under a gain or loss takes its row's up/down colour. */
+.inv-holdings .inv-subtone { color: inherit; }
+
+/* A small neutral tag: holding term, account type, "tax-deferred". Never gold, never up/down. */
+.inv-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--card-hi);
+  color: var(--ink-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.inv-tag.inv-quiet { background: transparent; color: var(--ink-3); }
+
+/* ---------- tax picture ---------- */
+.inv-taxpic { display: grid; gap: 12px; }
+.inv-taxpic .inv-big { font-size: 20px; font-weight: 650; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.inv-taxpic .inv-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--ink-2); }
+.inv-taxpic .inv-row b { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+
+/* ---------- forms ---------- */
+.inv-form { display: grid; gap: 12px; }
+.inv-form .inv-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inv-sym { text-transform: uppercase; }
+.inv-sym::placeholder { text-transform: none; }
+.inv-note { color: var(--ink-3); font-size: 12px; }
+
+/* ---------- prices: hand-set, manual and stale ---------- */
+/* Tag beside the price when there's room; below it (wrap-reverse) when the table is tight. */
+.inv-price { display: inline-flex; flex-wrap: wrap-reverse; align-items: center; justify-content: flex-end; gap: 3px 6px; }
+.inv-price .btn { font-family: var(--sans); }
+.inv-tagbtn {
+  font: inherit;
+  font-family: var(--sans); /* price cells are monospace; tags and buttons in them aren't */
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.inv-tagbtn:hover { color: var(--ink); border-color: var(--line-strong); }
+/* Old data, not an error: dashed and neutral — never --down. */
+.inv-stale { border-style: dashed; background: transparent; color: var(--ink-2); }
+
+/* ---------- small forms in a popover ---------- */
+.inv-pop { display: grid; gap: 12px; padding: 8px 8px 6px; width: 264px; max-width: 100%; }
+.inv-pop-title { font-size: 13px; font-weight: 650; color: var(--ink); }
+.inv-pop-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.inv-pop .inv-note { margin: 0; }
+
+/* ---------- balance accounts ---------- */
+.inv-balances td { vertical-align: middle; }
+.inv-acctname,
+.inv-asof { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inv-rowactions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.inv-histrow td { background: rgba(255, 255, 255, 0.02); font-size: 12px; padding-top: 4px; padding-bottom: 4px; }
+.inv-histdate { padding-left: 20px; font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.inv-backfill { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+@media (max-width: 520px) { .inv-backfill { grid-template-columns: 1fr; } }
+
+/* ---------- starting positions ---------- */
+.inv-paste {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  tab-size: 12;
+  color: var(--ink);
+  background: var(--plane);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: border-color var(--dur-1) var(--ease-out);
+}
+.inv-paste:hover:not(:focus) { border-color: rgba(255, 255, 255, 0.22); }
+.inv-paste::placeholder { color: var(--ink-3); }
+.inv-preview { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.inv-preview .inv-note { padding: 8px 10px; }
+.inv-notes { display: grid; gap: 2px; font-size: 11.5px; line-height: 1.35; min-width: 160px; }
+.inv-err { color: var(--down); }
+.inv-warn { color: var(--ink-3); }
+.inv-rowerr td { background: rgba(229, 96, 92, 0.06); }
+.inv-errlist { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 2px; }
+.inv-linkbtn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  text-align: start; /* wrapped onto two lines (a sheet's footer), it reads left-aligned, not centred */
+  cursor: pointer;
+}
+.inv-linkbtn:hover { color: var(--ink); text-decoration-color: currentColor; }
+.inv-preview td.num, .inv-preview th { white-space: nowrap; }
+/* A button or tag inside an account chip. */
+.inv-inchip { margin-left: 6px; }
+/* In a tight table the price tag may break onto two lines rather than widen the column. */
+.inv-price .inv-tagbtn { display: inline-block; white-space: normal; height: auto; min-height: 18px; line-height: 1.25; padding: 1px 6px; text-align: center; }
+.inv-nw { white-space: nowrap; }
+
+/* ---------- record-trade sheet ---------- */
+.inv-trade { gap: 16px; }
+.inv-amounts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 14px;
+  align-items: start;
+}
+.inv-amounts .inv-derived { grid-column: 1 / -1; margin: -4px 0 0; font-size: 12.5px; color: var(--ink-2); min-height: 1.3em; }
+.inv-amounts .inv-derived b { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+@media (max-width: 560px) {
+  .inv-amounts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .inv-amounts > :first-child { grid-column: 1 / -1; }
+}
+.inv-moneybox, .inv-qtybox { display: block; }
+
+/* The lot picker: FIFO, each open lot of this account, or an entered basis. */
+.inv-lotpick { border: 0; margin: 0; padding: 0; min-width: 0; }
+.inv-lotpick legend { padding: 0; margin-bottom: 6px; }
+.inv-lotpick table { width: 100%; border: 1px solid var(--line); border-radius: 10px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+.inv-lotpick td { font-size: 12.5px; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.inv-lotpick tr:last-child td { border-bottom: 0; }
+.inv-lotpick label { cursor: pointer; color: var(--ink); }
+.inv-lotpick .inv-radio { width: 28px; padding-right: 0; }
+.inv-lotpick input[type='radio'] { accent-color: var(--gold); margin: 0; cursor: pointer; }
+.inv-lotpick tr.inv-picked td { background: var(--card-hi); }
+/* Date, term tag and any note; the tag drops under the date (aligned with it) when the row is tight. */
+.inv-lotcell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
+/* Numbers never break ("1 / sh"); the lot's tag drops under its date instead. */
+.inv-lotpick td.num { white-space: nowrap; }
+
+/* The live preview under the form. */
+.inv-preview-pane {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--plane);
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.inv-preview-pane p { margin: 0; }
+.inv-quietpane { border-style: dashed; background: transparent; }
+.inv-pane-bare { padding: 0; border: 0; background: none; }
+.inv-stale-pane { opacity: 0.6; }
+.inv-pv-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--ink-2); }
+.inv-pv-row b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 650; color: var(--ink); }
+.inv-pv-row b.pos { color: var(--up); }
+.inv-pv-row b.neg { color: var(--down); }
+.inv-pv-sub { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-3); margin-top: -4px; }
+.inv-pv-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; color: var(--ink-3); }
+.inv-pv-parts li { display: flex; justify-content: space-between; gap: 12px; }
+.inv-pv-parts li > :last-child { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.inv-pv-warn { font-size: 12.5px; color: var(--ink-2); padding-left: 18px; position: relative; }
+.inv-pv-warn::before { content: '⚠'; position: absolute; left: 0; color: var(--ink-3); }
+/* A trap worth reading before recording: neutral, set apart — not an error. */
+.inv-callout {
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--card-hi);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.inv-callout b { color: var(--ink); font-size: 12.5px; }
+
+/* ---------- the activity ledger ---------- */
+.inv-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.inv-filters .ui-input { height: 28px; padding-top: 0; padding-bottom: 0; font-size: 12px; }
+/* position: a visually-hidden header label (absolute) stays inside the scroller instead of widening the drawer. */
+.inv-tablewrap { overflow-x: auto; position: relative; }
+.inv-activity td { vertical-align: middle; }
+.inv-activity .inv-actcol { width: 44px; }
+.inv-subline { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.35; margin-top: 1px; white-space: nowrap; }
+.inv-subline .inv-tag { margin-left: 6px; height: 16px; font-size: 10px; }
+.inv-subline.inv-subwrap { white-space: normal; }
+/* Side, symbol and note tag; in a tight table the tag drops under the symbol rather than widen the Trade column. */
+.inv-tradecell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.inv-side { font-size: 11px; font-weight: 650; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink-3); min-width: 30px; }
+.inv-side-sell { color: var(--ink-2); }
+.inv-editrow td { background: rgba(255, 255, 255, 0.03); }
+.inv-editrow2 td { padding-top: 0; }
+.inv-editextra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.inv-editextra .inv-keys { margin-left: auto; }
+.inv-more { display: flex; justify-content: center; padding-top: 10px; }
+.inv-pad { padding: 10px 0 0; }
+.inv-skel { display: grid; gap: 10px; padding: 6px 0; }
+.inv-loaderr { display: flex; gap: 10px; align-items: center; font-size: 12.5px; color: var(--ink-2); }
+
+/* ---------- the account strip (B8) ---------- */
+/* What a tab's monthly-history import couldn't cover, beside Refresh prices: one quiet line, the full list on hover. */
+.inv-hist-errs { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(208px, 1fr));
+  gap: 10px;
+}
+.inv-strip > li { display: flex; min-width: 0; }
+.inv-tile {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
+  gap: 4px;
+  padding: 11px 13px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--plane);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.inv-tile:hover { border-color: var(--line-strong); background: var(--card-hi); }
+.inv-tile:active { transform: translateY(1px); }
+.inv-tile-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.inv-tile-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-tile-v { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.inv-tile-v-none { color: var(--ink-3); }
+.inv-tile-sub { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.inv-tile-where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.inv-tile-foot { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11.5px; color: var(--ink-3); }
+.inv-tile-stale { color: var(--ink-2); }
+/* The mockup's dashed add-card, tile-sized. */
+.inv-tile-add {
+  place-content: center;
+  justify-items: center;
+  min-height: 96px;
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: none;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.inv-tile-add:hover { color: var(--gold); border-color: var(--gold); background: none; }
+.inv-tile-plus { font-size: 18px; line-height: 1; }
+.inv-tile-skel { cursor: default; gap: 9px; min-height: 96px; }
+.inv-tile-skel:hover { background: var(--plane); border-color: var(--line); }
+/* Old number, not an error: a hollow neutral ring — never --down. */
+.inv-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-2); }
+
+/* Owner avatars (the mockup's .av pair). */
+.inv-avs { display: inline-flex; flex: none; }
+.inv-av {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1.5px solid var(--plane);
+}
+.inv-av + .inv-av { margin-left: -7px; }
+.inv-av-1 { background: #3b4a75; color: #cdd9ff; }
+.inv-av-2 { background: #6d5330; color: #ffe9bd; }
+.inv-av-0 { background: var(--card-hi); color: var(--ink-2); border-color: var(--line-strong); }
+.inv-tile:hover .inv-av { border-color: var(--card-hi); }
+
+/* ---------- the account drawer ---------- */
+.inv-dsum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 28px;
+  padding: 2px 0 16px;
+}
+.inv-dsum-main { display: grid; gap: 2px; min-width: 0; }
+.inv-dsum-label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.inv-dsum-v { font-size: 26px; font-weight: 650; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.inv-dsum-sub { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12px; color: var(--ink-3); }
+.inv-dsum-side { display: grid; justify-items: end; gap: 8px; text-align: right; }
+.inv-dsum-stats { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; }
+.inv-dsum-stats > div { display: grid; gap: 2px; }
+.inv-dsum-stats dt { font-size: 11.5px; color: var(--ink-3); }
+.inv-dsum-stats dd { margin: 0; font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.inv-dsum-stats dd.pos { color: var(--up); }
+.inv-dsum-stats dd.neg { color: var(--down); }
+.inv-dsum-stats .inv-subline { font-family: var(--sans); font-weight: 400; }
+.inv-tabpanel { padding-top: 14px; }
+.inv-tabpanel:focus { outline: none; }
+.inv-panel { display: grid; gap: 12px; }
+.inv-paneltools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.inv-paneltools .inv-note { flex: 1; min-width: 200px; }
+.inv-drawerwarn span { font-size: 12px; }
+.inv-baltable td { vertical-align: middle; }
+.inv-baltable .inv-histrow td { background: none; font-size: 13px; }
+.inv-baltable .inv-histdate { padding-left: 0; }
+.inv-grants td { vertical-align: middle; }
+.inv-grantform { padding-top: 12px; border-top: 1px solid var(--line); }
+.inv-panel > .inv-grantform:first-child { padding-top: 0; border-top: 0; }
+.inv-formtitle { font-size: 13px; font-weight: 650; color: var(--ink); }
+.inv-owner { display: grid; gap: 8px; justify-items: start; }
+.inv-owner .ui-input { width: min(260px, 100%); }
+.inv-mask { font-family: var(--mono); letter-spacing: 0.08em; }
+.inv-check { align-items: flex-start; }
+.inv-check input { margin-top: 2px; }
+.inv-check .inv-subline { white-space: normal; }
+.inv-danger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(229, 96, 92, 0.28);
+  border-radius: 10px;
+}
+.inv-danger .inv-note { margin: 2px 0 0; }
+
+/* ---------- guided add ---------- */
+.inv-types { display: grid; gap: 18px; }
+.inv-typegroup { display: grid; gap: 8px; }
+.inv-typehead { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.inv-typegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.inv-typecard,
+.inv-nextcard {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding: 11px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--plane);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.inv-typecard:hover,
+.inv-nextcard:hover { border-color: rgba(255, 255, 255, 0.24); background: var(--card-hi); }
+.inv-typecard:active,
+.inv-nextcard:active { transform: translateY(1px); }
+.inv-typecard-title,
+.inv-nextcard-title { font-size: 13.5px; font-weight: 600; }
+.inv-typecard-blurb,
+.inv-nextcard-body { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.inv-next { display: grid; gap: 10px; }
+.inv-nextlede { margin: 0 0 2px; }
+.inv-nextcard { padding: 13px 15px; }
+.inv-nextcard-primary { border-color: rgba(227, 178, 60, 0.55); }
+.inv-nextcard-primary .inv-nextcard-title { color: var(--gold); }
+.inv-nextcard-primary:hover { border-color: var(--gold); }
+.inv-addform { gap: 16px; }
+.inv-firstbal { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--plane); }
+@media (max-width: 560px) {
+  .inv-dsum { align-items: flex-start; }
+  .inv-dsum-side { justify-items: start; text-align: left; }
+}
+/* A pill choice keeps its own width; its hint wraps under it. */
+.inv-choice { justify-items: start; }
+.inv-choice > .ui-field-hint { justify-self: stretch; }
+.inv-row2 { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 28px; }
+.inv-row2 > .inv-choice { flex: 1 1 260px; }
+.inv-maskfield { flex: 0 0 120px; }
+
+/* ---------- a lots account's cash: the cash anchor (B12) ---------- */
+.inv-cash { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.inv-cashrow td { border-top: 1px dashed var(--line-strong); }
+.inv-cashlabel { font-weight: 650; color: var(--ink); }
+/* Below $0 is a data gap (a deposit never recorded), not a loss: neutral, marked. */
+.inv-shortcash { color: var(--ink-2); text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px; }
+.inv-dsum-none { font-family: var(--sans); font-weight: 400; color: var(--ink-3); }
+/* A nested dialog's event boundary (NestedDialog): no box of its own. */
+.inv-nested { display: contents; }
+
+/* ---------- the vest dialog (B9) ---------- */
+.inv-vest { gap: 16px; }
+.inv-vest .inv-amounts { grid-template-columns: auto minmax(0, 1fr); }
+@media (max-width: 560px) {
+  .inv-vest .inv-amounts { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- symbol box (B10): a combobox over recorded symbols and the market list ---------- */
+.inv-symbox { position: relative; display: block; }
+.inv-symbox > .ui-input { width: 100%; }
+.inv-symlist {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max(100%, 340px);
+  max-width: min(460px, calc(100vw - 48px));
+  max-height: 304px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+}
+.inv-symlist[hidden] { display: none; }
+.inv-symopt {
+  display: grid;
+  grid-template-columns: minmax(52px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.inv-symopt-on { background: var(--card-hi); color: var(--ink); }
+.inv-symopt-sym { font-family: var(--mono); font-weight: 650; color: var(--ink); letter-spacing: 0.01em; }
+.inv-symopt-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-symopt-tags { display: inline-flex; gap: 4px; }
+.inv-symhint b { color: var(--ink); font-weight: 600; }
+
+/* ---------- the balance check-in (B11) ---------- */
+.inv-ci { display: grid; gap: 18px; }
+.inv-ci-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+.inv-ci-top .inv-note { margin: 0 0 6px; flex: 1 1 220px; }
+.inv-ci-asof { display: grid; gap: 4px; width: 160px; }
+.inv-ci-sec { display: grid; gap: 6px; }
+.inv-ci-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; font-size: 13px; font-weight: 650; color: var(--ink); }
+.inv-ci-h .inv-note { font-weight: 400; }
+.inv-ci-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.inv-ci-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 148px 148px 76px;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.inv-ci-row:last-child { border-bottom: 0; }
+.inv-ci-row.inv-ci-bad { background: rgba(229, 96, 92, 0.05); }
+.inv-ci-who { display: grid; gap: 2px; min-width: 0; }
+.inv-ci-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.inv-ci-name b { font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-ci-detail { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-ci-last { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.inv-ci-amount .ui-input, .inv-ci-date .ui-input { width: 100%; }
+.inv-ci-same { text-align: right; }
+.inv-ci-same .inv-linkbtn { font-size: 11.5px; }
+@media (max-width: 600px) {
+  .inv-ci-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .inv-ci-who { grid-column: 1 / -1; }
+  .inv-ci-same { grid-column: 1 / -1; text-align: left; }
+}
+
+/* ---------- owner pills (B13) ---------- */
+.inv-owners { display: flex; flex-wrap: wrap; margin: 2px 0 12px; }
+.inv-owners .ui-seg { flex-wrap: wrap; max-width: 100%; }
+.inv-ownpill { display: inline-flex; align-items: baseline; gap: 6px; }
+.inv-ownpill-v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--ink-3); }
+.ui-seg [aria-checked='true'] .inv-ownpill-v { color: var(--ink-2); }
+.inv-scopenote { font-size: 11.5px; color: var(--ink-3); }
+
+/* ---------- realized gains report on Taxes (B14) ---------- */
+.inv-rz .h4row .right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inv-rz-year { height: 28px; padding-top: 0; padding-bottom: 0; font-size: 12px; width: auto; }
+.inv-rz-sum { margin-bottom: 8px; }
+/* A half-width tax card never widens the page: its tables scroll inside it at narrow widths. */
+.inv-taxcard { min-width: 0; }
+/* Loss harvesting (Taxes): a lot's date and account wrap under its symbol before the table has to scroll. */
+.inv-harvest .inv-harvest-lot { white-space: normal; }
+.inv-rz-sum td.num, .inv-rz-sum th { white-space: nowrap; }
+.inv-rz-net { margin: 0 0 10px; }
+.inv-rz-flags { margin: 0 0 10px; padding: 8px 12px 8px 28px; display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--plane); }
+.inv-rz-lines td { vertical-align: middle; font-size: 12.5px; }
+.inv-rz-lines td.num { white-space: nowrap; }
+.inv-rz-tag { margin-left: 6px; }
+.inv-rz-sub { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.4; margin-top: 1px; }
+.inv-rz-sub .inv-tag { margin-left: 0; height: 16px; font-size: 10px; }
+.inv-rz-foot { margin: 10px 0 0; }

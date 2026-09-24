@@ -58,11 +58,13 @@ After that, every deploy is just `./scripts/deploy.sh`.
 The vault unlocks with a passkey (fingerprint/face; Chrome or Safari on
 current macOS, iOS, Android, Windows) and a printed recovery code — see
 PRIVACY.md.
-The server then serves only the encrypted-vault courier and the daily price
-basket; every plaintext route is refused and the app runs entirely in the
-browser tab (see `PRIVACY.md`). Converting an existing household install is a
-one-time `SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh` — export your data from
-Data & Vault first; the server refuses to boot vault-only over plaintext.
+The server then serves only the encrypted-vault courier (with the household's
+members and invitations) and the shared price data — the daily basket and its
+monthly history; every plaintext route is refused and the app runs entirely in
+the browser tab (see `PRIVACY.md`; the list is `server/zk-routes.ts`).
+Converting an existing household install is a one-time
+`SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh` — export your data from Data &
+Vault first; the server refuses to boot vault-only over plaintext.
 
 ## Costs
 
@@ -71,11 +73,14 @@ estimate - your costs could vary based on usage and number of users.
 
 ## Roadmap
 
-- **0 — Skeleton + fortress** (this): shell UI, health/identity wiring, IAP deploy.
+- **0 — Skeleton + fortress**: shell UI, health/identity wiring, IAP deploy.
 - **I — Cash**: CSV/OFX import, dedupe, categorizer, income/spend, budget.
 - **II — Investments & property**: trade ledger, tax lots, cost basis, EOD prices, valuations.
 - **III — Dream Home**: fund tracking, real loan sheets, payment matrix, rental scenario.
 - **IV — Future**: Monte Carlo with levers.
+
+All five shipped; the zero-knowledge work since (scarab.one) and what remains
+are in `DESIGN.md` §7 and `tasks.md`.
 
 ## Fonts
 

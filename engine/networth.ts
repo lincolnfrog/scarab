@@ -1,5 +1,7 @@
+import { monthsBetween } from '../shared/dates'
 import type { DbLike } from './db'
-import { computePosition, positionValueCents, type TradeInput } from './lots'
+import { cashAt, type CashTrade } from './holdings'
+import { computePosition, positionValueCents, type Position, type TradeInput } from './lots'
 
 export type NetWorthComponents = {
   cash: number
@@ -15,27 +17,23 @@ const sum = (o: NetWorthComponents) =>
   o.cash + o.brokerage + o.retirement + o.crypto + o.property + o.liabilities
 
 const monthEnd = (month: string) => `${month}-99` // string-compare sentinel: after any day in month
-
-function monthsBetween(first: string, last: string): string[] {
-  const out: string[] = []
-  let [y, m] = [Number(first.slice(0, 4)), Number(first.slice(5, 7))]
-  const [ly, lm] = [Number(last.slice(0, 4)), Number(last.slice(5, 7))]
-  while (y < ly || (y === ly && m <= lm)) {
-    out.push(`${y}-${String(m).padStart(2, '0')}`)
-    m++
-    if (m > 12) {
-      m = 1
-      y++
-    }
-  }
-  return out
-}
+const LATEST = '9999-99-99' // string-compare sentinel: after any date at all
 
 /**
  * Net worth as of each month end, derived entirely from dated facts. A month's
  * value uses the latest fact on or before that month's end (prices, snapshots,
  * valuations, balances); assets with trades but no price yet are carried at
  * cost basis.
+ *
+ * Holdings in the current month are as of today: trades dated after today
+ * haven't happened, and each asset is valued at its latest known price (a
+ * quote stamped with tomorrow's UTC date is still today's price). That is
+ * exactly how the portfolio values them, so the two agree to the cent.
+ *
+ * A lots account with a cash balance recorded (a balance snapshot: its cash
+ * anchor) also counts its cash — the anchor plus what later trades did to it
+ * (engine/holdings.ts cashAt) — so a sale moves value from shares to cash
+ * instead of out of net worth. Without an anchor it counts holdings alone.
  */
 export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
   const txMonths = db
@@ -56,7 +54,7 @@ export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
   const first = lows.sort()[0]!
   const months = monthsBetween(first, thisMonth)
 
-  // Pull everything once; derive per month in JS (household scale).
+  // Pull everything once; derive per month in JS.
   const accounts = db.prepare('SELECT id, opening_cents FROM accounts').all() as {
     id: number
     opening_cents: number
@@ -72,9 +70,9 @@ export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
   const trades = db
     .prepare(
       `SELECT id, invest_account_id, asset_id, traded_on, side, qty_micro, total_cents,
-              sold_lot_trade_id, acquired_on, basis_cents FROM trades ORDER BY traded_on`,
+              sold_lot_trade_id, acquired_on, basis_cents, note FROM trades ORDER BY traded_on`,
     )
-    .all() as ({ invest_account_id: number; asset_id: number } & TradeInput)[]
+    .all() as ({ invest_account_id: number; asset_id: number; note: string | null } & TradeInput)[]
   const prices = db
     .prepare('SELECT asset_id, priced_on, close_cents FROM prices ORDER BY priced_on')
     .all() as { asset_id: number; priced_on: string; close_cents: number }[]
@@ -93,79 +91,116 @@ export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
     .prepare('SELECT liability_id, balanced_on, balance_cents FROM liability_balances ORDER BY balanced_on')
     .all() as { liability_id: number; balanced_on: string; balance_cents: number }[]
 
-  const latestAtOrBefore = <T extends { [k: string]: unknown }>(
-    rows: T[],
-    dateKey: keyof T,
-    cutoff: string,
-  ): T | undefined => {
-    let best: T | undefined
-    for (const r of rows) {
-      if ((r[dateKey] as string) <= cutoff) best = r
-      else break
-    }
-    return best
+  // Each entity's facts, once, in date order. Every lookup below is then a
+  // binary search into its own rows, never a scan of a whole table: the
+  // prices table alone gains a row per asset for every day with a quote.
+  const txsBy = groupBy(txs, (t) => t.account_id)
+  const tradesBy = groupBy(trades, (t) => t.invest_account_id)
+  const pricesBy = groupBy(prices, (p) => p.asset_id)
+  const snapsBy = groupBy(snaps, (s) => s.invest_account_id)
+  const valsBy = groupBy(vals, (v) => v.property_id)
+  const liabsBy = groupBy(liabs, (l) => l.liability_id)
+
+  // A bank account's balance at a cutoff: opening plus the running sum of its first n transactions.
+  const txSums = new Map<number, number[]>()
+  for (const [id, rows] of txsBy) {
+    const cum = [0]
+    for (const t of rows) cum.push(cum[cum.length - 1]! + t.amount_cents)
+    txSums.set(id, cum)
   }
+
+  // Lots pool per (account, asset), as in engine/holdings.ts. A pool's
+  // position only changes when a month takes in more of its trades, so it is
+  // recomputed then and carried otherwise.
+  type Pool = { assetId: number; trades: TradeInput[]; n: number; pos: Position | null }
+  const pools = new Map<number, Pool[]>()
+  for (const [accountId, rows] of tradesBy)
+    pools.set(
+      accountId,
+      [...groupBy(rows, (t) => t.asset_id)].map(([assetId, list]) => ({ assetId, trades: list, n: 0, pos: null })),
+    )
 
   return months.map((month) => {
     const cutoff = monthEnd(month)
+    const current = month === thisMonth
+    const tradeCutoff = current ? today : cutoff
+    const priceCutoff = current ? LATEST : cutoff
     const c: NetWorthComponents = { cash: 0, brokerage: 0, retirement: 0, crypto: 0, property: 0, liabilities: 0 }
 
     for (const a of accounts) {
-      c.cash += a.opening_cents
-      for (const t of txs) if (t.account_id === a.id && t.posted_on <= cutoff) c.cash += t.amount_cents
+      const rows = txsBy.get(a.id)
+      c.cash += a.opening_cents + (rows ? txSums.get(a.id)![countOnOrBefore(rows, (t) => t.posted_on, cutoff)]! : 0)
     }
 
     for (const ia of investAccounts) {
       let value = 0
+      const anchors = snapsBy.get(ia.id) ?? []
       if (ia.tracking === 'balance') {
-        value =
-          latestAtOrBefore(
-            snaps.filter((s) => s.invest_account_id === ia.id),
-            'balanced_on',
-            cutoff,
-          )?.balance_cents ?? 0
+        value = lastOnOrBefore(anchors, (s) => s.balanced_on, cutoff)?.balance_cents ?? 0
       } else {
-        const byAsset = new Map<number, TradeInput[]>()
-        for (const t of trades)
-          if (t.invest_account_id === ia.id && t.traded_on <= cutoff) {
-            const list = byAsset.get(t.asset_id) ?? []
-            list.push(t)
-            byAsset.set(t.asset_id, list)
+        for (const pool of pools.get(ia.id) ?? []) {
+          const n = countOnOrBefore(pool.trades, (t) => t.traded_on, tradeCutoff)
+          if (n === 0) continue
+          if (n !== pool.n || !pool.pos) {
+            pool.pos = computePosition(pool.trades.slice(0, n), today)
+            pool.n = n
           }
-        for (const [assetId, assetTrades] of byAsset) {
-          const pos = computePosition(assetTrades, today)
+          const pos = pool.pos
           if (pos.qty_micro === 0) continue
-          const price = latestAtOrBefore(
-            prices.filter((p) => p.asset_id === assetId),
-            'priced_on',
-            cutoff,
-          )
+          const price = lastOnOrBefore(pricesBy.get(pool.assetId), (p) => p.priced_on, priceCutoff)
           value += price ? positionValueCents(pos.qty_micro, price.close_cents) : pos.cost_cents
+        }
+        // Its cash, when an anchor is recorded: snapshots on a lots account are cash balances.
+        if (anchors.length > 0) {
+          const own: CashTrade[] = tradesBy.get(ia.id) ?? []
+          value += cashAt(anchors, own, tradeCutoff)?.cents ?? 0
         }
       }
       c[ia.kind] += value
     }
 
     for (const p of props) {
-      const val = latestAtOrBefore(
-        vals.filter((v) => v.property_id === p.id),
-        'valued_on',
-        cutoff,
-      )
+      const val = lastOnOrBefore(valsBy.get(p.id), (v) => v.valued_on, cutoff)
       if (val) c.property += val.value_cents
       else if (p.purchased_on && p.purchased_on <= cutoff && p.purchase_cents) c.property += p.purchase_cents
     }
 
-    const liabIds = [...new Set(liabs.map((l) => l.liability_id))]
-    for (const id of liabIds) {
-      const bal = latestAtOrBefore(
-        liabs.filter((l) => l.liability_id === id),
-        'balanced_on',
-        cutoff,
-      )
+    for (const rows of liabsBy.values()) {
+      const bal = lastOnOrBefore(rows, (l) => l.balanced_on, cutoff)
       if (bal) c.liabilities -= bal.balance_cents
     }
 
     return { month, ...c, total: sum(c) }
   })
+}
+
+/** Rows grouped by an id, each group keeping the rows' order. */
+function groupBy<T>(rows: readonly T[], key: (r: T) => number): Map<number, T[]> {
+  const out = new Map<number, T[]>()
+  for (const r of rows) {
+    const k = key(r)
+    const list = out.get(k)
+    if (list) list.push(r)
+    else out.set(k, [r])
+  }
+  return out
+}
+
+/** How many of `rows` (in date order) are dated on or before `cutoff`. */
+function countOnOrBefore<T>(rows: readonly T[], date: (r: T) => string, cutoff: string): number {
+  let lo = 0
+  let hi = rows.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (date(rows[mid]!) <= cutoff) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/** The latest of `rows` (in date order) dated on or before `cutoff`. */
+function lastOnOrBefore<T>(rows: readonly T[] | undefined, date: (r: T) => string, cutoff: string): T | undefined {
+  if (!rows) return undefined
+  const n = countOnOrBefore(rows, date, cutoff)
+  return n > 0 ? rows[n - 1] : undefined
 }

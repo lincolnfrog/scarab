@@ -1,7 +1,13 @@
+import { netCapitalGains } from '../shared/capgains'
+import { addDaysIso } from '../shared/dates'
+import { RSU_WITHHOLDING_NOTE, type RealizedLine, type RealizedReport, type RealizedTotals, type TradeBody, type TradePreview, type WashBuy, type WashLossSale } from '../shared/invest-api'
+import { formatQtyMicro } from '../shared/money'
 import type { DbLike } from './db'
-import { computePosition, positionValueCents, type TradeInput } from './lots'
+import { ApiError, bad } from './errors'
+import { ALL_TIME, holdingLedger, loadHoldings } from './holdings'
+import { firstVestAfter, sharesText, validateTrade, vestOn } from './invest'
+import { computePosition, isLongTerm, longTermOn, positionValueCents, saleRealized } from './lots'
 import { ADDL_MEDICARE_RATE_MICRO, computePayroll, listPaySources, PAYROLL_VINTAGE, type Payroll } from './paychecks'
-import { addMonths, ApiError } from './services'
 
 /**
  * Tax intelligence. Same rules as the rest of engine/: isomorphic, synchronous,
@@ -596,27 +602,8 @@ export type TaxComputed = {
   totalCents: number
 }
 
-const CAP_LOSS_LIMIT = 3_000_00
-
-/** Capital-gain netting per §1211/1222: ST and LT net separately, then a net
- *  loss on one side offsets the other; an overall net loss offsets up to
- *  $3,000 of ordinary income, the rest carries forward. */
-export function netCapitalGains(stCents: number, ltCents: number) {
-  let st = stCents
-  let lt = ltCents
-  if (st < 0 && lt > 0) { lt += st; st = 0; if (lt < 0) { st = lt; lt = 0 } }
-  else if (lt < 0 && st > 0) { st += lt; lt = 0; if (st < 0) { lt = st; st = 0 } }
-  const netTotal = st + lt
-  let capLossUsed = 0
-  let capLossCarry = 0
-  if (netTotal < 0) {
-    capLossUsed = Math.min(CAP_LOSS_LIMIT, -netTotal)
-    capLossCarry = -netTotal - capLossUsed
-    st = 0
-    lt = 0
-  }
-  return { netStCents: st, netLtCents: lt, capLossUsedCents: capLossUsed, capLossCarryCents: capLossCarry }
-}
+// Netting lives in shared/ so the screens net exactly the way the engine does.
+export { netCapitalGains }
 
 export function computeTax(i: TaxInputs): TaxComputed {
   const qualified = Math.max(0, i.qualifiedDividendCents ?? 0)
@@ -671,8 +658,8 @@ export function marginalRates(i: TaxInputs) {
 /* ===================== ledger-derived year picture ==================== */
 
 const DAY = 86400000
-const shiftDays = (iso: string, days: number) =>
-  new Date(Date.parse(iso) + days * DAY).toISOString().slice(0, 10)
+/** Whole calendar days from `from` to `to` (both ISO days, parsed as UTC midnight — no DST). */
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / DAY)
 
 /** Sum of this year's RSU vest income: vest trades are buys at vest-day value,
  *  identifiable by their note or by the legacy rsu_vests linkage. */
@@ -728,17 +715,17 @@ export function projectVests(db: DbLike, today: string): { events: VestEvent[]; 
   const events: VestEvent[] = []
   let unpriced = 0
   for (const r of rows) {
-    let d = r.next_vest_on
-    let guard = 0
-    while (d <= today && guard++ < 400) d = addMonths(d, r.vest_every_months)
+    // Each vest counted from the anchor (engine/invest.ts vestOn), never stepped from the one before.
+    let { on: d, k } = firstVestAfter(r.next_vest_on, r.vest_every_months, today)
     let remaining = r.qty_micro
+    let guard = 0
     while (d <= yearEnd && remaining > 0 && guard++ < 400) {
       const q = Math.min(r.vest_qty_micro, remaining)
       const cents = r.price_cents === null ? null : positionValueCents(q, r.price_cents)
       if (cents === null) unpriced++
       events.push({ symbol: r.symbol, account: r.account, account_id: r.account_id, vest_on: d, qty_micro: q, cents })
       remaining -= q
-      d = addMonths(d, r.vest_every_months)
+      d = vestOn(r.next_vest_on, r.vest_every_months, ++k)
     }
   }
   events.sort((x, y) => (x.vest_on < y.vest_on ? -1 : x.vest_on > y.vest_on ? 1 : 0))
@@ -757,20 +744,23 @@ function dividendsYtd(db: DbLike, year: string): number {
   return r.s
 }
 
-/** Realized YTD short/long-term gains across every lots-tracked asset. */
-function realizedYtd(db: DbLike, today: string): { stCents: number; ltCents: number } {
-  const assets = db.prepare('SELECT id FROM assets').all() as { id: number }[]
-  const tradesFor = db.prepare(
-    'SELECT id, traded_on, side, qty_micro, total_cents, sold_lot_trade_id, acquired_on, basis_cents FROM trades WHERE asset_id = ? ORDER BY traded_on',
-  )
+/**
+ * Realized year-to-date short/long-term gains that reach the tax bill: lots
+ * pooled per account, taxable accounts only. Sales inside an IRA, Roth or
+ * 401(k) are summed separately as `shelteredCents` and never taxed here.
+ */
+function realizedYtd(db: DbLike, today: string): { stCents: number; ltCents: number; shelteredCents: number } {
   let st = 0
   let lt = 0
-  for (const a of assets) {
-    const pos = computePosition(tradesFor.all(a.id) as TradeInput[], today)
-    st += pos.realized_ytd_st_cents
-    lt += pos.realized_ytd_lt_cents
+  let sheltered = 0
+  for (const h of loadHoldings(db, today)) {
+    if (h.sheltered) sheltered += h.pos.realized_ytd_st_cents + h.pos.realized_ytd_lt_cents
+    else {
+      st += h.pos.realized_ytd_st_cents
+      lt += h.pos.realized_ytd_lt_cents
+    }
   }
-  return { stCents: st, ltCents: lt }
+  return { stCents: st, ltCents: lt, shelteredCents: sheltered }
 }
 
 /** Spread what's still owed over the due dates that haven't passed, in
@@ -857,7 +847,8 @@ export function rsuStateWithholdMicro(settings: TaxSettings): number {
   return STATE_SUPPLEMENTAL_MICRO[info.code] ?? 0
 }
 
-export function computeTaxYear(db: DbLike, today: string) {
+/** The year picture and the inputs it was computed from (a preview adds a sale to those). */
+function taxYear(db: DbLike, today: string) {
   const settings = getTaxSettings(db)
   const year = today.slice(0, 4)
   const realized = realizedYtd(db, today)
@@ -951,7 +942,7 @@ export function computeTaxYear(db: DbLike, today: string) {
       })
     : null
 
-  return {
+  const out = {
     year: Number(year),
     settings,
     incomes: {
@@ -967,6 +958,8 @@ export function computeTaxYear(db: DbLike, today: string) {
       dividendsOrdinaryCents: divOrdinary,
       realizedStCents: realized.stCents,
       realizedLtCents: realized.ltCents,
+      /** Realized this year inside tax-advantaged accounts — not income. */
+      realizedShelteredCents: realized.shelteredCents,
       totalIncomeCents: totalIncome,
       deductionCents: deduction,
     },
@@ -991,68 +984,163 @@ export function computeTaxYear(db: DbLike, today: string) {
     safeHarbor,
     stateSafeHarbor,
   }
+  return { out, inputs }
+}
+
+export function computeTaxYear(db: DbLike, today: string) {
+  return taxYear(db, today).out
+}
+
+/**
+ * The change in this year's total tax (federal + state) from realizing
+ * `stCents` short-term and `ltCents` long-term more, on top of everything
+ * the year already holds — computed exactly with computeTax, so netting
+ * against losses already realized, bracket edges, NIIT and the $3,000 loss
+ * limit all count. Negative when a loss saves tax.
+ */
+export function realizedTaxDelta(db: DbLike, today: string, stCents: number, ltCents: number): number {
+  const { inputs } = taxYear(db, today)
+  const base = computeTax(inputs).totalCents
+  return computeTax({ ...inputs, stGainCents: inputs.stGainCents + stCents, ltGainCents: inputs.ltGainCents + ltCents }).totalCents - base
 }
 
 /* ========================= harvesting advisor ========================= */
 
+/** A scheduled vest close enough that selling the same stock at a loss now would be a wash sale. */
+export type UpcomingVest = { vest_on: string; qty_micro: number; account: string; account_id: number }
+
 export type HarvestLot = {
   symbol: string
+  account: string // the taxable account holding the lot
+  account_id: number
   trade_id: number | null
   opened_on: string
+  lt_on: string // first day a sale counts as long-term
   qty_micro: number
   cost_cents: number
   value_cents: number
   gain_cents: number
   term: 'st' | 'lt'
   days_to_lt: number // 0 when already long-term
-  wash_risk: boolean // another buy of this asset within the past 30 days
+  wash_risk: boolean // a loss lot, and another buy of this asset — in any account, IRAs included — within the past 30 days
+  wash_upcoming: UpcomingVest | null // a loss lot, and a scheduled vest of this asset within the next 30 days
   tax_delta_cents: number // >0 tax owed if sold · <0 tax saved by harvesting
   after_tax_cents: number // proceeds net of the estimated tax effect
 }
 
+/** The wash-sale window: 30 days either side of a sale. */
+const WASH_DAYS = 30
+
+/**
+ * Whether the wash-sale rule reaches an asset at all. §1091 covers stock and
+ * securities; crypto held directly is property (IRS Notice 2014-21), outside
+ * it under current law, so a crypto loss is never flagged — flagging it would
+ * only talk someone out of a harvest that stands. A crypto ETF is a security,
+ * and is recorded as a stock.
+ */
+const washSaleApplies = (assetKind: 'stock' | 'crypto') => assetKind !== 'crypto'
+
+/**
+ * The first scheduled vest of each stock in (today, today + days], across
+ * every account: each unvested position's cadence rolled past today, capped
+ * by the shares still unvested. Keyed by asset id.
+ */
+function upcomingVests(db: DbLike, today: string, days: number): Map<number, UpcomingVest> {
+  const rows = db
+    .prepare(
+      `SELECT u.asset_id, u.qty_micro, u.next_vest_on, u.vest_every_months, u.vest_qty_micro, ia.name AS account, ia.id AS account_id
+       FROM unvested_positions u JOIN invest_accounts ia ON ia.id = u.invest_account_id
+       WHERE u.next_vest_on IS NOT NULL AND u.vest_every_months > 0 AND u.vest_qty_micro > 0 AND u.qty_micro > 0
+       ORDER BY u.asset_id, ia.id`,
+    )
+    .all() as {
+    asset_id: number
+    qty_micro: number
+    next_vest_on: string
+    vest_every_months: number
+    vest_qty_micro: number
+    account: string
+    account_id: number
+  }[]
+  const horizon = addDaysIso(today, days)
+  const out = new Map<number, UpcomingVest>()
+  for (const r of rows) {
+    const d = firstVestAfter(r.next_vest_on, r.vest_every_months, today).on
+    if (d > horizon) continue
+    const prev = out.get(r.asset_id)
+    if (!prev || d < prev.vest_on)
+      out.set(r.asset_id, {
+        vest_on: d,
+        qty_micro: Math.min(r.vest_qty_micro, r.qty_micro),
+        account: r.account,
+        account_id: r.account_id,
+      })
+  }
+  return out
+}
+
+/**
+ * Open lots in taxable accounts at today's prices, with what selling each
+ * would cost or save. Lots pool per account; IRA, Roth and 401(k) lots never
+ * appear — nothing sold inside them reaches the tax bill.
+ *
+ * The wash-sale scan is per asset across every account, sheltered ones and
+ * both spouses' included: buying the same stock in an IRA within 30 days
+ * disallows the taxable loss. A buy counts from when its shares were acquired
+ * (`acquired_on ?? traded_on`), so a position brought in with its original
+ * acquisition date doesn't look like a fresh purchase. Vests are buys, and a
+ * scheduled one within the next 30 days is flagged as `wash_upcoming`.
+ * Crypto is never flagged (see washSaleApplies).
+ */
 export function computeHarvest(
   db: DbLike,
   today: string,
   marginal: { stMicro: number; ltMicro: number },
 ) {
-  const assets = db.prepare('SELECT id, symbol FROM assets ORDER BY symbol').all() as {
-    id: number
-    symbol: string
-  }[]
-  const tradesFor = db.prepare(
-    'SELECT id, traded_on, side, qty_micro, total_cents, sold_lot_trade_id, acquired_on, basis_cents FROM trades WHERE asset_id = ? ORDER BY traded_on',
-  )
   const latestPrice = db.prepare(
     'SELECT close_cents FROM prices WHERE asset_id = ? ORDER BY priced_on DESC LIMIT 1',
   )
-  const cutoff = shiftDays(today, -30)
+  const buysIn = db.prepare(
+    `SELECT id FROM trades
+     WHERE asset_id = ? AND side = 'buy' AND COALESCE(acquired_on, traded_on) BETWEEN ? AND ?`,
+  )
+  const windowStart = addDaysIso(today, -WASH_DAYS)
+  const vests = upcomingVests(db, today, WASH_DAYS)
+  const recentBuysOf = new Map<number, number[]>()
   const rows: HarvestLot[] = []
-  for (const a of assets) {
-    const trades = tradesFor.all(a.id) as TradeInput[]
-    if (trades.length === 0) continue
-    const pos = computePosition(trades, today)
-    if (pos.lots.length === 0) continue
-    const price = latestPrice.get(a.id) as { close_cents: number } | undefined
+  for (const h of loadHoldings(db, today, { taxableOnly: true })) {
+    if (h.pos.lots.length === 0) continue
+    const price = latestPrice.get(h.assetId) as { close_cents: number } | undefined
     if (!price) continue
-    const recentBuys = trades.filter((t) => t.side === 'buy' && t.traded_on >= cutoff && t.traded_on <= today)
-    for (const lot of pos.lots) {
+    const washable = washSaleApplies(h.assetKind)
+    let recentBuys = recentBuysOf.get(h.assetId)
+    if (!recentBuys) {
+      recentBuys = washable ? (buysIn.all(h.assetId, windowStart, today) as { id: number }[]).map((b) => b.id) : []
+      recentBuysOf.set(h.assetId, recentBuys)
+    }
+    for (const lot of h.pos.lots) {
       const value = positionValueCents(lot.qty_micro, price.close_cents)
       const gain = value - lot.cost_cents
-      const heldDays = Math.floor((Date.parse(today) - Date.parse(lot.opened_on)) / DAY)
-      const isLt = heldDays > 365
+      const isLt = isLongTerm(lot.opened_on, today)
+      const ltOn = longTermOn(lot.opened_on)
       const rate = isLt ? marginal.ltMicro : marginal.stMicro
       const taxDelta = Math.round((gain * rate) / 1_000_000)
       rows.push({
-        symbol: a.symbol,
+        symbol: h.symbol,
+        account: h.accountName,
+        account_id: h.investAccountId,
         trade_id: lot.trade_id ?? null,
         opened_on: lot.opened_on,
+        lt_on: ltOn,
         qty_micro: lot.qty_micro,
         cost_cents: lot.cost_cents,
         value_cents: value,
         gain_cents: gain,
         term: isLt ? 'lt' : 'st',
-        days_to_lt: isLt ? 0 : 366 - heldDays,
-        wash_risk: gain < 0 && recentBuys.some((b) => b.id !== lot.trade_id),
+        days_to_lt: isLt ? 0 : daysBetween(today, ltOn),
+        // Selling a lot bought in the window isn't a wash against itself.
+        wash_risk: gain < 0 && recentBuys.some((id) => id !== lot.trade_id),
+        wash_upcoming: gain < 0 && washable ? (vests.get(h.assetId) ?? null) : null,
         tax_delta_cents: taxDelta,
         after_tax_cents: value - Math.max(0, taxDelta),
       })
@@ -1063,10 +1151,283 @@ export function computeHarvest(
     harvestableStCents: losses.filter((r) => r.term === 'st').reduce((s, r) => s + r.gain_cents, 0),
     harvestableLtCents: losses.filter((r) => r.term === 'lt').reduce((s, r) => s + r.gain_cents, 0),
     estTaxSavedCents: -losses.reduce((s, r) => s + Math.min(0, r.tax_delta_cents), 0),
-    washFlagged: losses.filter((r) => r.wash_risk).length,
+    washFlagged: losses.filter((r) => r.wash_risk || r.wash_upcoming !== null).length,
   }
   rows.sort((x, y) => x.gain_cents - y.gain_cents)
   return { rows, totals }
+}
+
+/* ============================ trade preview ============================ */
+
+/** Stands in for the id a recorded trade would get: after every existing trade on its day, as a new one sorts. */
+const PREVIEW_ID = Number.MAX_SAFE_INTEGER
+
+/**
+ * What recording a trade would do, before it's recorded — POST
+ * /api/trades/preview. Pure: the same checks createTrade runs
+ * (validateTrade), then the account's holding replayed with the trade added.
+ * Nothing is written.
+ *
+ * - Realized gain by term, with the lots a sale takes (FIFO, the chosen lot,
+ *   or its explicit basis), and warnings for shares no lot covers.
+ * - The estimated change in this year's tax (realizedTaxDelta — exact, netted
+ *   with the year so far). 0 in a tax-advantaged account; null for a sale
+ *   dated in an earlier tax year, which this year's picture can't price.
+ * - Wash-sale traps, the same scan the harvest list runs. A taxable sale at a
+ *   loss: buys of the asset in any account — IRAs and both spouses included —
+ *   acquired within 30 days either side (a lot this sale takes entirely
+ *   doesn't count against it), and a vest scheduled within 30 days after it.
+ *   A buy, in any account: taxable sales of the asset at a loss within 30
+ *   days of it, whose loss it could disallow. None for crypto (see
+ *   washSaleApplies).
+ * - How many other sales in the account would re-resolve (a trade dated
+ *   before them changes what FIFO takes).
+ */
+export function previewTrade(db: DbLike, b: Partial<Record<keyof TradeBody, unknown>>, today: string): TradePreview {
+  const v = validateTrade(db, b, today)
+  const acct = db.prepare('SELECT name, kind FROM invest_accounts WHERE id = ?').get(v.investAccountId) as { name: string; kind: string }
+  const sheltered = acct.kind === 'retirement'
+  const ledger = v.assetId === null ? [] : holdingLedger(db, v.investAccountId, v.assetId)
+  const trade = {
+    id: PREVIEW_ID,
+    traded_on: v.tradedOn,
+    side: v.side,
+    qty_micro: v.qtyMicro,
+    total_cents: v.totalCents,
+    sold_lot_trade_id: v.soldLotTradeId,
+    acquired_on: v.acquiredOn,
+    basis_cents: v.basisCents,
+    note: null,
+  }
+  const before = new Map(computePosition(ledger, ALL_TIME).sales.map((s) => [s.trade_id, s]))
+  const after = computePosition([...ledger, trade], ALL_TIME)
+  const sale = after.sales.find((s) => s.trade_id === PREVIEW_ID) ?? null
+
+  const warnings: string[] = []
+  let affected = 0
+  let shortened = 0
+  for (const s of after.sales) {
+    if (s.trade_id === PREVIEW_ID) continue
+    const was = before.get(s.trade_id)!
+    if (s.zero_basis_qty_micro > was.zero_basis_qty_micro) shortened++
+    const same =
+      s.zero_basis_cents === was.zero_basis_cents &&
+      s.parts.length === was.parts.length &&
+      s.parts.every((p, i) => p.lot_trade_id === was.parts[i]!.lot_trade_id && p.qty_micro === was.parts[i]!.qty_micro && p.proceeds_cents === was.parts[i]!.proceeds_cents && p.cost_cents === was.parts[i]!.cost_cents)
+    if (!same) affected++
+  }
+  if (sale && sale.zero_basis_qty_micro > 0) {
+    const short = sharesText(sale.zero_basis_qty_micro)
+    const one = sale.zero_basis_qty_micro === 1_000_000
+    warnings.push(
+      v.soldLotTradeId !== null
+        ? `That lot has fewer shares than this sale on ${v.tradedOn} — ${short} ${one ? 'counts' : 'count'} with zero basis (short-term). Pick FIFO or a larger lot, or enter the basis by hand.`
+        : `${acct.name} holds only ${formatQtyMicro(v.qtyMicro - sale.zero_basis_qty_micro)} ${v.symbol} on ${v.tradedOn} — ${short} ${one ? 'has' : 'have'} no recorded basis and count${one ? 's' : ''} as a zero-basis, short-term gain. Add the missing buy, or enter the basis by hand.`,
+    )
+  }
+  if (shortened > 0)
+    warnings.push(`This leaves ${shortened} later sale${shortened === 1 ? '' : 's'} in ${acct.name} short of recorded shares to sell.`)
+  else if (affected > 0)
+    warnings.push(`${affected} later sale${affected === 1 ? '' : 's'} in ${acct.name} will re-resolve — ${affected === 1 ? 'its realized gain recomputes' : 'their realized gains recompute'} (FIFO).`)
+
+  const realized = sale ? saleRealized(sale) : { st_cents: 0, lt_cents: 0 }
+  const taxYear = Number(v.tradedOn.slice(0, 4))
+  let estTaxCents: number | null = 0
+  if (sale && !sheltered) estTaxCents = taxYear === Number(today.slice(0, 4)) ? realizedTaxDelta(db, today, realized.st_cents, realized.lt_cents) : null
+
+  const washBuys: WashBuy[] = []
+  const lossSales: WashLossSale[] = []
+  let upcomingVest: UpcomingVest | null = null
+  const washable = washSaleApplies(v.assetKind)
+  if (sale && !sheltered && washable && realized.st_cents + realized.lt_cents < 0 && v.assetId !== null) {
+    const from = addDaysIso(v.tradedOn, -WASH_DAYS)
+    const to = addDaysIso(v.tradedOn, WASH_DAYS)
+    const taken = new Map(sale.parts.filter((p) => p.lot_trade_id !== null).map((p) => [p.lot_trade_id!, p.qty_micro]))
+    const buys = db
+      .prepare(
+        `SELECT t.id, t.invest_account_id, ia.name AS account, ia.kind AS account_kind, COALESCE(t.acquired_on, t.traded_on) AS acquired_on, t.qty_micro, t.note
+         FROM trades t JOIN invest_accounts ia ON ia.id = t.invest_account_id
+         WHERE t.asset_id = ? AND t.side = 'buy' AND COALESCE(t.acquired_on, t.traded_on) BETWEEN ? AND ?
+         ORDER BY COALESCE(t.acquired_on, t.traded_on), t.id`,
+      )
+      .all(v.assetId, from, to) as { id: number; invest_account_id: number; account: string; account_kind: string; acquired_on: string; qty_micro: number; note: string | null }[]
+    for (const x of buys)
+      // Selling every share of a lot bought in the window leaves nothing to replace them.
+      if (taken.get(x.id) !== x.qty_micro)
+        washBuys.push({
+          trade_id: x.id,
+          account: x.account,
+          account_id: x.invest_account_id,
+          acquired_on: x.acquired_on,
+          qty_micro: x.qty_micro,
+          note: x.note,
+          sheltered: x.account_kind === 'retirement',
+        })
+    if (to > today) {
+      const vest = upcomingVests(db, today, WASH_DAYS).get(v.assetId)
+      if (vest && vest.vest_on <= to) upcomingVest = vest
+    }
+  }
+  if (v.side === 'buy' && washable && v.assetId !== null) {
+    const on = v.acquiredOn ?? v.tradedOn
+    const from = addDaysIso(on, -WASH_DAYS)
+    const to = addDaysIso(on, WASH_DAYS)
+    for (const h of loadHoldings(db, today, { asOf: ALL_TIME, taxableOnly: true, assetId: v.assetId }))
+      for (const s of h.pos.sales) {
+        const r = saleRealized(s)
+        const gain = r.st_cents + r.lt_cents
+        if (gain < 0 && s.traded_on >= from && s.traded_on <= to && s.trade_id !== null)
+          lossSales.push({ trade_id: s.trade_id, account: h.accountName, account_id: h.investAccountId, traded_on: s.traded_on, loss_cents: -gain })
+      }
+    lossSales.sort((x, y) => x.traded_on.localeCompare(y.traded_on) || x.trade_id - y.trade_id)
+  }
+
+  return {
+    side: v.side,
+    account: acct.name,
+    sheltered,
+    realized: { stCents: realized.st_cents, ltCents: realized.lt_cents },
+    parts: sale ? sale.parts.map((p) => ({ ...p })) : [],
+    zeroBasisCents: sale?.zero_basis_cents ?? 0,
+    estTaxCents,
+    taxYear,
+    warnings,
+    washSale: { risk: washBuys.length > 0 || upcomingVest !== null || lossSales.length > 0, buys: washBuys, upcomingVest, lossSales },
+    affectedSales: affected,
+  }
+}
+
+/* ======================== the realized-gains report ======================== */
+
+/**
+ * A year's realized gains, sale by sale and lot by lot — the lines of Form
+ * 8949 — from taxable accounts, with the totals by term and the netting the
+ * return applies. The lots are exactly the ones the portfolio and the tax
+ * picture use (loadHoldings: lots pooled per account), so the report's gains
+ * add up to Taxes' realized figures for the year to the cent. The current
+ * year runs through today; an earlier one through its December 31.
+ *
+ * What it can't know is marked, never guessed: shares no lot covered (zero
+ * basis until entered), and losses with a buy of the same asset within 30
+ * days either side in any account — a possible wash sale, whose disallowed
+ * loss the broker's 1099-B reports (code W) and Scarab doesn't adjust.
+ * Crypto losses are never flagged (see washSaleApplies).
+ * Shares withheld at a vest (net settlement) aren't sales: they stay off the
+ * lines and are only counted (`withheld`).
+ */
+export function getRealizedReport(db: DbLike, yearRaw: unknown, today: string): RealizedReport {
+  const thisYear = Number(today.slice(0, 4))
+  const year = yearRaw === undefined || yearRaw === null || yearRaw === '' ? thisYear : Number(yearRaw)
+  if (!Number.isInteger(year) || year < 1900 || year > thisYear) bad(`year must be a whole year from 1900 to ${thisYear}`)
+  const asOf = year === thisYear ? today : `${year}-12-31`
+  const y = String(year)
+
+  const buysIn = db.prepare(
+    `SELECT id, qty_micro FROM trades WHERE asset_id = ? AND side = 'buy' AND COALESCE(acquired_on, traded_on) BETWEEN ? AND ?`,
+  )
+  const sellsOf = db.prepare(`SELECT id, note FROM trades WHERE invest_account_id = ? AND asset_id = ? AND side = 'sell'`)
+  const lines: RealizedLine[] = []
+  const sheltered = { sales: 0, gain_cents: 0 }
+  const withheld = { sales: 0, cents: 0 }
+  for (const h of loadHoldings(db, today, { asOf })) {
+    const sales = h.pos.sales.filter((s) => s.traded_on.startsWith(y))
+    if (sales.length === 0) continue
+    if (h.sheltered) {
+      for (const s of sales) {
+        const r = saleRealized(s)
+        sheltered.sales++
+        sheltered.gain_cents += r.st_cents + r.lt_cents
+      }
+      continue
+    }
+    const meta = new Map((sellsOf.all(h.investAccountId, h.assetId) as { id: number; note: string | null }[]).map((t) => [t.id, t]))
+    for (const s of sales) {
+      const note = s.trade_id !== null ? (meta.get(s.trade_id)?.note ?? null) : null
+      // Shares withheld at a vest (net settlement) never were a sale of yours: the
+      // employer kept them, no 1099-B reports them, and Scarab's $0 same-day sale
+      // is only how the lot drops them. Not a Form 8949 line — counted apart.
+      if (note === RSU_WITHHOLDING_NOTE) {
+        const g = saleRealized(s)
+        if (g.st_cents === 0 && g.lt_cents === 0 && s.zero_basis_qty_micro === 0) {
+          withheld.sales++
+          withheld.cents += s.proceeds_cents
+          continue
+        }
+      }
+      // A loss is at risk from a buy in the window that this sale didn't take whole (never crypto's: see washSaleApplies).
+      const taken = new Map(s.parts.filter((p) => p.lot_trade_id !== null).map((p) => [p.lot_trade_id!, p.qty_micro]))
+      const windowBuys = washSaleApplies(h.assetKind)
+        ? (buysIn.all(h.assetId, addDaysIso(s.traded_on, -WASH_DAYS), addDaysIso(s.traded_on, WASH_DAYS)) as { id: number; qty_micro: number }[]).filter(
+            (b) => taken.get(b.id) !== b.qty_micro,
+          )
+        : []
+      const line = (x: Omit<RealizedLine, 'sale_trade_id' | 'account' | 'account_id' | 'symbol' | 'sold_on' | 'note' | 'gain_cents' | 'wash_risk'>): RealizedLine => {
+        const gain = x.proceeds_cents - x.cost_cents
+        return {
+          sale_trade_id: s.trade_id,
+          account: h.accountName,
+          account_id: h.investAccountId,
+          symbol: h.symbol,
+          sold_on: s.traded_on,
+          note,
+          ...x,
+          gain_cents: gain,
+          wash_risk: gain < 0 && windowBuys.length > 0,
+        }
+      }
+      for (const p of s.parts)
+        lines.push(
+          line({
+            qty_micro: p.qty_micro,
+            acquired_on: p.opened_on,
+            proceeds_cents: p.proceeds_cents,
+            cost_cents: p.cost_cents,
+            term: p.term,
+            basis: p.lot_trade_id === null ? 'entered' : 'lot',
+          }),
+        )
+      if (s.zero_basis_qty_micro > 0 || s.zero_basis_cents !== 0)
+        lines.push(line({ qty_micro: s.zero_basis_qty_micro, acquired_on: null, proceeds_cents: s.zero_basis_cents, cost_cents: 0, term: 'st', basis: 'none' }))
+    }
+  }
+  lines.sort((a, b) => a.sold_on.localeCompare(b.sold_on) || (a.sale_trade_id ?? 0) - (b.sale_trade_id ?? 0))
+
+  const sum = (term: 'st' | 'lt'): RealizedTotals => {
+    const t = { proceeds_cents: 0, cost_cents: 0, gain_cents: 0, lines: 0 }
+    for (const l of lines)
+      if (l.term === term) {
+        t.proceeds_cents += l.proceeds_cents
+        t.cost_cents += l.cost_cents
+        t.gain_cents += l.gain_cents
+        t.lines++
+      }
+    return t
+  }
+  const st = sum('st')
+  const lt = sum('lt')
+  const years = new Set(
+    (
+      db
+        .prepare(
+          `SELECT DISTINCT substr(t.traded_on, 1, 4) AS y FROM trades t JOIN invest_accounts ia ON ia.id = t.invest_account_id
+           WHERE t.side = 'sell' AND ia.tracking = 'lots' AND ia.kind != 'retirement' AND t.traded_on <= ?
+             AND (t.note IS NULL OR t.note != ?)`,
+        )
+        .all(today, RSU_WITHHOLDING_NOTE) as { y: string }[]
+    ).map((r) => Number(r.y)),
+  )
+  years.add(year)
+  return {
+    year,
+    years: [...years].sort((a, b) => b - a),
+    lines,
+    st,
+    lt,
+    netted: netCapitalGains(st.gain_cents, lt.gain_cents),
+    sheltered,
+    withheld,
+    flags: { no_basis: lines.filter((l) => l.basis === 'none').length, wash_risk: lines.filter((l) => l.wash_risk).length },
+  }
 }
 
 /* ============================ the endpoint ============================ */

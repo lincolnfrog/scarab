@@ -15,7 +15,9 @@ fi
 
 # Vault-only (zero-knowledge) deployment: set SCARAB_ZK_ONLY=1 (put it in
 # .env.gcp so it sticks — --set-env-vars replaces the whole env each deploy).
-# The server then answers only the ciphertext courier and the price basket.
+# The server then answers only the ciphertext courier (with its kept versions,
+# members and invitations) and the price basket with its monthly history —
+# the complete list is server/zk-routes.ts.
 # Turning a household install into a vault-only one is a one-time
 # SCARAB_PURGE_PLAINTEXT=1 alongside it; the server refuses to boot ZK-only
 # over plaintext without it. Export your data first.

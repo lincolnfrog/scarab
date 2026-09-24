@@ -384,6 +384,76 @@ export const migrations: string[] = [
    ALTER TABLE vault_blobs ADD COLUMN prev_size INTEGER;
    ALTER TABLE vault_blobs ADD COLUMN prev_data TEXT;
    ALTER TABLE vault_blobs ADD COLUMN prev_updated_at TEXT`,
+
+  // 18 — an investment account's profile, the way a statement names it.
+  // `subtype` is what the account is for tax and display purposes
+  // (taxable|401k|403b|ira|roth_ira|hsa|crypto|stock_plan|other); NULL means
+  // infer it from `kind`, which every account written before this has.
+  // `owner` is free text, NULL = joint. `mask` is the last 4 digits. `sort`
+  // orders the account strip. All descriptive: nothing is derived from them.
+  `ALTER TABLE invest_accounts ADD COLUMN subtype TEXT;
+   ALTER TABLE invest_accounts ADD COLUMN institution TEXT;
+   ALTER TABLE invest_accounts ADD COLUMN owner TEXT;
+   ALTER TABLE invest_accounts ADD COLUMN mask TEXT;
+   ALTER TABLE invest_accounts ADD COLUMN sort INTEGER NOT NULL DEFAULT 0`,
+
+  // 19 — names for the price basket, so a symbol search can say "Vanguard
+  // Total Stock Market ETF" rather than just VTI, and tell funds from single
+  // stocks. Still shared infrastructure: basket_quotes stays out of the
+  // snapshot (engine/snapshot.ts TABLES).
+  `ALTER TABLE basket_quotes ADD COLUMN name TEXT;
+   ALTER TABLE basket_quotes ADD COLUMN etf INTEGER NOT NULL DEFAULT 0`,
+
+  // 20 — the courier keeps real history, and membership needs consent.
+  // vault_history holds the ciphertext a save replaced — many versions rather
+  // than 17's single prev_* step, which it starts from — with `pin` marking
+  // versions pruning must keep (e.g. 'pre-upgrade'). vault_invites is an
+  // invitation waiting on the invitee's consent — accepting it is what turns
+  // it into a household_members row. `updated_by` records which identity
+  // saved a version, so the other member's tab can say who. Server-side
+  // routing and ciphertext only: neither table is ever part of a snapshot
+  // (engine/snapshot.ts).
+  `CREATE TABLE vault_history (
+     owner_email TEXT NOT NULL,
+     version     INTEGER NOT NULL,
+     sha256      TEXT NOT NULL,
+     size        INTEGER NOT NULL,
+     data        TEXT NOT NULL,
+     updated_at  TEXT NOT NULL,
+     updated_by  TEXT,
+     pin         TEXT,
+     PRIMARY KEY (owner_email, version)
+   );
+   INSERT INTO vault_history (owner_email, version, sha256, size, data, updated_at)
+     SELECT owner_email, prev_version, prev_sha256, prev_size, prev_data, prev_updated_at
+     FROM vault_blobs WHERE prev_data IS NOT NULL;
+   ALTER TABLE vault_blobs ADD COLUMN updated_by TEXT;
+   CREATE TABLE vault_invites (
+     email      TEXT PRIMARY KEY,
+     household  TEXT NOT NULL,
+     invited_by TEXT NOT NULL,
+     invited_at TEXT NOT NULL DEFAULT (datetime('now'))
+   )`,
+
+  // 21 — an invitation waits per (invitee, household), not per invitee. With
+  // one row per email, any household's invitation replaced another's — so
+  // anyone could keep displacing someone's pending invitation, and the
+  // displaced household could see it vanish. Now each household's stands
+  // until the invitee answers it or the household withdraws it. SQLite can't
+  // change a primary key in place: the table is rebuilt, every row kept.
+  // Still server-side routing only, never part of a snapshot.
+  `CREATE TABLE vault_invites_21 (
+     email      TEXT NOT NULL,
+     household  TEXT NOT NULL,
+     invited_by TEXT NOT NULL,
+     invited_at TEXT NOT NULL DEFAULT (datetime('now')),
+     PRIMARY KEY (email, household)
+   );
+   INSERT INTO vault_invites_21 (email, household, invited_by, invited_at)
+     SELECT email, household, invited_by, invited_at FROM vault_invites;
+   DROP TABLE vault_invites;
+   ALTER TABLE vault_invites_21 RENAME TO vault_invites;
+   CREATE INDEX vault_invites_household ON vault_invites (household)`,
 ]
 
 export function migrate(db: DbLike): void {

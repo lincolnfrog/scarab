@@ -7,25 +7,23 @@ import { loadDump } from '../engine/snapshot'
 import { api } from './api'
 import { api2 } from './api2'
 import { api3 } from './api3'
-import { api4 } from './api4'
+import { api4, bodyLimits } from './api4'
 import { api5 } from './api5'
 import { api6 } from './api6'
 import { api7 } from './api7'
 import { api8, serverHasData } from './api8'
+import { api9 } from './api9'
+import { api10 } from './api10'
+import { jsonBodies, onError } from './http'
 import { detectTransfers } from './import'
 import { runRepairs } from './repairs'
+import { ZK_ROUTES } from './zk-routes'
 
 export type Variables = { userEmail: string; zkOnly: boolean }
 export type ServerOptions = { zkOnly: boolean }
 
-/**
- * Everything a zero-knowledge-only server will answer. Identity, the mode
- * probe, the encrypted-blob courier and its membership list (emails the
- * server already knows from IAP), and the daily price basket — nothing that
- * carries plaintext in either direction. The list is the whole
- * privacy claim for scarab.one, so it is deliberately short and literal.
- */
-export const ZK_ROUTES = /^\/api\/(me|health|mode|vault|vault\/members|vault\/members\/[^/]+|basket|basket\/status|basket\/rebuild)$/
+// The vault-only allowlist lives in its own file, one section per stream.
+export { ZK_ROUTES }
 
 /**
  * Identity comes from Identity-Aware Proxy. IAP sets this header after
@@ -78,6 +76,12 @@ export function createApp(opts: ServerOptions): Hono<{ Variables: Variables }> {
       return c.json({ error: 'this server is zero-knowledge only: it stores ciphertext and never handles plaintext' }, 403)
     await next()
   })
+  // Request body caps, after the gate so a refused route never reads its body (server/api4.ts).
+  app.use('/api/*', bodyLimits(opts))
+  // Then every body is parsed once: not JSON, or JSON null, is a 400 before any handler (server/http.ts).
+  app.use('/api/*', jsonBodies)
+  // Whatever a handler throws comes back as JSON { error }: 4xx for an ApiError, 500 for the server's own failure.
+  app.onError(onError)
 
   // The basket is ~10k rows; gzip it (Cloud Run's front end doesn't).
   app.use('/api/basket', compress())
@@ -90,6 +94,11 @@ export function createApp(opts: ServerOptions): Hono<{ Variables: Variables }> {
   app.route('/api', api6)
   app.route('/api', api7)
   app.route('/api', api8)
+  app.route('/api', api9)
+  app.route('/api', api10)
+  // An /api path no route answered (unknown, or a known path with a method it
+  // doesn't take) is an API miss, not a client route: JSON, never the SPA shell.
+  app.all('/api/*', (c) => c.json({ error: `no such endpoint: ${c.req.method} ${c.req.path}` }, 404))
 
   // Built client, with SPA fallback for client-side routes. Hashed assets are
   // immutable; the HTML shell must never be cached or deploys leave users on

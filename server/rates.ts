@@ -1,5 +1,6 @@
 import type { DbLike } from '../engine/db'
 import { putPmmsRate } from '../engine/digest'
+import { upstreamSignal } from './upstream'
 
 /**
  * Freddie Mac PMMS weekly average 30-year fixed rate, via FRED's keyless
@@ -34,7 +35,7 @@ export async function ensurePmmsRate(db: DbLike, f: typeof fetch = fetch): Promi
   const flag = `fetched:pmms:${today}`
   if (db.prepare('SELECT 1 FROM app_meta WHERE key = ?').get(flag)) return []
   try {
-    const r = await f(PMMS_URL, { headers: { 'user-agent': 'Mozilla/5.0 (scarab household finance)' } })
+    const r = await f(PMMS_URL, { headers: { 'user-agent': 'Mozilla/5.0 (scarab household finance)' }, signal: upstreamSignal() })
     if (!r.ok) return [`mortgage rates: PMMS HTTP ${r.status}`]
     const parsed = parsePmmsCsv(await r.text())
     if (!parsed) return ['mortgage rates: PMMS CSV had no parsable row']

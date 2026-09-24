@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { DbLike } from '../engine/db'
-import { applyBasket } from '../engine/services'
+import { applyBasket, upsertPrices } from '../engine/services'
 import { dumpDb } from '../engine/snapshot'
 import { serverHasData } from './api8'
 import {
   basketStatus,
   buildBasket,
+  cleanSecurityName,
   ensureBasket,
   fetchStockBasket,
   getBasket,
@@ -17,6 +18,7 @@ import {
   toYahooSymbol,
 } from './basket'
 import { openDb } from './migrations'
+import { BACKFILL_RETRY_DAYS, backfillMonthlyHistory, parseYahooHistory, type QuoteResult } from './prices'
 
 const mem = () => openDb(':memory:') as unknown as DbLike
 
@@ -82,9 +84,9 @@ function fakeNet(overrides: Partial<Record<'nasdaq' | 'other' | 'spark' | 'crumb
       return json(
         page === '1'
           ? [
-              { symbol: 'btc', current_price: 111234.56, last_updated: '2025-09-09T22:58:01.000Z' },
-              { symbol: 'eth', current_price: 4321.1, last_updated: '2025-09-09T22:58:01.000Z' },
-              { symbol: 'btc', current_price: 1.0, last_updated: '2025-09-09T22:58:01.000Z' }, // a lookalike token
+              { symbol: 'btc', name: 'Bitcoin', current_price: 111234.56, last_updated: '2025-09-09T22:58:01.000Z' },
+              { symbol: 'eth', name: 'Ethereum', current_price: 4321.1, last_updated: '2025-09-09T22:58:01.000Z' },
+              { symbol: 'btc', name: 'Batcoin', current_price: 1.0, last_updated: '2025-09-09T22:58:01.000Z' }, // a lookalike token
             ]
           : [{ symbol: 'sol', current_price: 210.05, last_updated: '2025-09-09T22:58:01.000Z' }],
       )
@@ -178,8 +180,82 @@ describe('buildBasket', () => {
     const b = getBasket(db)
     expect(b.count).toBe(7)
     expect(b.builtAt).toBeTruthy()
-    expect(b.quotes.find((q) => q.symbol === 'BTC')).toEqual({ symbol: 'BTC', kind: 'crypto', cents: 11123456, pricedOn: '2025-09-09' })
+    expect(b.quotes.find((q) => q.symbol === 'BTC')).toEqual({
+      symbol: 'BTC',
+      kind: 'crypto',
+      cents: 11123456,
+      pricedOn: '2025-09-09',
+      name: 'Bitcoin',
+      etf: false,
+    })
     expect(b.quotes.find((q) => q.symbol === 'BRK-B')?.kind).toBe('stock')
+    // Names and the ETF flag ride along from the symbol directory (A8).
+    const named = Object.fromEntries(b.quotes.map((q) => [q.symbol, [q.name, q.etf]]))
+    expect(named).toEqual({
+      AAPL: ['Apple Inc.', false],
+      'BRK-B': ['Berkshire Hathaway Inc. Class B', false],
+      QQQ: ['Invesco QQQ Trust, Series 1', true],
+      SPY: ['SPDR S&P 500 ETF Trust', true],
+      BTC: ['Bitcoin', false],
+      ETH: ['Ethereum', false],
+      SOL: [null, false], // CoinGecko sent no name
+    })
+  })
+
+  it('security names lose the share-class boilerplate, nothing else', () => {
+    expect(cleanSecurityName('Apple Inc. - Common Stock')).toBe('Apple Inc.')
+    expect(cleanSecurityName('Alphabet Inc. - Class A Common Stock')).toBe('Alphabet Inc. Class A')
+    expect(cleanSecurityName('Armada Acquisition Corp. III - Class A Ordinary Shares')).toBe('Armada Acquisition Corp. III Class A')
+    expect(cleanSecurityName('Brookfield Corp Class A Common Shares')).toBe('Brookfield Corp Class A')
+    expect(cleanSecurityName('Berkshire Hathaway Inc. New Common Stock')).toBe('Berkshire Hathaway Inc.')
+    expect(cleanSecurityName('Alphabet Inc. - Class C Capital Stock')).toBe('Alphabet Inc. Class C')
+    expect(cleanSecurityName('Brown Forman Inc Class B Common Stock')).toBe('Brown Forman Inc Class B')
+    expect(cleanSecurityName('Taiwan Semiconductor Manufacturing Company Ltd. - American Depositary Shares')).toBe(
+      'Taiwan Semiconductor Manufacturing Company Ltd.',
+    )
+    expect(cleanSecurityName('Alibaba Group Holding Limited American Depositary Shares each representing eight Ordinary share')).toBe(
+      'Alibaba Group Holding Limited',
+    )
+    expect(cleanSecurityName('  Vanguard  Total Stock Market ETF ')).toBe('Vanguard Total Stock Market ETF')
+    expect(cleanSecurityName('Common Stock')).toBe('Common Stock')
+    expect(cleanSecurityName('Invesco QQQ Trust, Series 1')).toBe('Invesco QQQ Trust, Series 1')
+  })
+
+  it('a source that fails outright leaves its kind’s rows; a symbol a build misses keeps its quote for two weeks', () => {
+    const db = mem()
+    const q = (symbol: string, kind: 'stock' | 'crypto', cents: number, pricedOn: string, name?: string) => ({ symbol, kind, cents, pricedOn, name })
+    storeBasket(
+      db,
+      [q('AAPL', 'stock', 100, '2025-09-01', 'Apple Inc.'), q('OLDCO', 'stock', 5, '2025-08-28'), q('BTC', 'crypto', 9, '2025-09-01')],
+      [],
+      '2025-09-01T21:00:00.000Z',
+    )
+    // Next build: stocks only (crypto failed), and AAPL's batch came back without a name.
+    storeBasket(db, [q('AAPL', 'stock', 101, '2025-09-09'), q('SPY', 'stock', 650, '2025-09-09')], ['crypto: CoinGecko page 1 HTTP 429'], '2025-09-09T21:00:00.000Z')
+    const rows = () => getBasket(db).quotes.map((r) => `${r.kind}:${r.symbol}:${r.cents}:${r.pricedOn}:${r.name}`)
+    expect(rows()).toEqual([
+      'crypto:BTC:9:2025-09-01:null', // crypto untouched
+      'stock:AAPL:101:2025-09-09:Apple Inc.', // refreshed, keeps its name
+      'stock:OLDCO:5:2025-08-28:null', // missed by this build, still under two weeks old
+      'stock:SPY:650:2025-09-09:null',
+    ])
+    expect(basketStatus(db).builtAt).toBe('2025-09-09T21:00:00.000Z')
+    // A build more than two weeks after OLDCO's last quote drops it.
+    storeBasket(db, [q('AAPL', 'stock', 102, '2025-09-12')], [], '2025-09-12T21:00:00.000Z')
+    expect(rows().filter((r) => r.includes('OLDCO'))).toEqual([])
+    expect(rows()).toContain('stock:SPY:650:2025-09-09:null')
+  })
+
+  it('ensureBasket({ force }) rebuilds after today’s attempt, and joins a build already running', async () => {
+    const db = mem()
+    const { f, calls } = fakeNet()
+    await ensureBasket(db, f, '2025-09-09')
+    expect(ensureBasket(db, f, '2025-09-09')).toBeNull()
+    const forced = ensureBasket(db, f, '2025-09-09', { force: true })
+    expect(forced).not.toBeNull()
+    expect(ensureBasket(db, f, '2025-09-09', { force: true })).toBe(forced) // same in-flight build
+    await forced
+    expect(calls.filter((u) => u.includes('nasdaqlisted'))).toHaveLength(2)
   })
 
   it('keeps yesterday’s basket when every source fails, and says why', async () => {
@@ -243,6 +319,59 @@ describe('applyBasket', () => {
     expect(applyBasket(db, { builtAt: null, quotes: [] }).errors[0]).toMatch(/empty/)
     expect(applyBasket(mem(), basket).errors[0]).toMatch(/no assets/)
   })
+
+  it('also accrues each matched quote into prices_daily, so a tab builds chart history day by day', () => {
+    const db = mem()
+    db.prepare("INSERT INTO assets (symbol, kind) VALUES ('VTI', 'stock'), ('BTC', 'crypto')").run()
+    const day = (pricedOn: string, vti: number) => ({
+      builtAt: `${pricedOn}T21:00:00.000Z`,
+      quotes: [
+        { symbol: 'VTI', kind: 'stock' as const, cents: vti, pricedOn },
+        { symbol: 'BTC', kind: 'crypto' as const, cents: 11_000_000, pricedOn },
+      ],
+    })
+    const both = () => ({
+      prices: db.prepare('SELECT asset_id, priced_on, close_cents FROM prices ORDER BY asset_id, priced_on').all(),
+      daily: db.prepare('SELECT asset_id, priced_on, close_cents FROM prices_daily ORDER BY asset_id, priced_on').all(),
+    })
+    expect(applyBasket(db, day('2025-09-09', 30_000)).updated).toBe(2)
+    const once = both()
+    expect(once.daily).toEqual(once.prices)
+    expect(once.daily).toEqual([
+      { asset_id: 1, priced_on: '2025-09-09', close_cents: 30_000 },
+      { asset_id: 2, priced_on: '2025-09-09', close_cents: 11_000_000 },
+    ])
+    // Idempotent within a day: the same basket again changes nothing.
+    applyBasket(db, day('2025-09-09', 30_000))
+    expect(both()).toEqual(once)
+    // A later build the same day updates that day's close in both tables.
+    applyBasket(db, day('2025-09-09', 30_100))
+    expect(both().daily).toEqual([
+      { asset_id: 1, priced_on: '2025-09-09', close_cents: 30_100 },
+      { asset_id: 2, priced_on: '2025-09-09', close_cents: 11_000_000 },
+    ])
+    expect(both().prices).toEqual(both().daily)
+    // The next day adds a row to each.
+    applyBasket(db, day('2025-09-10', 30_200))
+    expect(both().daily).toHaveLength(4)
+    expect(both().prices).toHaveLength(4)
+  })
+
+  it('skips malformed basket rows instead of writing them (the basket crosses the network into the tab)', () => {
+    const db = mem()
+    db.prepare("INSERT INTO assets (symbol, kind) VALUES ('AAA', 'stock'), ('BBB', 'stock'), ('CCC', 'stock')").run()
+    const r = applyBasket(db, {
+      builtAt: null,
+      quotes: [
+        { symbol: 'AAA', kind: 'stock', cents: 12.5, pricedOn: '2025-09-09' }, // float cents
+        { symbol: 'BBB', kind: 'stock', cents: 100, pricedOn: 'yesterday' },
+        { symbol: 'CCC', kind: 'stock', cents: 100, pricedOn: '2025-09-09' },
+      ],
+    })
+    expect(r.updated).toBe(1)
+    expect(r.errors).toEqual(['AAA: malformed quote in today’s basket', 'BBB: malformed quote in today’s basket'])
+    expect(db.prepare('SELECT count(*) AS n FROM prices_daily').get()).toEqual({ n: 1 })
+  })
 })
 
 /* ---------- the front door's question ---------- */
@@ -255,5 +384,100 @@ describe('serverHasData', () => {
     expect(serverHasData(db)).toBe(false)
     db.prepare("INSERT INTO accounts (name, kind) VALUES ('Checking', 'checking')").run()
     expect(serverHasData(db)).toBe(true)
+  })
+})
+
+/* ---------- price ingestion hygiene (server/prices.ts) ---------- */
+
+describe('parseYahooHistory monthly bars', () => {
+  const chart = (tz: string | undefined, bars: [number, number | null][]) => ({
+    chart: {
+      result: [
+        {
+          meta: tz ? { exchangeTimezoneName: tz } : {},
+          timestamp: bars.map(([t]) => t),
+          indicators: { quote: [{ close: bars.map(([, c]) => c) }] },
+        },
+      ],
+    },
+  })
+
+  it('stamps each bar at its month’s end (not its open), and the month in progress at today', () => {
+    const body = chart('America/New_York', [
+      [1704085200, 100.5], // 2024-01-01 05:00Z — midnight in New York, winter
+      [1706763600, null], // February: no close → skipped
+      [1719806400, 200], // 2024-07-01 04:00Z — midnight in New York, summer
+      [1725163200, 210], // 2024-09-01: the month in progress…
+      [1726689600, 211.11], // …and Yahoo's live bar for it, which wins
+    ])
+    expect(parseYahooHistory('VTI', body, { monthly: true, today: '2024-09-18' })).toEqual([
+      { symbol: 'VTI', cents: 10050, pricedOn: '2024-01-31' },
+      { symbol: 'VTI', cents: 20000, pricedOn: '2024-07-31' },
+      { symbol: 'VTI', cents: 21111, pricedOn: '2024-09-18' },
+    ])
+    // Daily mode (charts.ts) is unchanged: the timestamp's UTC day.
+    expect(parseYahooHistory('VTI', body).map((q) => q.pricedOn)).toEqual(['2024-01-01', '2024-07-01', '2024-09-01', '2024-09-18'])
+  })
+
+  it('reads the month in the exchange’s zone: a bar at local midnight east of UTC is the previous day in UTC', () => {
+    const body = chart('Asia/Tokyo', [[1719759600, 50]]) // 2024-06-30 15:00Z = July 1, 00:00 in Tokyo
+    expect(parseYahooHistory('7203.T', body, { monthly: true, today: '2024-09-18' })[0]!.pricedOn).toBe('2024-07-31')
+    // No zone (or a bogus one): UTC.
+    expect(parseYahooHistory('X', chart(undefined, [[1719759600, 50]]), { monthly: true, today: '2024-09-18' })[0]!.pricedOn).toBe('2024-06-30')
+    expect(parseYahooHistory('X', chart('Not/AZone', [[1719759600, 50]]), { monthly: true, today: '2024-09-18' })[0]!.pricedOn).toBe('2024-06-30')
+  })
+})
+
+describe('backfillMonthlyHistory (household refresh)', () => {
+  const setup = () => {
+    const db = mem()
+    db.prepare("INSERT INTO assets (symbol, kind) VALUES ('VTI', 'stock'), ('GONE', 'stock')").run()
+    const calls: string[] = []
+    const fetchHistory = async (symbol: string, _kind: 'stock' | 'crypto', _f?: typeof fetch, today?: string): Promise<QuoteResult> => {
+      calls.push(`${symbol}@${today}`)
+      if (symbol === 'GONE') return { quotes: [], errors: ['GONE: Yahoo history HTTP 404'] }
+      return { quotes: [{ symbol, cents: 20_000, pricedOn: '2026-08-31' }], errors: [] }
+    }
+    const assets = [
+      { symbol: 'VTI', kind: 'stock' as const },
+      { symbol: 'GONE', kind: 'stock' as const },
+    ]
+    const meta = () => db.prepare("SELECT key, value FROM app_meta WHERE key LIKE 'backfill%' ORDER BY key").all() as { key: string; value: string }[]
+    const run = (today: string) => backfillMonthlyHistory(db, assets, upsertPrices, { today, fetchHistory })
+    return { db, calls, meta, run }
+  }
+
+  it('backfills once per asset under the v2 flag; a failure is stamped and retried weekly, not every refresh', async () => {
+    const { db, calls, meta, run } = setup()
+    // An asset backfilled before v2 (month-open stamps) refetches once.
+    db.prepare("INSERT INTO app_meta (key, value) VALUES ('backfilled:VTI', '2026-01-01 00:00:00')").run()
+
+    const first = await run('2026-09-01')
+    expect(first).toMatchObject({ backfilled: 1, errors: ['GONE: Yahoo history HTTP 404'], skipped: [] })
+    expect(calls).toEqual(['VTI@2026-09-01', 'GONE@2026-09-01'])
+    expect(meta().map((m) => m.key)).toEqual(['backfill_failed:GONE', 'backfilled:VTI', 'backfilled:v2:VTI'])
+    expect(meta().find((m) => m.key === 'backfill_failed:GONE')!.value).toBe('2026-09-01')
+    expect(db.prepare('SELECT priced_on, close_cents FROM prices').all()).toEqual([{ priced_on: '2026-08-31', close_cents: 20_000 }])
+
+    // Refreshes inside the week fetch nothing at all.
+    const quiet = await run('2026-09-07')
+    expect(quiet).toEqual({ backfilled: 0, errors: [], skipped: ['GONE'] })
+    expect(calls).toHaveLength(2)
+
+    // A week on, the failed symbol is tried again (still failing → restamped).
+    await run(`2026-09-0${1 + BACKFILL_RETRY_DAYS}`)
+    expect(calls.slice(2)).toEqual(['GONE@2026-09-08'])
+    expect(meta().find((m) => m.key === 'backfill_failed:GONE')!.value).toBe('2026-09-08')
+  })
+
+  it('a retry that succeeds clears the failure stamp', async () => {
+    const { db, meta } = setup()
+    db.prepare("INSERT INTO app_meta (key, value) VALUES ('backfill_failed:VTI', '2026-08-01'), ('backfilled:v2:GONE', 'x')").run()
+    const r = await backfillMonthlyHistory(db, [{ symbol: 'VTI', kind: 'stock' }], upsertPrices, {
+      today: '2026-09-01',
+      fetchHistory: async (symbol) => ({ quotes: [{ symbol, cents: 1, pricedOn: '2026-08-31' }], errors: [] }),
+    })
+    expect(r.backfilled).toBe(1)
+    expect(meta().map((m) => m.key)).toEqual(['backfilled:v2:GONE', 'backfilled:v2:VTI'])
   })
 })

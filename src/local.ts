@@ -1,16 +1,28 @@
 import type { DbLike } from '../engine/db'
-import { ApiError } from '../engine/services'
+import { ApiError } from '../engine/errors'
 import type { Dump } from '../engine/snapshot'
+import type { BrowserDb } from '../engine/sqljs-db'
+import { todayLocal } from '../shared/dates'
 import type { VaultHeader } from '../shared/vault'
+import { isNetworkOnly, loadRoutes } from './local/routes'
+import { matchRoute, policyOf, type LocalCtx } from './local/table'
 
 /**
  * Local mode: the entire app runs against a SQLite database living in this
- * tab. Every /api call the screens make is dispatched to engine/services
- * instead of the network. The server's only remaining jobs are serving the
- * static bundle and couriering encrypted vault blobs (which pass through).
+ * tab. Every /api call the screens make is dispatched to the in-tab route
+ * table (src/local/) instead of the network — the same paths and payloads,
+ * answered by the same engine functions the server calls. The server's only
+ * remaining jobs are serving the static bundle and couriering encrypted vault
+ * blobs (which pass through).
  *
  * State is per-tab and in-memory — leaving is a page reload; durable saves go
  * through the encrypted vault.
+ *
+ * Events, all on `window`:
+ *   'scarab-mode'     a state transition — entered, turned dirty, saved, vault or identity changed
+ *   'scarab-write'    every write that changed the database, once it is applied (autosave debounces on it)
+ *   'scarab-data'     the tab's data was replaced in place; dataEpoch moved (screens re-read)
+ *   'scarab-revision' anything in the database changed, unsaved work or not; dataRevision moved
  */
 
 /**
@@ -29,20 +41,40 @@ export type VaultSession = { rawDataKey: Uint8Array; header: VaultHeader; versio
 export type SnapshotLoad = { from: number; upgraded: number[] }
 
 type LocalState = {
-  db: (DbLike & { export(): Uint8Array }) | null
+  db: BrowserDb | null
   vault: VaultSession | null
   dirty: boolean
   /** Monotonic count of writes this session. A save records it at dump time to know whether later writes slipped in. */
   writes: number
+  /** The IAP identity this tab was opened by; survives entering and leaving a session. */
+  identity: string | null
+  /** Bumped whenever the tab's data is replaced in place, so screens keyed on it remount. */
+  dataEpoch: number
+  /**
+   * Bumped whenever the database changed at all: every dispatch that moved its
+   * change counter, whatever the route's dirty policy, and every new or
+   * replaced database. Never reset, so it names one state of the data for the
+   * life of the page.
+   */
+  dataRevision: number
 }
-const state: LocalState = { db: null, vault: null, dirty: false, writes: 0 }
+const state: LocalState = { db: null, vault: null, dirty: false, writes: 0, identity: null, dataEpoch: 0, dataRevision: 0 }
 
+const announce = (event: 'scarab-mode' | 'scarab-write' | 'scarab-data' | 'scarab-revision') => window.dispatchEvent(new Event(event))
+
+/** A write landed in the tab's database. Called after it is applied, never before. */
 function markDirty() {
   state.writes++
-  if (!state.dirty) {
-    state.dirty = true
-    window.dispatchEvent(new Event('scarab-mode'))
-  }
+  const wasDirty = state.dirty
+  state.dirty = true
+  if (!wasDirty) announce('scarab-mode')
+  announce('scarab-write')
+}
+
+/** The tab's data was swapped wholesale: anything read before is stale. */
+function markDataReplaced() {
+  state.dataEpoch++
+  announce('scarab-data')
 }
 
 export const localMode = {
@@ -59,9 +91,33 @@ export const localMode = {
   get writes() {
     return state.writes
   },
+  /** Who is signed in (IAP), as the in-tab engine attributes digests and imports; null until App learns it. */
+  get identity() {
+    return state.identity
+  },
+  /** Increments on every in-place data replacement (loadLocalDump, POST /import). Key screens on it. */
+  get dataEpoch() {
+    return state.dataEpoch
+  },
+  /**
+   * Increments whenever anything in the tab's database changes, including
+   * writes that leave no unsaved work (a price refresh storing quotes, a read
+   * that seeds a default). A cache of results computed from the data keys on
+   * it: the same revision means the same data.
+   */
+  get dataRevision() {
+    return state.dataRevision
+  },
   setVault(v: VaultSession | null) {
     state.vault = v
-    window.dispatchEvent(new Event('scarab-mode'))
+    announce('scarab-mode')
+  },
+  /** App calls this with /api/me's email before the front door enters a session. */
+  setIdentity(email: string | null) {
+    const next = email?.trim() || null
+    if (next === state.identity) return
+    state.identity = next
+    announce('scarab-mode')
   },
   /**
    * A save landed. `writesAtDump` is what `writes` read when the payload was
@@ -71,7 +127,7 @@ export const localMode = {
   markSaved(version: number, writesAtDump: number = state.writes) {
     state.dirty = writesAtDump !== state.writes
     if (state.vault) state.vault.version = version
-    window.dispatchEvent(new Event('scarab-mode'))
+    announce('scarab-mode')
   },
 }
 
@@ -93,6 +149,9 @@ export async function enterLocalMode(
   const db = await openBrowserDb({ wasmUrl })
   migrate(db)
   const loaded = dump ? loadDump(db, dump) : null
+  // Entering again replaces the tab's database (an unlock after a Create vault
+  // that failed once the engine was up): free the old one, or sql.js keeps it.
+  const prev = state.db
   state.db = db
   state.vault = vault
   // An empty start has nothing saved yet; so does a snapshot this engine had to
@@ -100,7 +159,16 @@ export async function enterLocalMode(
   // reseals it at the current version.
   state.dirty = dump === null || (loaded !== null && loaded.upgraded.length > 0)
   state.writes = 0
-  window.dispatchEvent(new Event('scarab-mode'))
+  state.dataRevision++
+  if (prev && prev !== db) {
+    try {
+      prev.close()
+    } catch (e) {
+      console.error('local mode: closing the replaced database failed', e)
+    }
+  }
+  announce('scarab-mode')
+  announce('scarab-revision')
   return loaded
 }
 
@@ -109,8 +177,11 @@ export async function loadLocalDump(dump: Dump): Promise<SnapshotLoad> {
   if (!state.db) throw new Error('local mode is not active')
   const { loadDump } = await import('../engine/snapshot')
   const loaded = loadDump(state.db, dump)
-  state.dirty = false // caller decides: an unlock marks it saved, a file load marks it dirty
+  state.dataRevision++
+  markDataReplaced()
+  state.dirty = false // caller decides: an unlock marks it saved, a file load leaves it dirty
   markDirty()
+  announce('scarab-revision')
   return loaded
 }
 
@@ -119,6 +190,38 @@ export function exitLocalMode(): void {
   state.vault = null
   state.dirty = false
   window.location.reload()
+}
+
+const HOUSEHOLD_CHOICE_KEY = 'scarab:chose-household'
+
+/**
+ * The front door's "Continue in household mode" while a session is already
+ * booted behind it (a Create vault that failed after starting the engine, or
+ * one that just made a vault). Household mode means the server's data, but a
+ * live session answers every /api call from this tab — so end it (the page
+ * reloads) and have the next load go straight to household mode.
+ */
+export function exitToHousehold(): void {
+  try {
+    sessionStorage.setItem(HOUSEHOLD_CHOICE_KEY, '1')
+  } catch {
+    /* the reload shows the front door again; the choice is one click away there */
+  }
+  exitLocalMode()
+}
+
+let householdChoice: boolean | undefined
+/** Whether this page load follows exitToHousehold. Read once per load (and cleared), so a later reload asks again. */
+export function takeHouseholdChoice(): boolean {
+  if (householdChoice === undefined) {
+    try {
+      householdChoice = sessionStorage.getItem(HOUSEHOLD_CHOICE_KEY) === '1'
+      sessionStorage.removeItem(HOUSEHOLD_CHOICE_KEY)
+    } catch {
+      householdChoice = false
+    }
+  }
+  return householdChoice
 }
 
 // Leaving the page discards the tab's database; warn if there's unsaved work.
@@ -130,180 +233,82 @@ if (typeof window !== 'undefined')
     }
   })
 
-const todayIso = () => new Date().toISOString().slice(0, 10)
+/**
+ * Rows changed on this connection since it opened, counting every INSERT,
+ * UPDATE and DELETE. Prepared per call: sql.js frees every statement on
+ * export(), so a cached one could go stale.
+ */
+const totalChanges = (db: DbLike) => (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
 
+const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+  typeof (v as PromiseLike<unknown> | null)?.then === 'function'
+
+/**
+ * Answer one /api call from the tab's database. Mirrors the server: same
+ * route table shape, same engine calls, and an engine ApiError becomes a
+ * plain Error carrying its message, as a failed fetch does in api.ts.
+ *
+ * A call dirties the tab only when its route's policy is 'auto' and the
+ * database's change counter moved across the handler: a write that failed
+ * validation or changed nothing leaves the tab clean, and the write is
+ * counted only after it is applied, so a save that dumps mid-call can't claim
+ * it. (A handler that throws after partly writing counts as a change: better
+ * one extra save than a lost edit.) Sync handlers — all but the network-backed
+ * price refresh — run and settle in one uninterrupted turn.
+ *
+ * Whatever the policy, a call that moved the counter bumps dataRevision
+ * (before the other announcements, so their listeners read the new value): a
+ * 'never' price refresh stores quotes that change what the screens compute
+ * without being unsaved work. A refresh that runs the history import through
+ * a nested call bumps it once for each, and one that awaited while another
+ * call wrote bumps it for that write too: an extra bump, never a missed one.
+ */
 export async function localDispatch(method: string, rawUrl: string, body?: unknown): Promise<unknown> {
-  const db = state.db
-  if (!db) throw new Error('local mode is not active')
+  if (!state.db) throw new Error('local mode is not active')
   const url = new URL(rawUrl, 'http://local')
-  const path = url.pathname.replace(/^\/api/, '')
-  const q = url.searchParams
-  const svc = await import('../engine/services')
-  const snapshot = await import('../engine/snapshot')
-  const b = (body ?? {}) as never
-  const seg = path.split('/').filter(Boolean)
-  const key = `${method} /${seg[0] ?? ''}${seg.length > 1 ? '/*' : ''}`
-  if (method !== 'GET' && !(method === 'POST' && seg[0] === 'scenarios' && (seg[1] === 'compare' || seg[1] === 'price')))
-    markDirty()
+  if (!/^\/api(?:\/|$)/.test(url.pathname)) throw new Error(`local mode answers /api paths only, not ${url.pathname}`)
+  const path = url.pathname.slice('/api'.length) || '/'
+  const verb = method.toUpperCase()
+  const hit = matchRoute(await loadRoutes(), verb, path)
+  if (!hit)
+    throw new Error(
+      isNetworkOnly(path)
+        ? `${verb} /api${path} is served by the network, never by the in-tab engine`
+        : `local mode has no handler for ${verb} ${path}`,
+    )
+  const db = state.db
+  if (!db) throw new Error('local mode is not active') // the session ended while the routes loaded
 
+  const ctx: LocalCtx = {
+    db,
+    params: hit.params,
+    query: url.searchParams,
+    body: body ?? {},
+    today: todayLocal(),
+    identity: state.identity,
+  }
+  const watch = policyOf(hit.route) === 'auto'
+  const before = totalChanges(db)
+  let succeeded = false
   try {
-    switch (key) {
-      case 'GET /me':
-        return { email: 'you · local tab' }
-      case 'GET /health':
-        return svc.health()
-      case 'GET /accounts':
-        return svc.listAccounts(db)
-      case 'POST /accounts':
-        return svc.createAccount(db, b)
-      case 'PATCH /accounts/*':
-        return svc.anchorAccount(db, Number(seg[1]), b)
-      case 'GET /categories':
-        return svc.listCategories(db)
-      case 'POST /categories':
-        return svc.createCategory(db, b)
-      case 'POST /imports':
-        return svc.runImport(db, b, 'local')
-      case 'GET /imports':
-        return svc.listImports(db)
-      case 'GET /transactions':
-        return svc.listTransactions(db, {
-          q: q.get('q') ?? undefined,
-          month: q.get('month') ?? undefined,
-          categoryId: q.get('category_id') ?? undefined,
-          accountId: q.get('account_id') ?? undefined,
-          uncategorized: q.get('uncategorized') === '1',
-        })
-      case 'PATCH /transactions/*':
-        return svc.patchTransaction(db, Number(seg[1]), b)
-      case 'GET /cashflow/*':
-        return seg[1] === 'monthly' ? svc.cashflowMonthly(db) : svc.cashflowCategories(db, q.get('month') ?? undefined)
-      case 'GET /budget':
-        return svc.getBudget(db, q.get('month') ?? undefined)
-      case 'PUT /budget':
-        return svc.putBudget(db, b)
-      case 'GET /invest/*':
-        return svc.listInvestAccounts(db)
-      case 'POST /invest/*':
-        return svc.createInvestAccount(db, b)
-      case 'PATCH /invest/*':
-        return svc.updateInvestAccount(db, Number(seg[2]), b)
-      case 'DELETE /invest/*':
-        return svc.deleteInvestAccount(db, Number(seg[2]))
-      case 'PUT /invest/*':
-        return svc.putBalanceSnapshot(db, b)
-      case 'POST /trades':
-        return svc.createTrade(db, b)
-      case 'GET /trades':
-        return svc.listTrades(db)
-      case 'GET /portfolio':
-        return svc.getPortfolio(db, todayIso())
-      case 'POST /prices/*': {
-        // The one price path that touches the network: the shared daily
-        // basket, identical for everyone. Which symbols matter is decided here.
-        const r = await fetch('/api/basket')
-        if (!r.ok) throw new Error(`price basket: ${r.status} ${r.statusText}`)
-        return svc.applyBasket(db, (await r.json()) as Parameters<typeof svc.applyBasket>[1])
-      }
-      case 'GET /properties':
-        return svc.listProperties(db)
-      case 'POST /properties':
-        return svc.createProperty(db, b)
-      case 'PUT /properties/*':
-        return svc.putValuation(db, Number(seg[1]), b)
-      case 'POST /liabilities':
-        return svc.createLiability(db, b)
-      case 'PUT /liabilities/*':
-        return svc.putLiabilityBalance(db, Number(seg[1]), b)
-      case 'GET /networth':
-        return svc.getNetworth(db, todayIso())
-      case 'GET /activity':
-        return svc.getActivity(db)
-      case 'GET /unvested':
-        return svc.getUnvested(db)
-      case 'PUT /unvested':
-        return svc.putUnvested(db, b, todayIso())
-      case 'POST /unvested/*':
-        return svc.vestUnvested(db, b, todayIso())
-      case 'GET /charts/*':
-        return svc.getChartData(db, seg[1]!, [])
-      case 'GET /goal':
-        return svc.getGoal(db)
-      case 'PUT /goal':
-        return svc.putGoal(db, b)
-      case 'POST /loans':
-        return svc.createLoan(db, b)
-      case 'DELETE /loans/*':
-        return svc.deleteLoan(db, Number(seg[1]))
-      case 'GET /digest': {
-        const dg = await import('../engine/digest')
-        return { ...dg.getDigest(db, 'local', todayIso()), errors: [] }
-      }
-      case 'POST /digest/*': {
-        const dg = await import('../engine/digest')
-        return dg.ackDigest(db, 'local')
-      }
-      case 'GET /recurring': {
-        const rc = await import('../engine/recurring')
-        return rc.getRecurring(db, todayIso())
-      }
-      case 'GET /tax': {
-        const tax = await import('../engine/tax')
-        return tax.getTax(db, todayIso())
-      }
-      case 'PUT /tax/*': {
-        const tax = await import('../engine/tax')
-        return tax.putTaxSettings(db, b)
-      }
-      case 'POST /paychecks': {
-        const pc = await import('../engine/paychecks')
-        return pc.createPaySource(db, b)
-      }
-      case 'PUT /paychecks/*': {
-        const pc = await import('../engine/paychecks')
-        return pc.updatePaySource(db, Number(seg[1]), b)
-      }
-      case 'DELETE /paychecks/*': {
-        const pc = await import('../engine/paychecks')
-        return pc.deletePaySource(db, Number(seg[1]))
-      }
-      case 'GET /scenarios': {
-        const sc = await import('../engine/scenarios')
-        return sc.listScenarios(db, todayIso())
-      }
-      case 'POST /scenarios':
-      case 'POST /scenarios/*': {
-        const sc = await import('../engine/scenarios')
-        if (seg[1] === 'compare') return sc.compareScenarios(db, todayIso(), b)
-        if (seg[1] === 'price') return sc.priceScenarioDecision(db, todayIso(), b)
-        return sc.createScenario(db, b, todayIso())
-      }
-      case 'PUT /scenarios/*': {
-        const sc = await import('../engine/scenarios')
-        return sc.updateScenario(db, Number(seg[1]), b, todayIso())
-      }
-      case 'DELETE /scenarios/*': {
-        const sc = await import('../engine/scenarios')
-        return sc.deleteScenario(db, Number(seg[1]))
-      }
-      case 'POST /simulate': {
-        const { simulate } = await import('../engine/simulate')
-        const p = b as import('../engine/simulate').SimParams
-        p.paths = Math.min(5000, Math.max(200, p.paths ?? 2000))
-        return simulate(p)
-      }
-      case 'GET /export':
-        return snapshot.dumpDb(db)
-      case 'POST /import': {
-        snapshot.loadDump(db, b as import('../engine/snapshot').Dump)
-        return { ok: true, restored: 'local' }
-      }
-      default:
-        throw new Error(`local mode has no handler for ${method} ${path}`)
-    }
+    const out = hit.route.handler(ctx)
+    const result = isThenable(out) ? await out : out
+    succeeded = true
+    return result
   } catch (e) {
     if (e instanceof ApiError) throw new Error(e.message)
     throw e
+  } finally {
+    // Only if this is still the database the call ran against: a session that
+    // ended (or restarted) mid-call has nothing left to dirty.
+    if (state.db === db && totalChanges(db) !== before) {
+      state.dataRevision++
+      if (watch) {
+        markDirty()
+        if (succeeded && hit.route.replacesData) markDataReplaced()
+      }
+      announce('scarab-revision')
+    }
   }
 }
 

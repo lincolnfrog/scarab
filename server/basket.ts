@@ -1,4 +1,8 @@
 import type { DbLike } from '../engine/db'
+import { addDaysIso } from '../shared/dates'
+import type { BasketQuoteRow, BasketResponse } from '../shared/series-api'
+import { appendToHistory, historyStatus } from './history-pack'
+import { upstreamSignal } from './upstream'
 
 /**
  * The daily price basket: every US-listed stock and ETF plus the top crypto
@@ -17,9 +21,14 @@ import type { DbLike } from '../engine/db'
  *
  * The build is best-effort: a failed source leaves yesterday's rows in
  * place and reports why, and the UI shows the basket's age.
+ *
+ * Each row also carries the security's name and whether it is an ETF (from
+ * the symbol directory; CoinGecko's name for crypto), so a symbol search in
+ * the tab can say "Vanguard Total Stock Market ETF" rather than just VTI.
  */
 
-export type BasketQuote = { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string }
+/** A quote as fetched. `name`/`etf` are filled in where the source knows them. */
+export type BasketQuote = { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string; name?: string | null; etf?: boolean }
 export type Listing = { symbol: string; name: string; etf: boolean }
 
 const UA = { 'user-agent': 'Mozilla/5.0 (scarab price basket)' }
@@ -30,6 +39,23 @@ export const OTHER_LISTED_URL = 'https://www.nasdaqtrader.com/dynamic/SymDir/oth
 
 /** Yahoo spells class shares and units with a dash: BRK.B → BRK-B. */
 export const toYahooSymbol = (s: string) => s.trim().toUpperCase().replace(/\./g, '-')
+
+/**
+ * The directory's security names, minus the share-type boilerplate:
+ * "Apple Inc. - Common Stock" → "Apple Inc.", "Alphabet Inc. - Class A Common
+ * Stock" → "Alphabet Inc. Class A", "Berkshire Hathaway Inc. New Common Stock"
+ * → "Berkshire Hathaway Inc.". A share class or series is kept; anything that
+ * doesn't end in one of these suffixes is kept as written.
+ */
+const SHARE_SUFFIX =
+  /^(.*?)(?:\s*-\s*|\s+)(?:New\s+)?(?:((?:Class|Series) [A-Z0-9]+)\s+)?(?:New\s+)?(?:Common Stock|Common Shares|Ordinary Shares|Capital Stock|American Deposit[ao]ry Shares)$/i
+const ADR_TAIL = /\s*-?\s*American Deposit[ao]ry Shares?,? each represent.*$/i
+export function cleanSecurityName(raw: string): string {
+  const s = raw.trim().replace(/\s+/g, ' ').replace(ADR_TAIL, '') || raw.trim()
+  const m = SHARE_SUFFIX.exec(s)
+  if (!m || !m[1]) return s
+  return m[2] ? `${m[1]} ${m[2]}` : m[1]
+}
 
 const SKIP_NAME = /\b(warrants?|units?|rights?|preferred|depositary shares?, each representing .* preferred|notes? due)\b/i
 
@@ -52,7 +78,7 @@ export function parseSymbolDirectory(text: string): Listing[] {
     if (raw.includes('$')) continue // preferred series: BAC$B
     const name = f[iName]?.trim() ?? ''
     if (SKIP_NAME.test(name)) continue
-    out.push({ symbol: toYahooSymbol(raw), name, etf: f[iEtf]?.trim() === 'Y' })
+    out.push({ symbol: toYahooSymbol(raw), name: cleanSecurityName(name), etf: f[iEtf]?.trim() === 'Y' })
   }
   return out
 }
@@ -63,7 +89,7 @@ export async function fetchUniverse(f: typeof fetch = fetch): Promise<{ listings
   const listings: Listing[] = []
   for (const url of [NASDAQ_LISTED_URL, OTHER_LISTED_URL]) {
     try {
-      const r = await f(url, { headers: UA })
+      const r = await f(url, { headers: UA, signal: upstreamSignal() })
       if (!r.ok) {
         errors.push(`universe: ${url.split('/').pop()} HTTP ${r.status}`)
         continue
@@ -123,14 +149,15 @@ export function parseCoinGeckoMarkets(body: unknown, seen = new Set<string>()): 
     if (!sym || c === null || seen.has(sym)) continue
     seen.add(sym)
     const on = typeof r.last_updated === 'string' ? r.last_updated.slice(0, 10) : new Date().toISOString().slice(0, 10)
-    out.push({ symbol: sym, kind: 'crypto', cents: c, pricedOn: on })
+    const name = typeof r.name === 'string' ? r.name.trim() : ''
+    out.push({ symbol: sym, kind: 'crypto', cents: c, pricedOn: on, ...(name ? { name } : {}) })
   }
   return out
 }
 
 async function sparkBatch(symbols: string[], f: typeof fetch): Promise<BasketQuote[] | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(symbols.join(','))}&range=1d&interval=1d`
-  const r = await f(url, { headers: UA })
+  const r = await f(url, { headers: UA, signal: upstreamSignal() })
   if (!r.ok) return null
   const q = parseSpark(await r.json())
   return q.length > 0 ? q : null
@@ -139,14 +166,14 @@ async function sparkBatch(symbols: string[], f: typeof fetch): Promise<BasketQuo
 /** Yahoo's v7 quote endpoint wants a session cookie and a crumb minted from it. */
 async function yahooCrumb(f: typeof fetch): Promise<{ cookie: string; crumb: string } | null> {
   try {
-    const c = await f('https://fc.yahoo.com', { headers: UA, redirect: 'manual' })
+    const c = await f('https://fc.yahoo.com', { headers: UA, redirect: 'manual', signal: upstreamSignal() })
     const set = (c.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [c.headers.get('set-cookie') ?? '']
     const cookie = set
       .map((s) => s.split(';')[0]!)
       .filter(Boolean)
       .join('; ')
     if (!cookie) return null
-    const r = await f('https://query1.finance.yahoo.com/v1/test/getcrumb', { headers: { ...UA, cookie } })
+    const r = await f('https://query1.finance.yahoo.com/v1/test/getcrumb', { headers: { ...UA, cookie }, signal: upstreamSignal() })
     if (!r.ok) return null
     const crumb = (await r.text()).trim()
     return crumb && !crumb.includes('<') ? { cookie, crumb } : null
@@ -157,7 +184,7 @@ async function yahooCrumb(f: typeof fetch): Promise<{ cookie: string; crumb: str
 
 async function v7Batch(symbols: string[], auth: { cookie: string; crumb: string }, f: typeof fetch): Promise<BasketQuote[] | null> {
   const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(','))}&crumb=${encodeURIComponent(auth.crumb)}`
-  const r = await f(url, { headers: { ...UA, cookie: auth.cookie } })
+  const r = await f(url, { headers: { ...UA, cookie: auth.cookie }, signal: upstreamSignal() })
   if (!r.ok) return null
   const q = parseV7Quotes(await r.json())
   return q.length > 0 ? q : null
@@ -206,7 +233,7 @@ export async function fetchCryptoBasket(f: typeof fetch = fetch, pages = 2): Pro
     try {
       const r = await f(
         `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`,
-        { headers: UA },
+        { headers: UA, signal: upstreamSignal() },
       )
       if (!r.ok) {
         errors.push(`crypto: CoinGecko page ${page} HTTP ${r.status}`)
@@ -238,18 +265,45 @@ export function basketStatus(db: DbLike): BasketStatus {
   }
 }
 
-/** The whole basket — identical for every caller, by design. */
-export function getBasket(db: DbLike): BasketStatus & { quotes: BasketQuote[] } {
-  const rows = db.prepare('SELECT symbol, kind, cents, priced_on AS pricedOn FROM basket_quotes ORDER BY kind, symbol').all() as BasketQuote[]
-  return { ...basketStatus(db), quotes: rows }
+/**
+ * The whole basket — identical for every caller, by design. Wire shape:
+ * shared/series-api.ts BasketResponse. `history` says whether the monthly
+ * market history (./history-pack.ts) is ready, so a tab asks for that file
+ * only when there is one.
+ */
+export function getBasket(db: DbLike): BasketResponse {
+  const rows = db
+    .prepare('SELECT symbol, kind, cents, priced_on AS pricedOn, name, etf FROM basket_quotes ORDER BY kind, symbol')
+    .all() as (Omit<BasketQuoteRow, 'etf'> & { etf: number })[]
+  return { ...basketStatus(db), quotes: rows.map((r) => ({ ...r, etf: r.etf === 1 })), history: historyStatus(db) }
 }
 
+/**
+ * How long a symbol that later builds no longer quote keeps its last quote. A
+ * batch that failed today shouldn't make its symbols vanish from every tab
+ * (yesterday's close, dated as such, beats "not in today's basket"); a
+ * delisted symbol ages out.
+ */
+export const BASKET_KEEP_DAYS = 14
+
+/**
+ * Store a build. Only the kinds this build actually quoted are touched, so a
+ * source that failed outright (CoinGecko down, say) leaves its kind's rows as
+ * they were. Within a quoted kind, rows are upserted, and rows the build
+ * didn't refresh are dropped once older than BASKET_KEEP_DAYS.
+ */
 export function storeBasket(db: DbLike, quotes: BasketQuote[], errors: string[], builtAt = new Date().toISOString()): void {
   db.transaction(() => {
     if (quotes.length > 0) {
-      db.prepare('DELETE FROM basket_quotes').run()
-      const ins = db.prepare('INSERT OR REPLACE INTO basket_quotes (symbol, kind, cents, priced_on) VALUES (?, ?, ?, ?)')
-      for (const q of quotes) ins.run(q.symbol, q.kind, q.cents, q.pricedOn)
+      const cutoff = addDaysIso(builtAt.slice(0, 10), -BASKET_KEEP_DAYS)
+      const prune = db.prepare('DELETE FROM basket_quotes WHERE kind = ? AND priced_on < ?')
+      for (const kind of new Set(quotes.map((q) => q.kind))) prune.run(kind, cutoff)
+      const put = db.prepare(
+        `INSERT INTO basket_quotes (symbol, kind, cents, priced_on, name, etf) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (symbol, kind) DO UPDATE SET cents = excluded.cents, priced_on = excluded.priced_on,
+           name = COALESCE(excluded.name, basket_quotes.name), etf = excluded.etf`,
+      )
+      for (const q of quotes) put.run(q.symbol, q.kind, q.cents, q.pricedOn, q.name || null, q.etf ? 1 : 0)
       setMeta(db, 'basket:built_at', builtAt)
     }
     setMeta(db, 'basket:errors', JSON.stringify(errors))
@@ -265,9 +319,22 @@ export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<
     listings.length > 0 ? fetchStockBasket(listings.map((l) => l.symbol), f) : { quotes: [], errors: ['quotes: no universe, skipped'] },
     fetchCryptoBasket(f),
   ])
-  const all = [...stocks.quotes, ...crypto.quotes]
+  // Names and the ETF flag come from the directory, keyed by Yahoo spelling.
+  const listing = new Map(listings.map((l) => [l.symbol, l]))
+  const named = stocks.quotes.map((q) => {
+    const l = listing.get(q.symbol)
+    return l ? { ...q, name: l.name || null, etf: l.etf } : q
+  })
+  const all = [...named, ...crypto.quotes]
   const allErrors = [...errors, ...stocks.errors, ...crypto.errors]
-  storeBasket(db, all, allErrors)
+  const builtAt = new Date().toISOString()
+  storeBasket(db, all, allErrors, builtAt)
+  // Keep the monthly history's month in progress current. Best-effort: the basket is served either way.
+  try {
+    appendToHistory(db, all, builtAt.slice(0, 10))
+  } catch (e) {
+    console.error('basket: merging quotes into the market history failed', e)
+  }
   return { stocks: stocks.quotes.length, crypto: crypto.quotes.length, universe: listings.length, errors: allErrors, ms: Date.now() - t0 }
 }
 
@@ -278,10 +345,20 @@ export const isBuilding = () => inflight !== null
  * Build at most once per day, and never twice at once. Returns the running
  * build so a caller with nothing to serve can await it; callers that already
  * have a basket just let it run in the background.
+ *
+ * `force` skips the once-a-day check (a manual rebuild) but still joins a
+ * build already running rather than starting a second one; throttling a
+ * forced rebuild is the caller's call (basketStatus().builtAt says when the
+ * last one finished).
  */
-export function ensureBasket(db: DbLike, f: typeof fetch = fetch, today = new Date().toISOString().slice(0, 10)): Promise<BuildResult> | null {
+export function ensureBasket(
+  db: DbLike,
+  f: typeof fetch = fetch,
+  today = new Date().toISOString().slice(0, 10),
+  opts: { force?: boolean } = {},
+): Promise<BuildResult> | null {
   if (inflight) return inflight
-  if (meta(db, 'basket:attempted_on') === today) return null
+  if (!opts.force && meta(db, 'basket:attempted_on') === today) return null
   setMeta(db, 'basket:attempted_on', today) // stamp first: a crash mid-build shouldn't retry in a loop
   inflight = buildBasket(db, f).finally(() => {
     inflight = null

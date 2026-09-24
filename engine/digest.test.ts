@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
 import { parsePmmsCsv } from '../server/rates'
 import type { DbLike } from './db'
-import { ackDigest, getDigest, putPmmsRate } from './digest'
+import { ackDigest, getDigest, inheritDigestMark, putPmmsRate } from './digest'
 
 const mem = () => openDb(':memory:') as unknown as DbLike
 const $ = (dollars: number) => Math.round(dollars * 100)
@@ -93,6 +93,21 @@ describe('getDigest', () => {
     const m = getDigest(db, 'max@x', today).mortgage!
     expect(m.triggered).toBe(true)
     expect(m.bestLoanName).toBe('Chase 30yr')
+  })
+})
+
+describe('inheritDigestMark', () => {
+  it("copies another identity's mark once and never overwrites one that exists", () => {
+    const db = mem()
+    expect(inheritDigestMark(db, 'max@x', 'local')).toBe(false) // nothing to inherit
+    lastSeen(db, 'local', '2026-08-01 09:00:00')
+    expect(inheritDigestMark(db, 'max@x', 'local')).toBe(true)
+    expect(getDigest(db, 'max@x', today).since).toBe('2026-08-01 09:00:00')
+    lastSeen(db, 'max@x', '2026-08-20 10:00:00')
+    expect(inheritDigestMark(db, 'max@x', 'local')).toBe(false)
+    expect(getDigest(db, 'max@x', today).since).toBe('2026-08-20 10:00:00')
+    expect(getDigest(db, 'local', today).since).toBe('2026-08-01 09:00:00') // the source stays for the other member
+    expect(inheritDigestMark(db, 'local', 'local')).toBe(false)
   })
 })
 

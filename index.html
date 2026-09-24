@@ -4,14 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0d12" />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🪲</text></svg>"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='2 1 40 40' fill='none' stroke='%23e3b23c' stroke-width='3.4' stroke-linecap='round'%3E%3Ccircle cx='22' cy='9' r='5'/%3E%3Cellipse cx='22' cy='27' rx='10' ry='11'/%3E%3Cpath d='M22 16v22'/%3E%3C/svg%3E"
     />
     <title>Scarab</title>
+    <!-- Painted before the bundle arrives: the page colour (no white flash) and the splash below.
+         App's boot screen reuses .boot-splash, so these rules stay inline. -->
+    <style>
+      html { background: #0a0d12; }
+      .boot-splash { position: fixed; inset: 0; display: grid; place-items: center; animation: boot-in 600ms ease-out 250ms both; }
+      @keyframes boot-in { from { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .boot-splash { animation: none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-splash" role="status" aria-label="Loading Scarab">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="#e3b23c" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="22" cy="9" r="5" />
+          <ellipse cx="22" cy="27" rx="10" ry="11" />
+          <path d="M22 16v22" />
+        </svg>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

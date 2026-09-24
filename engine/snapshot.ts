@@ -1,4 +1,4 @@
-import type { DbLike } from './db'
+import type { DbLike, Stmt } from './db'
 import { CURRENT_VERSION, readabilityError, SNAPSHOT_COMPAT, upgradesFor, type Compat } from './upgrades'
 
 /**
@@ -7,15 +7,20 @@ import { CURRENT_VERSION, readabilityError, SNAPSHOT_COMPAT, upgradesFor, type C
  * FK-safe insert order; columns come from the rows themselves (every export
  * row carries every column, SELECT * semantics).
  *
- * A snapshot is household DATA only. Two things live in the same database but
+ * A snapshot is household DATA only. Some things live in the same database but
  * are deliberately not part of it:
- *   - vault_blobs: the courier's ciphertext. A snapshot is what goes INTO the
- *     vault; carrying the previous blob along would nest ciphertext in every
- *     backup and a restore would roll the vault's version back.
+ *   - vault_blobs and vault_history: the courier's ciphertext. A snapshot is
+ *     what goes INTO the vault; carrying earlier blobs along would nest
+ *     ciphertext in every backup and a restore would roll the vault's version
+ *     back.
  *   - basket_quotes and the basket:* keys in app_meta: shared price
  *     infrastructure (server/basket.ts), not anyone's data.
- *   - household_members: which identities share a vault — routing for the
- *     courier, meaningful only to the deployment that stores the ciphertext.
+ *   - household_members and vault_invites: which identities share a vault, or
+ *     have been asked to — routing for the courier, meaningful only to the
+ *     deployment that stores the ciphertext.
+ *   - onchain_daily: BTC on-chain metrics from migration 9. Nothing has ever
+ *     written or read it; the table stays (migrations are append-only) but it
+ *     is no longer carried. An older snapshot's rows for it are ignored.
  */
 export const TABLES = [
   'app_meta',
@@ -30,7 +35,6 @@ export const TABLES = [
   'trades',
   'prices',
   'prices_daily',
-  'onchain_daily',
   'balance_snapshots',
   'properties',
   'property_valuations',
@@ -53,6 +57,8 @@ export type Dump = {
 
 /** app_meta rows that belong to the server's price basket, never to a snapshot. */
 const BASKET_META = "key LIKE 'basket:%'"
+/** BASKET_META for a row in hand (LIKE is case-insensitive for ASCII). */
+const isBasketKey = (key: unknown) => typeof key === 'string' && key.slice(0, 7).toLowerCase() === 'basket:'
 
 export function dumpDb(db: DbLike): Dump {
   const tables: Record<string, Record<string, unknown>[]> = {}
@@ -90,17 +96,34 @@ export function loadDump(db: DbLike, dump: Dump, compat: Compat = SNAPSHOT_COMPA
   // throws must leave the database untouched.
   let shaped = dump
   for (const { upgrade } of plan) if (upgrade.before) shaped = upgrade.before(shaped)
+  // Check every row before the first write, so a bad snapshot fails with the
+  // database untouched (and a tab stays clean).
+  // The basket:* keys belong to the server's price basket and market history,
+  // never to a snapshot: dumpDb leaves them out, and a snapshot that carries
+  // one anyway must not overwrite (or collide with) the server's.
+  const tables = TABLES.map((t) => {
+    const rows = checkedRows(db, t, shaped.tables[t])
+    return { t, rows: t === 'app_meta' ? rows.filter((r) => !isBasketKey(r.key)) : rows }
+  })
   db.pragma('foreign_keys = OFF')
   try {
     db.transaction(() => {
       for (const t of [...TABLES].reverse())
         db.prepare(t === 'app_meta' ? `DELETE FROM app_meta WHERE NOT (${BASKET_META})` : `DELETE FROM ${t}`).run()
-      for (const t of TABLES) {
-        const rows = shaped.tables[t] ?? []
-        if (rows.length === 0) continue
-        const cols = Object.keys(rows[0]!)
-        const insert = db.prepare(`INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
-        for (const row of rows) insert.run(...cols.map((c) => (row[c] === undefined ? null : row[c])))
+      for (const { t, rows } of tables) {
+        // Each row is inserted with its own keys: a key a row lacks takes the
+        // column's DEFAULT, never a NULL borrowed from another row's shape.
+        const inserts = new Map<string, Stmt>()
+        for (const row of rows) {
+          const cols = Object.keys(row)
+          const shape = cols.join(',')
+          let insert = inserts.get(shape)
+          if (!insert) {
+            insert = db.prepare(`INSERT INTO ${t} (${cols.map(quoteIdent).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
+            inserts.set(shape, insert)
+          }
+          insert.run(...cols.map((c) => row[c] ?? null))
+        }
       }
       // Older snapshot: bring its ROWS up to what this schema expects. Never
       // opens its own transaction — sql.js can't nest one.
@@ -111,3 +134,30 @@ export function loadDump(db: DbLike, dump: Dump, compat: Compat = SNAPSHOT_COMPA
   }
   return { from: dump.schemaVersion, upgraded: plan.map((u) => u.version) }
 }
+
+/**
+ * One table's rows from a snapshot, checked against the live schema. Row keys
+ * become SQL identifiers, so every key that ANY row carries (the union, not
+ * just the first row's) must be a column the table really has
+ * (PRAGMA table_info). Values must be what both engines bind the same way:
+ * null, a string, or a finite number.
+ */
+function checkedRows(db: DbLike, table: string, rows: unknown): Record<string, unknown>[] {
+  if (rows === undefined || rows === null) return []
+  if (!Array.isArray(rows)) throw new Error(`snapshot table ${table} is not a list of rows`)
+  if (rows.length === 0) return []
+  const known = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name))
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null || Array.isArray(row) || Object.keys(row).length === 0)
+      throw new Error(`snapshot has a malformed row in ${table}`)
+    for (const [c, v] of Object.entries(row as Record<string, unknown>)) {
+      if (!known.has(c)) throw new Error(`snapshot has an unknown column: ${table}.${c}`)
+      if (!(v === null || v === undefined || typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))))
+        throw new Error(`snapshot has a malformed value in ${table}.${c}`)
+    }
+  }
+  return rows as Record<string, unknown>[]
+}
+
+/** A validated column name, quoted anyway: belt and braces for an identifier built from data. */
+const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`

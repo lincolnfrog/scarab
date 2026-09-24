@@ -4,13 +4,30 @@ import { detectRecurring, type Recurrence } from './recurring'
 
 /**
  * The "since you were last here" digest. Everything is derived on read from
- * the ledger against a per-person high-water mark stored in app_meta —
- * household mode keys it by IAP email, local mode by 'local'. Works
- * identically in both universes; the one household-only extra (a cached
- * mortgage-rate quote) degrades to whatever the snapshot carried.
+ * the ledger against a per-person high-water mark stored in app_meta, keyed
+ * by IAP email in both universes (local mode falls back to 'local' until the
+ * tab knows who is signed in). Works identically in both; the one
+ * household-only extra (a cached mortgage-rate quote) degrades to whatever
+ * the snapshot carried.
  */
 
 const seenKey = (email: string) => `digest:last_seen:${email}`
+
+/**
+ * Give `email` the high-water mark `from` has, unless it already has its own.
+ * Local mode once keyed every tab's mark as 'local', so both members of a
+ * household shared one "caught up"; each member inherits that mark the first
+ * time their own digest is read, then keeps a separate one. The shared mark
+ * stays for the other member. Returns whether a mark was copied.
+ */
+export function inheritDigestMark(db: DbLike, email: string, from: string): boolean {
+  if (email === from) return false
+  return (
+    db
+      .prepare('INSERT OR IGNORE INTO app_meta (key, value) SELECT ?, value FROM app_meta WHERE key = ?')
+      .run(seenKey(email), seenKey(from)).changes > 0
+  )
+}
 export const PMMS_KEY = 'rates:pmms30y' // JSON { on: 'yyyy-mm-dd', rateMicro }
 
 // app_meta timestamps use SQLite's datetime('now') shape: 'YYYY-MM-DD HH:MM:SS' (UTC).

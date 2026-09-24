@@ -244,7 +244,7 @@ export function resolveContext(db: DbLike, today: string): { balance: BalanceShe
         total: nw.total,
       }
     : null
-  const g = getGoal(db)
+  const g = getGoal(db, today)
   const loans = g.loans as { id: number; name: string; rate_micro: number; term_months: number }[]
   const loan = loans.find((l) => l.id === g.goal.selectedLoanId) ?? loans[0]
   const down = Math.round((g.goal.targetPriceCents * g.goal.downPctMicro) / 1_000_000)

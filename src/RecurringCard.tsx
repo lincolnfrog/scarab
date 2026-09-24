@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatCents } from '../shared/money'
 import { get } from './api'
+import { Tooltip } from './ui/Tooltip'
+import './screens/screens.css'
 
 type Rec = {
   merchant: string
@@ -25,13 +27,31 @@ type SafeToSpend = {
   bills: { merchant: string; cents: number; due: string }[]
 }
 
-export default function RecurringCard() {
+/**
+ * Recurring charges and "left to spend", on the Cash screen. The merchant and
+ * category link into the screen's transaction list and the left-to-spend line
+ * into the budget; Cash owns those filters, so the jumps are callbacks.
+ * `refreshKey` changes after a write that can move the rhythm (an import, a
+ * re-categorization), so the card re-reads.
+ */
+export default function RecurringCard(p: {
+  refreshKey?: number
+  onMerchant?: (merchant: string) => void
+  onCategory?: (name: string) => void
+  onBudget?: (month: string) => void
+}) {
   const [data, setData] = useState<{ recurring: Rec[]; safeToSpend: SafeToSpend } | null>(null)
   const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
-    get<{ recurring: Rec[]; safeToSpend: SafeToSpend }>('/api/recurring').then(setData).catch(console.error)
-  }, [])
+    let live = true
+    get<{ recurring: Rec[]; safeToSpend: SafeToSpend }>('/api/recurring')
+      .then((d) => live && setData(d))
+      .catch(console.error) // an extra card: on failure it stays as it was (or absent)
+    return () => {
+      live = false
+    }
+  }, [p.refreshKey])
 
   if (!data) return null
   const s = data.safeToSpend
@@ -53,7 +73,14 @@ export default function RecurringCard() {
       </div>
       {s.budgetCents > 0 && (
         <div className="sub2" style={{ marginBottom: 10 }}>
-          Left to spend this month:{' '}
+          {p.onBudget ? (
+            <button className="scr-link" onClick={() => p.onBudget!(s.month)}>
+              Left to spend this month
+            </button>
+          ) : (
+            'Left to spend this month'
+          )}
+          :{' '}
           <b className={`inkstrong ${s.safeCents < 0 ? 'neg' : ''}`} style={{ fontSize: 16 }}>{formatCents(s.safeCents)}</b>
           {' '}<span className="muted">= {formatCents(s.budgetCents)} budgeted − {formatCents(s.spentCents)} spent − ≈{formatCents(s.upcomingBillsCents)} in bills still coming{s.bills.length > 0 && ` (${s.bills.slice(0, 3).map((x) => x.merchant).join(', ')}${s.bills.length > 3 ? '…' : ''})`}</span>
         </div>
@@ -68,15 +95,39 @@ export default function RecurringCard() {
         <tbody>
           {rows.map((r) => (
             <tr key={r.merchant}>
-              <td className="desc">{r.merchant}</td>
-              <td className="muted">{r.category ?? '—'}</td>
+              <td className="desc">
+                {p.onMerchant ? (
+                  <button className="scr-link" aria-label={`Show transactions from ${r.merchant}`} onClick={() => p.onMerchant!(r.merchant)}>
+                    {r.merchant}
+                  </button>
+                ) : (
+                  r.merchant
+                )}
+              </td>
+              <td className="muted">
+                {r.category && p.onCategory ? (
+                  <button className="scr-link" aria-label={`Show ${r.category} transactions`} onClick={() => p.onCategory!(r.category!)}>
+                    {r.category}
+                  </button>
+                ) : (
+                  (r.category ?? '—')
+                )}
+              </td>
               <td className="muted">{r.cadence} · ×{r.occurrences}</td>
               <td className="r num">{formatCents(r.typicalCents)}</td>
               <td className={`r num ${r.priceCreepMicro > 0 ? 'neg' : ''}`}>{formatCents(r.lastCents)}</td>
               <td className="muted">{r.lapsed ? '—' : r.nextExpectedOn}</td>
               <td>
-                {r.lapsed && <span className="tag" title="No charge when one was expected — cancelled, or the card changed">lapsed?</span>}
-                {r.priceCreepMicro > 0 && !r.lapsed && <span className="tag" title="Latest charge is above the typical amount">↑ price</span>}
+                {r.lapsed && (
+                  <Tooltip content="No charge when one was expected — cancelled, or the card changed">
+                    <span className="tag">lapsed?</span>
+                  </Tooltip>
+                )}
+                {r.priceCreepMicro > 0 && !r.lapsed && (
+                  <Tooltip content={`Latest charge is above the typical ${formatCents(r.typicalCents)}`}>
+                    <span className="tag">↑ price</span>
+                  </Tooltip>
+                )}
               </td>
             </tr>
           ))}

@@ -9,8 +9,10 @@ it works identically in household and zero-knowledge modes.
 
 Ordering rationale: tax layer first (largest concrete dollar value, builds on
 the lot engine — our strongest asset), digest second, decision engine third
-(biggest win, most design-heavy). All three shipped; what's left is follow-ups
-and the smaller backlog below.
+(biggest win, most design-heavy). All three shipped, and so did the
+2026-09-23 improvement pass (zero knowledge for two, brokerage, analytics, UI
+shell, charts — see its section below); what's left is follow-ups, the
+vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
 
@@ -74,8 +76,11 @@ Follow-ups — **shipped 2026-09-10** except the last:
 - [x] Remaining-year vests. Migration 13 adds an optional cadence to
       `unvested_positions` (`next_vest_on`, `vest_every_months`,
       `vest_qty_micro`); `projectVests` walks it to Dec 31 at today's price and
-      the income lands in `incomes.rsuProjectedCents`. Recording a vest rolls the
-      cadence past the vest date so nothing double-counts.
+      the income lands in `incomes.rsuProjectedCents`. Since 2026-09-23
+      `next_vest_on` is the schedule's anchor (the k-th vest is k × cadence
+      months after it, never stepped from a clamped date); the next unrecorded
+      vest is derived from the ledger's vest buys, so recording one rewrites
+      nothing and deleting one makes it due again.
 - [x] Qualified vs ordinary dividends: a `qualifiedDividendShareMicro` setting
       splits the 'Dividends & interest' category; the qualified part stacks with
       LT gains federally and stays ordinary for the state.
@@ -196,16 +201,22 @@ Follow-ups (not blocking):
 - [ ] **Anonymous add** for off-universe symbols: an identity-opaque, delayed,
       chaffed request that widens the basket without linking a symbol to a
       person. (Deferred by decision — the whole-universe basket already covers
-      ordinary US holdings.)
-- [ ] ZK daily-history charts: hashed symbol buckets so a client fetches 1-of-N
-      buckets instead of naming the ticker (Safe-Browsing style). Charts are
-      as-of-snapshot in local mode today.
+      ordinary US holdings, and since 2026-09-23 a fund or private stock can
+      take a hand-entered price.)
+- [x] ZK *monthly* history (2026-09-23): the shared market history file,
+      ten years of month-ends for the whole basket, identical for every caller
+      (`server/history-pack.ts`, `GET /api/basket/history`).
+- [ ] ZK *daily* history: hashed symbol buckets so a client fetches 1-of-N
+      buckets instead of naming the ticker (Safe-Browsing style) — only once
+      the monthly file has proved itself. A tab's daily chart is month-ends
+      plus the basket quotes it has collected.
 - [ ] Migrate household price refresh onto the basket path too (one code path);
       today `POST /api/prices/refresh` still fetches held symbols per-symbol.
 - [x] Passkey-only vault v2 (WebAuthn PRF; no passphrase; typed recovery
       code) and the household member flow — DESIGN.md roadmap #2 and #3,
-      2026-09-15. Not yet exercised on a real authenticator: verify create →
-      unlock → add member on a Mac + iPhone before the vault-only deploy.
+      2026-09-15. Still not exercised on a real authenticator (the 2026-09-23
+      pass used CDP virtual authenticators): verify create → unlock → add
+      member on a Mac + iPhone before the vault-only deploy.
 - [ ] Live basket build couldn't run from the build sandbox (egress 403s to
       nasdaqtrader.com / coingecko); verify a real build on the deployment.
 
@@ -218,11 +229,15 @@ front door (start empty → accounts → statements → trades/properties/liabil
 - [x] Snapshots hold household data only: `vault_blobs` and the basket
       (`basket_quotes`, `basket:*` app_meta keys) are out of `TABLES`. Before
       this, every household backup nested the previous ciphertext inside the new
-      blob, and a restore rolled the vault version back.
-- [x] `SCARAB_ZK_ONLY=1` server (`server/app.ts`): only me/health/mode/vault/
-      basket routes answer; boot refuses plaintext data unless
-      `SCARAB_PURGE_PLAINTEXT=1` wipes it once; `/api/mode` reports it and the
-      front door drops the household escape hatch. Tests in `server/app.test.ts`.
+      blob, and a restore rolled the vault version back. (Since 2026-09-23
+      vault_history, household_members, vault_invites and the dead
+      onchain_daily are out too.)
+- [x] `SCARAB_ZK_ONLY=1` server: only me/health/mode/vault/basket routes
+      answer (the allowlist now lives in `server/zk-routes.ts`, and since
+      2026-09-23 also covers vault history, invitations and the market
+      history); boot refuses plaintext data unless `SCARAB_PURGE_PLAINTEXT=1`
+      wipes it once; `/api/mode` reports it and the front door drops the
+      household escape hatch. Tests in `server/app.test.ts`.
 
 Still needed for the milestone:
 
@@ -235,18 +250,208 @@ Still needed for the milestone:
       keep the tab dirty for the next one. A version conflict (another device
       saved first) is sticky and shown, not retried — a manual save or a fresh
       unlock clears it.
-- [ ] Verify the basket builds on the real deployment (see above).
-- [ ] Then: gzip before encrypt (10MB blob cap).
+- [ ] Verify the basket builds on the real deployment (see above) — and the
+      market history build, which needs a CPU decision (DESIGN.md §6).
+- [x] Gzip before encrypt (2026-09-23): vault format v3 frames the plaintext
+      as [length][gzip][zero padding to a size bucket] inside the encryption —
+      a snapshot-shaped 2.5 MB dump stores at under a quarter of its size, and
+      the stored size only tells a bucket.
+- [x] Format v3 authenticates the header and the version it was sealed for;
+      each device remembers the last version it saw and asks before opening an
+      older copy (2026-09-23).
+- [x] RP ID pinned in code: passkeys use `scarab.one` on scarab.one and its
+      subdomains (2026-09-23). **Decision still open**: map scarab.one before
+      the real vault exists — a `run.app` host binds passkeys to itself.
+- [ ] Snapshot fixture: deliberately none until production (the v17 fixture
+      step was cut). At the production cut: freeze that version's fixture and
+      lower `SNAPSHOT_COMPAT.minReadable` to it (`engine/fixtures/README.md`).
+      Until then every migration (#18–#21 this pass) leaves earlier dev vaults
+      unreadable.
+
+## Improvement pass — shipped 2026-09-23
+
+One plan (a foundation, then five streams — zero knowledge and two people,
+brokerage, analytics, UI shell, charts), an integration round, and a
+six-dimension adversarial review whose 34 confirmed findings were fixed.
+Migrations #18–#21. DESIGN.md §7 has the roadmap view; this is the checklist.
+
+- [x] **Shell**: hash router (`src/router.ts`) — Back/Forward, reload stays
+      put, deep links to sections and `?d=` actions; fragments carry only ids,
+      enums and months (tickers and search text ride in route state). Screens
+      kept alive in `<Activity>` and code-split. `src/ui` primitives replace
+      every native dialog; every save and failure toasts; labelled fields
+      with integer parsing; view-transition crossfades that honour reduced
+      motion; ⌘K command palette.
+- [x] **Zero knowledge, two people**: one save queue (browsing never makes a
+      vault version; offline edits save on their own; 409/413 sticky);
+      following the other member (45s poll, in-place refresh, conflict sheet
+      with Take theirs / Keep mine / Download mine); "saved by"; vault format
+      v3 (above); create never overwrites, and delete is owner-only and typed;
+      members panel with passkeys bound to identities; consent-based
+      invitations, one per household (#20, #21); removal = re-key + history
+      purge; a fresh passkey to show the recovery code, which gained a check
+      group; version history with preview and restore (#20); encrypted
+      `.scarab` backups; idle auto-lock; request body caps; a throttled basket
+      rebuild.
+- [x] **Brokerage**: lots pooled per account (a Roth's gains stay off the tax
+      bill), the anniversary rule, trades validated before any write; account
+      profiles (#18) with strip, drawer and guided add; a record-trade sheet
+      previewing gain, estimated tax and wash sales (upcoming vests included);
+      an activity ledger with edit and delete; pasted starting positions with
+      true acquisition dates; hand-entered prices; balance accounts, the
+      check-in and stale chips; the cash anchor; net-settlement vests; symbol
+      search over the basket (#19 names); owner pills; the realized-gains
+      report with a Form 8949-shaped CSV.
+- [x] **Analytics**: the series API (`engine/analytics.ts`: catalog, saved
+      views shared through the vault); return by holding (money-weighted,
+      XIRR); monthly TWR for accounts, holdings and sets vs `bench:<SYM>`; the
+      shared monthly market history for ZK tabs; month-end stamping of
+      monthly bars; basket names; the sql.js statement cache.
+- [x] **Charts**: TimeChart behind every trend (UTC axis, multi-series
+      crosshair, legend toggles, presets, drag-to-zoom, keyboard); the Compare
+      screen (values, rebased, % change, A−B; Performance preset; saved
+      views); the Dashboard to the mockup (grouped tiles with sparklines,
+      Total/Breakdown, dream-home tile, clickable activity, digest driver
+      bars); portfolio value vs. cost; return-by-holding bars; a fixed price
+      chart, donut and axes.
+- [x] **Hardening from the review**: a re-key or create whose answer is lost
+      still shows (or keeps owing) its new recovery code; restoring an old backup can't resurrect a retired key;
+      Keep mine checks for an older copy; number boxes never hold a stale
+      value; netWorthSeries 5–15× faster; JSON errors instead of opaque 500s;
+      deadlines on every upstream fetch; a 64 MB restore cap; per-symbol price
+      flags cleared with their asset; crypto exempt from wash-sale flags.
+- [x] **Performance attribution** (from the backlog): XIRR per holding, TWR
+      per account/holding/set, benchmarks, overlaid in Compare.
+
+## Open follow-ups from the 2026-09-23 pass
+
+Decisions for the user:
+
+- [ ] **Production origin** before the real vault: map scarab.one (passkeys
+      bind to the hostname for life; `run.app` is on the Public Suffix List),
+      or accept re-registering every passkey later.
+- [ ] **`--ink-3` contrast**: 3.68:1 on `--card`, under 4.5:1 for 11px card
+      titles. Nudge to about #7d8390, or use `--ink-2` under 12px. A token
+      change, so it waits for a yes.
+- [ ] **Cloud Run CPU for the market history build**: with request-based CPU a
+      build that outlives its request crawls (it resumes, so the first full
+      build may take days of visits). `--no-cpu-throttling`, or a scheduled
+      ping to `GET /api/basket/history`. Never touch `--max-instances`.
+- [ ] Money trend charts sit on a $0 baseline; the mockup fits them to the
+      data (`baseline="fit"`, one prop per card).
+
+Engineering:
+
+- [ ] **Restores over 32 MiB**: Cloud Run's front end refuses larger request
+      bodies before the app's 64 MB cap. Needs a gzipped upload
+      (Content-Encoding) from `src/screens/vault/Backups.tsx` and server
+      support in `server/api4.ts`.
+- [ ] **Owner-scoped money-weighted rates**: `getHoldingsReturns(db, today,
+      accountIds?)` in `engine/returns.ts` plus `?accounts=` on
+      `GET /api/portfolio/returns` (server/api10.ts and the tab's
+      routes-analytics.ts). Then HoldingsReturnsCard can drop its "held
+      outside this scope → no rate" fallback.
+- [ ] **Declare production**: freeze the first snapshot fixture and lower
+      `SNAPSHOT_COMPAT.minReadable` (see the milestone above). The
+      'pre-upgrade' history pin can't fire until then.
+- [ ] Household mode's Future cache sees only this tab's own server writes;
+      the other member's changes show after a reload.
+- [ ] `useAnchor` should follow a section until the page settles on every
+      screen (Cash does it with its own `useSettleOnSection`).
+- [ ] End session reloads without waiting for an upload in flight (Lock does
+      wait); `toast.info` can't take a `detail`.
+- [x] Holdings table at 1100px scrolled sideways inside its card — cost basis
+      and % of cost now sit under Value and Unrealized (fits at 1100–1920 and
+      in the account drawer).
+- [ ] Drop the `NestedDialog` pass-through (BalanceAccounts.tsx,
+      GrantsPanel.tsx, `.inv-nested`) now that Dialog ignores bubbled events.
+- [ ] A fresh-load deep link that opens two dialogs at once (a trade sheet over
+      an account drawer) closes both on one Esc (Chrome's close-watcher
+      grouping).
+- [ ] Taxes still estimates RSU withholding at the flat supplemental rate.
+- [ ] The 390px app shell doesn't collapse (screens themselves fit).
+- [ ] Future's first compare (`POST /api/scenarios/compare`, 5 dev
+      scenarios) takes 6–16 s over HTTP, mostly simulate + crossingYear;
+      a cold `#/future?d=new-scenario` waits for it before opening.
+- [x] `prompt()` text fields prefill the default with the caret at the end
+      (src/ui/dialogs.tsx), so typing a name appends to it — an untouched
+      default is now selected on focus.
+- [ ] Household Data & Vault logs a console 404 for `GET /api/vault` ("no
+      vault yet" is its signal); answer 200 `{vault:null}` instead.
+- [x] Unknown `/api/*` paths (or a listed path with an unhandled method) fall
+      through to the SPA fallback: 200 index.html instead of a JSON 404/405.
+      Now a JSON 404 (`server/app.ts`, tested in both modes).
+- [x] Starting-positions placeholder mixes tab, comma and space separators,
+      but `parsePositions` picks one per paste — pasting it verbatim fails.
+      Now one separator, with a test that the placeholder parses as shown.
+- [ ] The trade sheet's symbol box and Holdings can show different last
+      prices for the same symbol (seen: VTI $381.27 vs $378.23).
+- [x] Price upserts rewrite identical closes, so every refresh moves the tab's
+      `dataRevision` and re-runs Future's compare even when nothing changed.
+      Fixed with `WHERE close_cents IS NOT excluded.close_cents` (parity-tested).
+- [ ] The member-passkey "Add it now" (QR/hybrid) path is untested — the pass
+      used one CDP virtual authenticator per tab.
+
+## Cut from the 2026-09-23 plan (revisit later)
+
+- [ ] Brokerage CSV import — wait for real redacted exports; build a generic
+      column mapper. (Starting-positions paste covers onboarding.)
+- [ ] Stock splits: an `asset_events` table, manual recording, basket-ratio
+      detection. Rare and tax-critical.
+- [ ] Close account / transfer lots between accounts.
+- [ ] Dividends inside brokerage accounts (`invest_income`) — now that the cash
+      anchor exists; needs a migration and tax changes.
+- [ ] Asset classes and custom groups (the #18 owner column is in).
+- [ ] Modified-Dietz returns for balance-tracked accounts — needs contribution
+      facts that don't exist yet.
+- [ ] `created_by` on trades, a change log, a "who changed what" digest.
+- [ ] Change-journal replay, a member-2 onboarding wizard, per-member key
+      pairs (L+ for rare events).
+- [ ] Holdings small multiples, drawdown panel, waterfall attribution, a tax
+      bracket bar, synced crosshairs, a table view / CSV copy of any chart, and
+      moving BigChart onto TimeChart.
+- [ ] Chart annotations (a table plus derived markers) — see life events below.
+- [ ] A daily ledger-sweep engine — revisit with profiling (monthly series
+      suffice; netWorthSeries was made fast instead).
+
+Decided against, with the reason (don't redo without a new one):
+
+- Tickers and search text in the URL — browser history sync uploads fragments.
+- Nav as `<a>` (cmd-click opens a tab) — would spawn self-conflicting ZK
+  sessions; deep links still work through the hash.
+- A `VITE_SCARAB_ZK` build flag — can't pass through `gcloud run deploy
+  --source`; a proper ZK build target belongs to the trust chain.
+- Removing `basket/rebuild` from the ZK allowlist — it is the only rebuild path
+  there; throttled instead.
+- A `useApi` cache — keep-alive screens already show stale data while they
+  revalidate.
+- Global topbar range pills — daily and monthly series don't line up; each
+  chart has presets.
+- Generic undo toasts / `restoreRows` — typed confirms plus vault history cover
+  recovery.
+- Taxes autosave — 13 interdependent settings would recompute and write the
+  vault on half-typed input; explicit save with a dirty marker instead.
+- Household name, and avatars from passkey labels — labels are free text;
+  avatars come from the members list.
+- Converting the inline styles, centring the grid, an animated segmented
+  thumb, Taxes/Vault tabs, card stagger, app-wide count-ups, rAF tweens, a
+  donut sweep — churn or motion overreach.
+- A separate benchmark route (superseded by `bench:` over the market history)
+  and an `invest_cash` table (superseded by the cash anchor).
+- Incremental daily price fetch — the full refetch keeps split adjustment
+  consistent.
 
 ## Backlog: smaller, high leverage
 
-- [ ] Performance attribution on Invest: TWR/IRR per account and total, vs a
-      hold-SPY benchmark (trades + daily prices already suffice).
+- [x] Performance attribution on Invest — shipped 2026-09-23 (above): a
+      money-weighted rate per holding and for the household total, TWR per
+      account. Still open within it: a money-weighted rate per account or
+      owner (see the owner-scoped follow-up).
 - [ ] Life-event annotations on the net-worth chart (dated facts deserve a
       memory: "bought the car", "changed jobs").
 - [ ] Continuity export: "if something happens to me" document generated from
       the ledger (accounts, institutions, recovery-key locations). Pairs with
       the two-member vault roadmap item.
-- [ ] Trust chain (DESIGN.md roadmap #5) treated as a headline feature of
+- [ ] Trust chain (DESIGN.md roadmap) treated as a headline feature of
       scarab.one, not a chore: reproducible builds + attestations are the
       differentiator.

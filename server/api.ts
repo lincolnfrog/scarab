@@ -50,6 +50,8 @@ api.get('/transactions', (c) =>
       categoryId: c.req.query('category_id'),
       accountId: c.req.query('account_id'),
       uncategorized: c.req.query('uncategorized') === '1',
+      offset: c.req.query('offset'),
+      limit: c.req.query('limit'),
     }),
   ),
 )
@@ -58,7 +60,7 @@ api.patch('/transactions/:id', async (c) => {
   return handle(c, () => svc.patchTransaction(db, Number(c.req.param('id')), b))
 })
 
-api.get('/cashflow/monthly', (c) => handle(c, () => svc.cashflowMonthly(db)))
+api.get('/cashflow/monthly', (c) => handle(c, () => svc.cashflowMonthly(db, { months: c.req.query('months') })))
 api.get('/cashflow/categories', (c) => handle(c, () => svc.cashflowCategories(db, c.req.query('month'))))
 api.get('/budget', (c) => handle(c, () => svc.getBudget(db, c.req.query('month'))))
 api.put('/budget', async (c) => {

@@ -1,0 +1,438 @@
+/* Charts (stream C). Tokens come from :root in styles.css; the base .chart,
+   .legend and .tip skins stay in its chart section (the Tooltip primitive
+   shares .tip). Everything here is .ch-*. */
+
+/* ---------- tooltip: measured, flipped, 80ms fade ---------- */
+.tip.ch-tip {
+  width: max-content;
+  max-width: 320px;
+  opacity: 0;
+  transition: opacity 80ms var(--ease-out);
+}
+.tip.ch-tip.on { opacity: 1; }
+.tip .r .sw.ch-sw-ln { width: 12px; height: 3px; border-radius: 2px; }
+.tip .t .ch-sub { color: var(--ink-3); margin-left: 6px; }
+.tip .ch-note { color: var(--ink-3); font-size: 11px; margin-top: 4px; max-width: 240px; white-space: normal; }
+
+/* ---------- legend ---------- */
+.legend .sw.ch-sw-dash,
+.tip .r .sw.ch-sw-dash {
+  background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px);
+}
+.ch-li {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out);
+}
+.ch-li:hover { color: var(--ink); }
+.ch-li.off { color: var(--ink-3); }
+.ch-li.off .sw { opacity: 0.35; }
+
+/* ---------- control bar above a chart (ranges, scale, legend toggles) ---------- */
+.ch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ch-bar .legend { margin-left: auto; }
+.ch-note { color: var(--ink-3); font-size: 12px; margin-top: 8px; }
+.ch-hint { color: var(--ink-2); font-size: 12.5px; }
+
+/* ---------- donut: legend in the layout flow, wraps under the ring when narrow ---------- */
+.ch-donut {
+  display: flex;
+  align-items: center;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+}
+.ch-donut > svg { flex: none; }
+.ch-donut path { transition: opacity var(--dur-1) var(--ease-out); }
+.ch-donut-legend {
+  flex: 1 1 130px;
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+}
+.ch-donut-legend .r { display: flex; align-items: center; gap: 7px; cursor: default; transition: opacity var(--dur-1) var(--ease-out); }
+.ch-donut-legend .sw { width: 9px; height: 9px; border-radius: 2.5px; flex: none; }
+.ch-donut-legend .nm { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-donut-legend .vl { margin-left: auto; padding-left: 12px; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* ---------- price chart ---------- */
+.ch-empty { padding: 18px 0 8px; }
+.ch-empty .ch-hint { max-width: 62ch; }
+.ch-empty .btn { margin-top: 10px; }
+.ch-symbols .ui-seg { flex-wrap: wrap; }
+.ch-legend-below { margin-top: 8px; }
+
+/* ---------- TimeChart ---------- */
+.ch-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.card .ch-head h2 { margin: 0; }
+.ch-head-r {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* wrapped rows stay right-aligned under the title */
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.ch-tc-plot {
+  border-radius: 6px;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.ch-tc.is-pending .ch-tc-plot { opacity: 0.5; }
+.ch-tc-plot svg {
+  touch-action: pan-y; /* a horizontal drag scrubs (touch) or zooms (mouse); vertical still scrolls the page */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ch-tc-plot svg.is-brushing { cursor: col-resize; }
+.ch-brush {
+  fill: rgba(255, 255, 255, 0.06);
+  stroke: var(--ink-3);
+  stroke-dasharray: 2 3;
+}
+.ch-tc-empty {
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+.ch-refused { color: var(--ink-3); }
+.tip .r .vl .ch-asof {
+  color: var(--ink-3);
+  font-family: var(--sans);
+  font-size: 10.5px;
+  margin-left: 6px;
+}
+.ch-head-lead { min-width: 0; }
+
+/* ---------- links inside chart cards (there is no global anchor skin) ---------- */
+.ch-a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--dur-1) var(--ease-out);
+}
+.ch-a:hover { text-decoration-color: var(--ink-2); }
+
+/* ---------- dashboard: hero, change text, tiles ---------- */
+.ch-hero-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; }
+.ch-hero { font-size: 44px; line-height: 1.05; }
+.ch-delta { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ch-hero-delta { font-size: 13px; }
+.ch-compare { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+
+.ch-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color var(--dur-1) var(--ease-out);
+}
+.ch-stat:hover { border-color: var(--line-strong); }
+/* The link's own ring hugs the small title; the card's border says which tile has focus. */
+.ch-stat:has(.ch-stat-link:focus-visible) { border-color: var(--gold); }
+.ch-stat h2 { margin-bottom: 8px; }
+.ch-stat-link { color: inherit; text-decoration: none; }
+/* The title is the link; its hit area stretches over the whole card. */
+.ch-stat-link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.ch-stat:hover .ch-stat-link { color: var(--ink-2); }
+.ch-stat-v { font-size: 21px; font-weight: 650; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ch-stat .ch-spark { margin-top: auto; padding-top: 8px; box-sizing: content-box; pointer-events: none; /* under the card link */ }
+
+/* ---------- dashboard: dream home tile ---------- */
+.ch-dream { display: flex; flex-direction: column; }
+.ch-dream-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ch-dream-v { font-size: 24px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ch-dream .pbar { margin: 10px 0 6px; }
+.ch-dream-empty { margin: 0; }
+.ch-dream-cta { align-self: flex-start; margin-top: 14px; text-decoration: none; }
+
+/* ---------- dashboard: activity ---------- */
+.ch-activity td { padding-top: 7px; padding-bottom: 7px; }
+/* The description takes what the other columns leave and ellipsizes, so a long payee never pushes the amount out of the card. */
+.ch-activity td.desc { max-width: 0; width: 100%; }
+.ch-act { position: relative; }
+.ch-act-day { width: 88px; }
+.ch-act-link { color: var(--ink); text-decoration: none; }
+/* The description is the row's link; its hit area covers the row. */
+.ch-act-link::after { content: ''; position: absolute; inset: 0; }
+.ch-act:hover .ch-act-link { text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.ch-act-tag { width: 1%; white-space: nowrap; }
+.ch-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--card-hi);
+  border: 1px solid var(--line);
+  padding: 2px 9px;
+  border-radius: 999px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-cat.is-none { color: var(--ink-3); border-style: dashed; background: none; }
+.ch-skel-rows { display: grid; gap: 14px; padding: 6px 0; }
+
+/* ---------- digest: driver bars ---------- */
+.ch-digest { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 36px; }
+.ch-digest-nw { flex: 1 1 340px; max-width: 540px; display: grid; gap: 6px; }
+.ch-digest-list { flex: 1 1 320px; min-width: 0; display: grid; gap: 6px; }
+.ch-digest-nw:only-child, .ch-digest-list:only-child { max-width: none; }
+.ch-drivers { display: grid; }
+.ch-driver {
+  display: grid;
+  align-items: center;
+  border-radius: 6px;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+.ch-driver.on { background: rgba(255, 255, 255, 0.035); }
+.ch-driver-nm { font-size: 12.5px; color: var(--ink-2); padding-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-driver-vl { font-family: var(--mono); font-size: 12px; text-align: right; padding-right: 6px; font-variant-numeric: tabular-nums; }
+.ch-driver svg { display: block; overflow: visible; }
+
+/* ---------- bar charts: hover, selection, keyboard (C8) ---------- */
+/* The chart is one tab stop; the global :focus-visible ring draws around it. */
+.ch-nav { border-radius: 6px; }
+.ch-bullets-legend { margin: -2px 0 10px; }
+.legend .sw.ch-sw-tick { width: 2px; height: 12px; border-radius: 1px; background: var(--ink-2); }
+.legend .sw.ch-sw-pace {
+  width: 2px;
+  height: 12px;
+  border-radius: 0;
+  background: repeating-linear-gradient(180deg, var(--ink) 0 2px, transparent 2px 4px);
+}
+
+/* ---------- motion (C9): CSS only, so the reduced-motion kill-switch in styles.css removes all of it ---------- */
+@keyframes ch-grow-y { from { transform: scaleY(0); } }
+@keyframes ch-grow-x { from { transform: scaleX(0); } }
+@keyframes ch-fade { from { opacity: 0; } }
+@keyframes ch-pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  60% { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); }
+}
+/* First reveal only: useGrow drops .ch-grow once the staggered grow is over,
+   so a keep-alive revisit (which restarts animations) never replays it. */
+.ch-grow .ch-bar-v,
+.ch-grow .ch-bar-h {
+  transform-box: fill-box;
+  animation-duration: var(--dur-4);
+  animation-timing-function: var(--ease-out);
+  animation-delay: calc(var(--i, 0) * 18ms);
+  animation-fill-mode: both;
+}
+.ch-grow .ch-bar-v { transform-origin: 50% 100%; animation-name: ch-grow-y; }
+.ch-grow .ch-bar-v.neg { transform-origin: 50% 0; }
+.ch-grow .ch-bar-h { transform-origin: 0 50%; animation-name: ch-grow-x; }
+.ch-grow .ch-bar-h.neg { transform-origin: 100% 50%; }
+.ch-wash { animation: ch-fade var(--dur-1) var(--ease-out) both; }
+.ch-wash-sel { animation: ch-fade var(--dur-2) var(--ease-out) both; }
+/* The crosshair's dots pop in when the crosshair appears. */
+.ch-pop { transform-box: fill-box; transform-origin: center; animation: ch-pop var(--dur-2) var(--ease-out) both; }
+.ch-dream .pbar i.ch-growing { transform-origin: 0 50%; animation: ch-grow-x var(--dur-4) var(--ease-out) both; }
+
+/* ---------- count-up hero figures (C11): the final figure reserves the width, so nothing beside it shifts ---------- */
+.ch-count { display: inline-grid; font-variant-numeric: tabular-nums; }
+.ch-count > [aria-hidden] { grid-area: 1 / 1; }
+.ch-count-size { visibility: hidden; }
+
+/* ---------- net-worth composition (C10) ---------- */
+.ch-stack { transition: fill-opacity var(--dur-1) var(--ease-out); }
+
+/* ---------- investments: portfolio value, trade rug, return by holding (C6) ---------- */
+.ch-rug { pointer-events: none; }
+.ch-rug-key { margin-top: 6px; }
+.ch-ret-sub { color: var(--ink-3); margin-left: 4px; }
+.ch-rets { display: grid; }
+.ch-ret-sym { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.ch-ret-vl { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; white-space: nowrap; }
+.ch-ret-vl b { font-weight: 600; }
+.ch-ret-rate { color: var(--ink-3); font-size: 11px; }
+.ch-ret-none { color: var(--ink-3); font-family: var(--sans); font-size: 11.5px; }
+.ch-ret-hollow { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 2; }
+.ch-ret-total { margin-top: 10px; }
+
+/* ---------- Compare (C7) ---------- */
+.ch-cmp-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-bottom: 12px;
+}
+.ch-cmp-modes { margin-left: auto; }
+.ch-cmp-modes .ui-seg { flex-wrap: wrap; }
+.ch-chips { display: contents; list-style: none; margin: 0; padding: 0; }
+.ch-chip {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  background: var(--card-hi);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12.5px;
+  transition: border-color var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+}
+.ch-chip:hover { border-color: var(--line-strong); }
+.ch-chip.warn { border-style: dashed; }
+.ch-chip button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.ch-chip-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 4px 4px 11px;
+  border-radius: 999px 0 0 999px;
+  color: var(--ink);
+}
+.ch-chip-t:disabled { cursor: default; }
+.ch-chip-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 32ch; }
+.ch-chip.off .ch-chip-t { color: var(--ink-3); }
+.ch-chip.off .sw { opacity: 0.35; }
+.ch-chip .sw.ln { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.ch-chip-ab { font-size: 11px; color: var(--ink-2); font-weight: 650; }
+.ch-chip-warn {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-3);
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 700;
+}
+.ch-chip-x {
+  padding: 0 10px 0 6px;
+  border-radius: 0 999px 999px 0;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1;
+  transition: color var(--dur-1) var(--ease-out);
+}
+.ch-chip-x:hover { color: var(--ink); }
+.ch-cmp-hint, .ch-cmp-win { margin: -4px 0 10px; }
+.ch-cmp-win { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ch-cmp-edited { color: var(--ink-3); }
+.ch-cmp-quick { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.ch-cmp-warn { margin: 8px 0 0; padding-left: 18px; color: var(--ink-3); font-size: 12px; display: grid; gap: 2px; }
+.ch-cmp-stats { margin-top: 14px; overflow-x: auto; transition: opacity var(--dur-2) var(--ease-out); }
+.ch-cmp-stats.is-pending { opacity: 0.5; }
+.ch-cmp-stats table { width: 100%; }
+.ch-cmp-stats th { white-space: nowrap; }
+.ch-cmp-stats td { vertical-align: top; }
+.ch-cmp-stats td small {
+  display: block;
+  color: var(--ink-3);
+  font-family: var(--sans);
+  font-size: 10.5px;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+.ch-cmp-sname { display: inline-flex; align-items: center; gap: 8px; }
+.ch-cmp-sname .sw.ln { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+
+/* the series picker (a popover): search box, grouped listbox, key hints */
+.ui-pop.ch-picker {
+  width: min(400px, calc(100vw - 16px));
+  max-width: min(400px, calc(100vw - 16px));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ch-picker-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
+.ch-picker-head .ui-input { flex: 1; min-width: 0; }
+.ch-picker-count { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ch-picker-list {
+  max-height: min(360px, 52vh);
+  overflow-y: auto;
+  padding: 4px 6px 6px;
+  overscroll-behavior: contain;
+  /* The sticky group heading covers the list's top ~28px: keyboard scrolling stops the active row below it. */
+  scroll-padding-top: 30px;
+  scroll-padding-bottom: 6px;
+}
+.ch-picker-group {
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  background: var(--card-hi);
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 8px 8px 4px;
+}
+.ch-picker-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ch-picker-opt.on { background: rgba(255, 255, 255, 0.06); }
+.ch-picker-opt.off { cursor: default; }
+.ch-picker-opt.off .ch-picker-lbl { color: var(--ink-3); }
+.ch-picker-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+}
+.ch-picker-opt.sel .ch-picker-check { border-color: var(--ink-2); }
+.ch-picker-sw { width: 8px; height: 8px; border-radius: 2px; }
+.ch-picker-txt { display: grid; min-width: 0; }
+.ch-picker-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-picker-sub { color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-picker-empty { display: grid; gap: 8px; justify-items: start; padding: 14px 12px; color: var(--ink-3); font-size: 12.5px; }
+.ch-picker-foot { border-top: 1px solid var(--line); padding: 7px 12px; color: var(--ink-3); font-size: 11px; }
+.ch-picker-why { color: var(--ink-2); }
+.ch-picker-foot kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 2px;
+}
+
+/* the Performance preset dialog */
+.ch-perf { display: grid; gap: 14px; }
+.ch-perf-set { border: 0; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ch-perf-set legend { color: var(--ink-3); font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; padding: 0; margin-bottom: 4px; }
+.ch-check { display: flex; align-items: flex-start; gap: 9px; padding: 4px 2px; font-size: 13px; cursor: pointer; }
+.ch-check input { margin: 2px 0 0; accent-color: var(--ink-2); flex: none; }
+.ch-check > span { display: grid; min-width: 0; }
+.ch-check small { color: var(--ink-3); font-size: 11.5px; }
+.ch-check.off { color: var(--ink-3); cursor: default; }
+.ch-perf-combine { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ch-perf-err { color: var(--ink-2); margin-top: 0; }
