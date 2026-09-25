@@ -22,6 +22,7 @@ import { CommandPalette, PaletteHint } from './ui/CommandPalette'
 import { confirm, DialogHost } from './ui/dialogs'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { announce } from './ui/LiveRegion'
+import { ScarabMark } from './ui/ScarabMark'
 import { ScreenProvider } from './ui/screen'
 import { SidebarStatus } from './ui/SidebarStatus'
 import { Skeleton } from './ui/Skeleton'
@@ -466,16 +467,6 @@ function ScreenLoading({ label }: { label: string }) {
 }
 
 /* ---------- before the shell ---------- */
-
-function ScarabMark({ size }: { size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 44 44" fill="none" aria-hidden="true">
-      <circle cx="22" cy="9" r="5" stroke="var(--gold)" strokeWidth="2.6" />
-      <ellipse cx="22" cy="27" rx="10" ry="11" stroke="var(--gold)" strokeWidth="2.6" />
-      <path d="M22 16v22" stroke="var(--gold)" strokeWidth="2.6" strokeLinecap="round" />
-    </svg>
-  )
-}
 
 /**
  * index.html's splash, re-rendered by React while the boot questions are out.

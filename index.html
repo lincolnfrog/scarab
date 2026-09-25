@@ -6,10 +6,12 @@
     <meta name="robots" content="noindex" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0a0d12" />
+    <!-- The favicon and the splash below are copies of src/ui/ScarabMark.tsx. The favicon's cuts
+         are heavier so the beetle survives 16px, and its gold darkens on a light tab strip. -->
     <link
       rel="icon"
       type="image/svg+xml"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='2 1 40 40' fill='none' stroke='%23e3b23c' stroke-width='3.4' stroke-linecap='round'%3E%3Ccircle cx='22' cy='9' r='5'/%3E%3Cellipse cx='22' cy='27' rx='10' ry='11'/%3E%3Cpath d='M22 16v22'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cstyle%3Erect{fill:%23e3b23c}@media (prefers-color-scheme:light){rect{fill:%23a67c1e}}%3C/style%3E%3Cmask id='m'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23fff'/%3E%3Cpath d='M24.6 19.31A7.4 5.55 0 0 1 39.4 19.31Q32 23.16 24.6 19.31ZM23.49 20.42Q32 25.6 40.51 20.42C43.1 20.42 44.58 22.64 44.58 25.6C44.58 28.19 43.84 30.04 41.62 30.04H22.38C20.16 30.04 19.42 28.19 19.42 25.6C19.42 22.64 20.9 20.42 23.49 20.42ZM31.07 31.89V50.02C25.34 50.02 20.16 47.8 20.16 41.88V34.11C20.16 32.85 21.12 31.89 22.38 31.89ZM32.92 31.89V50.02C38.66 50.02 43.84 47.8 43.84 41.88V34.11C43.84 32.85 42.88 31.89 41.62 31.89Z'/%3E%3Cpath d='M22.75 19.16L24.05 19.87Q32 24.38 39.95 19.87L41.25 19.16M18.68 30.96H45.32M32 30.96V51.13' fill='none' stroke='%23fff' stroke-width='3.26'/%3E%3Cpath d='M20.9 24.86L16.46 24.12L11.65 17.83M20.53 31.15L14.61 32.26L12.02 36.7M20.9 39.29L16.46 42.25L15.35 48.54M43.1 24.86L47.54 24.12L52.35 17.83M43.47 31.15L49.39 32.26L51.98 36.7M43.1 39.29L47.54 42.25L48.65 48.54' fill='none' stroke='%23000' stroke-width='3.26' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/mask%3E%3Crect width='64' height='64' mask='url(%23m)'/%3E%3C/svg%3E"
     />
     <title>Scarab</title>
     <!-- Painted before the bundle arrives: the page colour (no white flash) and the splash below.
@@ -24,10 +26,14 @@
   <body>
     <div id="root">
       <div class="boot-splash" role="status" aria-label="Loading Scarab">
-        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="#e3b23c" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
-          <circle cx="22" cy="9" r="5" />
-          <ellipse cx="22" cy="27" rx="10" ry="11" />
-          <path d="M22 16v22" />
+        <svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true">
+          <mask id="boot-mark">
+            <circle cx="32" cy="32" r="30" fill="#fff" />
+            <path d="M24.6 19.31A7.4 5.55 0 0 1 39.4 19.31Q32 23.16 24.6 19.31ZM23.49 20.42Q32 25.6 40.51 20.42C43.1 20.42 44.58 22.64 44.58 25.6C44.58 28.19 43.84 30.04 41.62 30.04H22.38C20.16 30.04 19.42 28.19 19.42 25.6C19.42 22.64 20.9 20.42 23.49 20.42ZM31.07 31.89V50.02C25.34 50.02 20.16 47.8 20.16 41.88V34.11C20.16 32.85 21.12 31.89 22.38 31.89ZM32.92 31.89V50.02C38.66 50.02 43.84 47.8 43.84 41.88V34.11C43.84 32.85 42.88 31.89 41.62 31.89Z" />
+            <path d="M22.75 19.16L24.05 19.87Q32 24.38 39.95 19.87L41.25 19.16M18.68 30.96H45.32M32 30.96V51.13" fill="none" stroke="#fff" stroke-width="2.81" />
+            <path d="M20.9 24.86L16.46 24.12L11.65 17.83M20.53 31.15L14.61 32.26L12.02 36.7M20.9 39.29L16.46 42.25L15.35 48.54M43.1 24.86L47.54 24.12L52.35 17.83M43.47 31.15L49.39 32.26L51.98 36.7M43.1 39.29L47.54 42.25L48.65 48.54" fill="none" stroke="#000" stroke-width="2.66" stroke-linecap="round" stroke-linejoin="round" />
+          </mask>
+          <rect width="64" height="64" fill="#e3b23c" mask="url(#boot-mark)" />
         </svg>
       </div>
     </div>

@@ -38,6 +38,7 @@ import { Button } from './ui/Button'
 import { confirm } from './ui/dialogs'
 import { Field, TextInput } from './ui/Field'
 import { withViewTransition } from './ui/motion'
+import { ScarabMark } from './ui/ScarabMark'
 import { parseServerTime, relTime, useSyncStatus, whoLabel } from './ui/syncStatus'
 import { toast } from './ui/Toast'
 import { useAction } from './ui/useAction'
@@ -453,11 +454,7 @@ export default function FrontDoor({ mode: booted, onEnter, onHousehold }: { mode
     <div className="frontdoor">
       <div className="card zk-door" style={{ maxWidth: 520, width: '100%' }}>
         <div className="logo" style={{ marginBottom: 18 }}>
-          <svg width="26" height="26" viewBox="0 0 44 44" fill="none" aria-hidden="true">
-            <circle cx="22" cy="9" r="5" stroke="var(--gold)" strokeWidth="2.6" />
-            <ellipse cx="22" cy="27" rx="10" ry="11" stroke="var(--gold)" strokeWidth="2.6" />
-            <path d="M22 16v22" stroke="var(--gold)" strokeWidth="2.6" strokeLinecap="round" />
-          </svg>
+          <ScarabMark size={26} />
           <span>SCARAB</span>
         </div>
 
