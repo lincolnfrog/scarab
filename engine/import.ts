@@ -118,7 +118,38 @@ function parseOfx(text: string): ParsedRow[] {
   return rows
 }
 
+/** What the cash half of a split cash-back purchase is called — a rule on it files it (e.g. under Cash). */
+export const CASH_BACK_DESCRIPTION = 'CASH BACK WITH PURCHASE'
+const CASH_BACK = /^PURCHASE\s+WITH\s+CASH\s+BACK\s+\$\s*([\d,]+\.\d{2})\s+/i
+
+/**
+ * Wells Fargo books a debit-card purchase with cash back as one row —
+ * "PURCHASE WITH CASH BACK $ 100.00 AUTHORIZED ON 01/15 NUGGET MARKET …",
+ * -$179.45 — so the whole amount would file as Groceries. Split it into the
+ * two things that happened: the purchase ("PURCHASE AUTHORIZED ON 01/15
+ * NUGGET MARKET …", -$79.45, which the merchant's rule files) and the cash
+ * (CASH_BACK_DESCRIPTION, -$100.00). Deterministic, so a re-import dedupes
+ * both halves. A row whose cash isn't smaller than its total is left whole.
+ */
+export function splitCashBack(rows: ParsedRow[]): ParsedRow[] {
+  return rows.flatMap((r) => {
+    const m = CASH_BACK.exec(r.description)
+    if (!m) return [r]
+    const cash = parseMoney(m[1]!)
+    if (!(cash > 0) || r.amountCents >= 0 || cash >= -r.amountCents) return [r]
+    return [
+      { ...r, amountCents: r.amountCents + cash, description: `PURCHASE ${r.description.slice(m[0].length)}` },
+      { postedOn: r.postedOn, amountCents: -cash, description: CASH_BACK_DESCRIPTION, ...(r.fitid ? { fitid: `${r.fitid}:cash` } : {}) },
+    ]
+  })
+}
+
 export function parseStatement(text: string): ParseResult {
+  const parsed = parseStatementRows(text)
+  return { ...parsed, rows: splitCashBack(parsed.rows) }
+}
+
+function parseStatementRows(text: string): ParseResult {
   if (/<OFX|<STMTTRN/i.test(text)) {
     const rows = parseOfx(text)
     if (rows.length === 0) throw new Error('OFX file contained no transactions')
@@ -141,6 +172,10 @@ export function parseStatement(text: string): ParseResult {
 
 const norm = (s: string) => s.toUpperCase().replace(/\s+/g, ' ').trim()
 
+/** A CSV row's dedupe hash before its ordinal: (date, amount, normalized description). */
+export const hashBase = (r: Pick<ParsedRow, 'postedOn' | 'amountCents' | 'description'>) =>
+  sha1Hex(`${r.postedOn}|${r.amountCents}|${norm(r.description)}`).slice(0, 20)
+
 /**
  * Dedupe key. OFX gives a real per-account transaction id (FITID). For CSV we
  * hash (date, amount, normalized description) and add an ordinal so that two
@@ -151,7 +186,7 @@ export function dedupeHashes(rows: ParsedRow[]): string[] {
   const seen = new Map<string, number>()
   return rows.map((r) => {
     if (r.fitid) return `fitid:${r.fitid}`
-    const base = sha1Hex(`${r.postedOn}|${r.amountCents}|${norm(r.description)}`).slice(0, 20)
+    const base = hashBase(r)
     const ordinal = seen.get(base) ?? 0
     seen.set(base, ordinal + 1)
     return `${base}#${ordinal}`
@@ -176,6 +211,51 @@ export function categorize(description: string, rules: Rule[]): Rule | null {
       best = r
   }
   return best
+}
+
+/* ---------------- a pasted rule list ---------------- */
+
+export type PastedRule = { line: number; pattern: string; category: string; priority: number | null }
+export type RulePaste = { rules: PastedRule[]; errors: { line: number; message: string }[] }
+
+/** Manual categorizing files at priority 10; a pasted list stays below it unless it says otherwise. */
+export const RULE_PRIORITY_MAX = 100
+
+/**
+ * One rule per line: `pattern<TAB>category[<TAB>priority]`, or the same with
+ * ` -> ` / ` → ` between the fields (patterns may hold commas, so commas don't
+ * separate). Blank lines, `#` comments and a `pattern…` header are skipped.
+ * Patterns are stored the way the categorizer compares them: uppercase, inner
+ * whitespace collapsed, ends trimmed. The UI previews with this and the
+ * engine imports with it, so the two never disagree.
+ */
+export function parseRules(text: string): RulePaste {
+  const rules: PastedRule[] = []
+  const errors: RulePaste['errors'] = []
+  const seen = new Map<string, number>()
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = i + 1
+    const s = raw.trim()
+    if (!s || s.startsWith('#')) return
+    const f = s.split(/\t+|\s+(?:->|→)\s+/).map((x) => x.trim())
+    if (rules.length === 0 && errors.length === 0 && /^pattern$/i.test(f[0]!)) return
+    const err = (message: string) => errors.push({ line, message })
+    if (f.length < 2 || f.length > 3) return err('expected pattern, category and an optional priority, separated by tabs or →')
+    const pattern = norm(f[0]!)
+    const category = f[1]!.replace(/\s+/g, ' ')
+    if (pattern.length < 3) return err('the pattern needs at least 3 characters')
+    if (!category || category.length > 40) return err('the category needs a name of 1–40 characters')
+    let priority: number | null = null
+    if (f[2] !== undefined) {
+      priority = /^\d+$/.test(f[2]) ? Number(f[2]) : NaN
+      if (!(priority >= 0 && priority <= RULE_PRIORITY_MAX)) return err(`the priority must be a whole number 0–${RULE_PRIORITY_MAX}`)
+    }
+    const dup = seen.get(pattern)
+    if (dup !== undefined) return err(`“${pattern}” is already on line ${dup}`)
+    seen.set(pattern, line)
+    rules.push({ line, pattern, category, priority })
+  })
+  return { rules, errors }
 }
 
 /* ---------------- the import itself ---------------- */
@@ -241,8 +321,11 @@ export function importStatement(
  * A debit in one account and an equal-and-opposite credit in another within a
  * few days is almost certainly money moving between your own accounts, not
  * income or spending. Pair them greedily (nearest dates first, one-to-one) and
- * file both sides as Transfer. Manual categorizations are never overridden;
- * runs at boot and after every import, so it is idempotent.
+ * file both sides as Transfer. Only rows with no category yet, or already
+ * filed as a transfer, take part: a merchant rule is better evidence than an
+ * amount coincidence (a $100 refund is not the other side of $100 cash back).
+ * Manual categorizations are never overridden; runs at boot and after every
+ * import, so it is idempotent.
  */
 export function detectTransfers(db: DbLike, windowDays = 3): number {
   const transfer = db.prepare("SELECT id FROM categories WHERE kind = 'transfer' ORDER BY id LIMIT 1").get() as
@@ -257,6 +340,7 @@ export function detectTransfers(db: DbLike, windowDays = 3): number {
        FROM transactions t
        LEFT JOIN categories cat ON cat.id = t.category_id
        WHERE t.amount_cents != 0 AND (t.categorized_by IS NULL OR t.categorized_by NOT IN ('manual'))
+         AND (t.category_id IS NULL OR cat.kind = 'transfer')
        ORDER BY t.posted_on, t.id`,
     )
     .all() as { id: number; account_id: number; posted_on: string; amount_cents: number; is_transfer: 0 | 1 | null }[]
@@ -306,7 +390,7 @@ export function detectTransfers(db: DbLike, windowDays = 3): number {
 /* ---------------- merchant extraction ---------------- */
 
 const BANK_PREFIX =
-  /^(?:(?:PURCHASE|POS PURCHASE|CHECK CRD PURCHASE|DEBIT CARD PURCHASE|RECURRING PAYMENT|PAYMENT|ATM WITHDRAWAL|WITHDRAWAL|CHECKCARD)\s+(?:AUTHORIZED\s+)?(?:ON\s+)?\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+)/
+  /^(?:(?:PURCHASE WITH CASH BACK \$ ?[\d,]+\.\d{2}|PURCHASE RETURN|PURCHASE|POS PURCHASE|CHECK CRD PURCHASE|DEBIT CARD PURCHASE|RECURRING PAYMENT|MONEY TRANSFER|PAYMENT|ATM WITHDRAWAL|WITHDRAWAL|CHECKCARD)\s+(?:AUTHORIZED\s+)?(?:ON\s+)?\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+)/
 
 /**
  * Pull the actual merchant out of bank statement boilerplate:

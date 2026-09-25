@@ -250,3 +250,28 @@ td.scr-none { padding: 18px 10px; text-align: center; }
   color: var(--ink-2);
   font: 11px var(--mono);
 }
+
+/* ---------- Cash: import rules (RulesSheet) ---------- */
+.scr-sheet { display: grid; gap: 12px; }
+.scr-sheet .scr-note, .ui-foot-start.scr-note { color: var(--ink-3); font-size: 12px; margin: 0; }
+.scr-paste {
+  width: 100%;
+  min-height: 160px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  tab-size: 24;
+  color: var(--ink);
+  background: var(--plane);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: border-color var(--dur-1) var(--ease-out);
+}
+.scr-paste:hover:not(:focus) { border-color: rgba(255, 255, 255, 0.22); }
+.scr-paste::placeholder { color: var(--ink-3); }
+.scr-preview { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.scr-preview td.num { white-space: nowrap; }
+.scr-errlist { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 2px; }
+.scr-newtag { margin-left: 8px; }

@@ -58,6 +58,7 @@ export function prepareDatabase(db: DbLike, opts: ServerOptions & { purge: boole
   }
   const repairs = runRepairs(db)
   if (repairs.signsFlipped > 0) log.push(`repair: flipped ${repairs.signsFlipped} card-payment rows to inflows`)
+  if (repairs.cashBackSplit > 0) log.push(`repair: split ${repairs.cashBackSplit} cash-back purchases into purchase + cash`)
   if (repairs.rulesApplied > 0) log.push(`rules: filed ${repairs.rulesApplied} previously uncategorized transactions`)
   const swept = detectTransfers(db)
   if (swept > 0) log.push(`transfer detection: filed ${swept} transactions as Transfer`)

@@ -55,6 +55,7 @@ export const CORE: LocalRoute[] = [
     }),
   ),
   r('PATCH', '/transactions/:id', (c) => svc.patchTransaction(c.db, Number(c.params.id), c.body)),
+  r('POST', '/rules/import', (c) => svc.importRules(c.db, c.body)),
   r('GET', '/cashflow/monthly', (c) => svc.cashflowMonthly(c.db, { months: c.query.get('months') })),
   r('GET', '/cashflow/categories', (c) => svc.cashflowCategories(c.db, c.query.get('month') ?? undefined)),
   r('GET', '/budget', (c) => svc.getBudget(c.db, c.query.get('month') ?? undefined)),

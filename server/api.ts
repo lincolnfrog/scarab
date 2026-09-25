@@ -59,6 +59,10 @@ api.patch('/transactions/:id', async (c) => {
   const b = await c.req.json()
   return handle(c, () => svc.patchTransaction(db, Number(c.req.param('id')), b))
 })
+api.post('/rules/import', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => svc.importRules(db, b))
+})
 
 api.get('/cashflow/monthly', (c) => handle(c, () => svc.cashflowMonthly(db, { months: c.req.query('months') })))
 api.get('/cashflow/categories', (c) => handle(c, () => svc.cashflowCategories(db, c.req.query('month'))))

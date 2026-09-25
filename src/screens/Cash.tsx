@@ -8,6 +8,7 @@ import { Bullets, fmtMonth, fmtShort } from '../viz'
 import RecurringCard from '../RecurringCard'
 import CashFlowCard from '../cards/CashFlowCard'
 import CategorySpendCard from '../cards/CategorySpendCard'
+import RulesSheet from './RulesSheet'
 import { Button } from '../ui/Button'
 import { useDeepAction } from '../ui/CommandPalette'
 import { prompt } from '../ui/dialogs'
@@ -150,6 +151,7 @@ export default function Cash() {
   const [dataVersion, setDataVersion] = useState(0)
   const [importAccount, setImportAccount] = useState<number | null>(null)
   const [editBudgets, setEditBudgets] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)
   const [newAccount, setNewAccount] = useState<{ name: string; kind: 'checking' | 'savings' } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const accountNameRef = useRef<HTMLInputElement>(null)
@@ -409,9 +411,14 @@ export default function Cash() {
     <HeaderSlot
       sub={accountsLine(accounts)}
       actions={
-        <Button variant="gold" busy={importFile.busy} onClick={onImportClick}>
-          Import CSV / OFX
-        </Button>
+        <>
+          <Button variant="ghost" disabled={!categories} onClick={() => setRulesOpen(true)}>
+            Import rules…
+          </Button>
+          <Button variant="gold" busy={importFile.busy} onClick={onImportClick}>
+            Import CSV / OFX
+          </Button>
+        </>
       }
     />
   )
@@ -458,6 +465,15 @@ export default function Cash() {
   return (
     <>
       {header}
+      <RulesSheet
+        open={rulesOpen}
+        categories={categories ?? []}
+        onClose={() => setRulesOpen(false)}
+        onDone={() => {
+          loadStatic().catch((e) => toast.error("Couldn't refresh the categories", { detail: message(e) }))
+          refreshAll()
+        }}
+      />
       <input
         ref={fileRef}
         type="file"

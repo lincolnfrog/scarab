@@ -1,10 +1,10 @@
 import { addMonthsIso, addMonthsToMonth, isRealIsoDay, monthsBetween, todayLocal } from '../shared/dates'
 import { OPENING_NOTE, RSU_VEST_NOTE, RSU_WITHHOLDING_NOTE } from '../shared/invest-api'
-import type { BudgetRow, CategorySpend, GoalDerived, MonthlyFlow, Tx, TxPage } from '../shared/types'
+import type { BudgetRow, CategorySpend, GoalDerived, MonthlyFlow, RulesImportResult, Tx, TxPage } from '../shared/types'
 import type { DbLike } from './db'
 import { ApiError, bad, isoMonth, notFound } from './errors'
 import { cashEffectCents, type CashTrade } from './holdings'
-import { categorize, extractMerchant, importStatement, type Rule } from './import'
+import { categorize, detectTransfers, extractMerchant, importStatement, parseRules, type Rule } from './import'
 import { migrations } from './migrations'
 import { netWorthSeries } from './networth'
 
@@ -241,6 +241,86 @@ export function patchTransaction(db: DbLike, id: number, body: { categoryId: num
     } else pattern = null
   }
   return { ok: true as const, ruleApplied, pattern }
+}
+
+/* ---------- rules ---------- */
+
+/** Rows the app filed itself — by a rule, a transfer pair, or not yet at all — as opposed to by hand. */
+const AUTOMATIC = "categorized_by IS NULL OR categorized_by LIKE 'rule:%' OR categorized_by = 'auto:transfer'"
+
+/**
+ * Load a pasted rule list (engine/import.ts parseRules): all of it or none.
+ * A category it names that doesn't exist yet is created as spending. A
+ * pattern already on file takes the list's category (and its priority, when
+ * the line gives one). Then every transaction not filed by hand is re-filed
+ * the way an import files it — the rules' longest match, then transfer
+ * pairing — so the list reaches past imports as well as future ones.
+ */
+export function importRules(db: DbLike, b: { text?: string }): RulesImportResult {
+  if (typeof b.text !== 'string') bad('text required')
+  const { rules, errors } = parseRules(b.text!)
+  if (errors.length > 0)
+    bad(errors.slice(0, 3).map((e) => `line ${e.line}: ${e.message}`).join('; ') + (errors.length > 3 ? ` (+${errors.length - 3} more)` : ''))
+  if (rules.length === 0) bad('no rules in the paste')
+
+  const out: RulesImportResult = { added: 0, updated: 0, unchanged: 0, categoriesCreated: [], refiled: 0 }
+  const automatic = db.prepare(`SELECT id, description, category_id, categorized_by FROM transactions WHERE ${AUTOMATIC}`).all() as {
+    id: number
+    description: string
+    category_id: number | null
+    categorized_by: string | null
+  }[]
+  db.transaction(() => {
+    const catId = new Map<string, number>()
+    for (const c of db.prepare('SELECT id, name FROM categories').all() as { id: number; name: string }[])
+      catId.set(c.name.toLowerCase(), c.id)
+    const byPattern = new Map(
+      (db.prepare('SELECT id, pattern, category_id, priority FROM rules').all() as Rule[]).map((r) => [r.pattern.toUpperCase(), r]),
+    )
+    const insert = db.prepare('INSERT INTO rules (pattern, category_id, priority) VALUES (?, ?, ?)')
+    const update = db.prepare('UPDATE rules SET category_id = ?, priority = ? WHERE id = ?')
+    for (const r of rules) {
+      let cid = catId.get(r.category.toLowerCase())
+      if (cid === undefined) {
+        cid = (createCategory(db, { name: r.category, kind: 'expense' }) as { id: number }).id
+        catId.set(r.category.toLowerCase(), cid)
+        out.categoriesCreated.push(r.category)
+      }
+      const cur = byPattern.get(r.pattern)
+      if (!cur) {
+        insert.run(r.pattern, cid, r.priority ?? 0)
+        out.added++
+      } else if (cur.category_id !== cid || (r.priority !== null && r.priority !== cur.priority)) {
+        update.run(cid, r.priority ?? cur.priority, cur.id)
+        out.updated++
+      } else out.unchanged++
+    }
+
+    // Every row not filed by hand is re-filed by the rules. Automatic transfer
+    // pairs stand, unless a rule now files one side as something else: a pair
+    // made before that rule existed may be a coincidence of amounts. Then all
+    // of them are released (a pair's other side isn't recorded) and found
+    // again below, from rows the rules leave uncategorized or call transfers.
+    const all = db.prepare('SELECT id, pattern, category_id, priority FROM rules').all() as Rule[]
+    const transferIds = new Set(
+      (db.prepare("SELECT id FROM categories WHERE kind = 'transfer'").all() as { id: number }[]).map((c) => c.id),
+    )
+    const filed = automatic.map((t) => ({ t, rule: categorize(t.description, all) }))
+    const repair = filed.some(({ t, rule }) => t.categorized_by === 'auto:transfer' && rule && !transferIds.has(rule.category_id))
+    const set = db.prepare('UPDATE transactions SET category_id = ?, categorized_by = ? WHERE id = ?')
+    for (const { t, rule } of filed) {
+      if (t.categorized_by === 'auto:transfer' && !repair) continue
+      const by = rule ? `rule:${rule.id}` : null
+      if (by !== t.categorized_by || (rule?.category_id ?? null) !== t.category_id) set.run(rule?.category_id ?? null, by, t.id)
+    }
+  })()
+  // After the transaction: detectTransfers opens its own, and the sql.js seam can't nest them.
+  detectTransfers(db)
+  const now = new Map(
+    (db.prepare(`SELECT id, category_id FROM transactions WHERE ${AUTOMATIC}`).all() as { id: number; category_id: number | null }[]).map((t) => [t.id, t.category_id]),
+  )
+  out.refiled = automatic.filter((t) => now.get(t.id) !== t.category_id).length
+  return out
 }
 
 /* ---------- cash flow & budget ---------- */

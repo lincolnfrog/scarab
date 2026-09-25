@@ -185,6 +185,22 @@ describe('detectTransfers', () => {
     expect(detectTransfers(db)).toBe(0)
   })
 
+  it('leaves rows a merchant rule filed as spending or income out of pairing', async () => {
+    const { detectTransfers } = await import('./import')
+    const db = dbWithTwoAccounts()
+    const cash = db.prepare("INSERT INTO categories (name, kind, sort) VALUES ('Cash', 'expense', 99)").run().lastInsertRowid
+    insert(db, 1, '2026-05-13', -10000, 'CASH BACK WITH PURCHASE')
+    db.prepare("UPDATE transactions SET category_id = ?, categorized_by = 'rule:1' WHERE description = 'CASH BACK WITH PURCHASE'").run(cash)
+    insert(db, 2, '2026-05-12', 10000, 'MERCHANT REFUND') // same amount, days apart — a coincidence, not a transfer
+    expect(detectTransfers(db)).toBe(0)
+    // A row a rule already filed as a transfer still pairs with its uncategorized other side.
+    const transfer = (db.prepare("SELECT id FROM categories WHERE kind = 'transfer'").get() as { id: number }).id
+    insert(db, 1, '2026-06-01', -500000, 'GOLDMAN SACHS BA TRANSFER')
+    db.prepare("UPDATE transactions SET category_id = ?, categorized_by = 'rule:2' WHERE description LIKE 'GOLDMAN%'").run(transfer)
+    insert(db, 2, '2026-06-02', 500000, 'DEPOSIT FROM WELLS FARGO')
+    expect(detectTransfers(db)).toBe(1)
+  })
+
   it('matches one-to-one: two identical debits, one credit → one pair', async () => {
     const { detectTransfers } = await import('./import')
     const db = dbWithTwoAccounts()
@@ -212,6 +228,14 @@ describe('extractMerchant', () => {
       'WHOLE FOODS MAR SANTA',
     )
   })
+  it('strips cash-back, return and money-transfer boilerplate too', async () => {
+    const { extractMerchant } = await import('./import')
+    expect(
+      extractMerchant('PURCHASE WITH CASH BACK        $ 100.00 AUTHORIZED ON   01/15 NUGGET MARKET #18         GRANITE BAY   CA  P586015816826024   CARD 4668'),
+    ).toBe('NUGGET MARKET')
+    expect(extractMerchant('PURCHASE RETURN AUTHORIZED ON 03/02 REI #74 ROSEVILLE CA S123456789 CARD 4668')).toBe('REI')
+    expect(extractMerchant('MONEY TRANSFER AUTHORIZED ON 01/01 PAYPAL *EE43 SAN JOSE CA S123456789 CARD 4668')).toBe('PAYPAL *EE43 SAN JOSE')
+  })
   it('keeps plain descriptions, capped at four tokens', async () => {
     const { extractMerchant } = await import('./import')
     expect(extractMerchant('LA SUPER-RICA TAQUERIA SANTA BARBARA CA')).toBe('LA SUPER-RICA TAQUERIA SANTA')
@@ -227,5 +251,53 @@ Cleared,08/05/2026,COSTCO WHSE #0029,142.55,
 Cleared,08/04/2026,REFUND FROM MERCHANT,,25.00`
     const { rows } = parseStatement(csv)
     expect(rows.map((r) => r.amountCents)).toEqual([560100, -14255, 2500])
+  })
+})
+
+describe('cash-back purchases', () => {
+  const CASHBACK_CSV = `"DATE","DESCRIPTION","AMOUNT","CHECK #","STATUS"
+"01/15/2026","PURCHASE WITH CASH BACK        $ 100.00 AUTHORIZED ON   01/15 NUGGET MARKET #18         GRANITE BAY   CA  P586015816826024   CARD 4668","-179.45","","Posted"
+"01/16/2026","PURCHASE WITH CASH BACK        $  40.00 AUTHORIZED ON   01/16 WHOLEFDS ROS 102 1001 GAL ROSEVILLE     CA  P346262801821654   CARD 4668","-40.00","","Posted"`
+
+  it('splits into the purchase and the cash, and a re-import skips both', async () => {
+    const { CASH_BACK_DESCRIPTION } = await import('./import')
+    const { rows } = parseStatement(CASHBACK_CSV)
+    expect(rows.map((r) => [r.amountCents, r.description.replace(/\s+/g, ' ')])).toEqual([
+      [-7945, 'PURCHASE AUTHORIZED ON 01/15 NUGGET MARKET #18 GRANITE BAY CA P586015816826024 CARD 4668'],
+      [-10000, CASH_BACK_DESCRIPTION],
+      // All of it was cash: nothing to split off, left whole.
+      [-4000, 'PURCHASE WITH CASH BACK $ 40.00 AUTHORIZED ON 01/16 WHOLEFDS ROS 102 1001 GAL ROSEVILLE CA P346262801821654 CARD 4668'],
+    ])
+    const db = openDb(':memory:')
+    db.prepare("INSERT INTO accounts (name, kind) VALUES ('WF Checking', 'checking')").run()
+    expect(importStatement(db, { accountId: 1, filename: 'a.csv', content: CASHBACK_CSV, importedBy: 't' })).toMatchObject({ imported: 3 })
+    expect(importStatement(db, { accountId: 1, filename: 'a.csv', content: CASHBACK_CSV, importedBy: 't' })).toMatchObject({ imported: 0, skipped: 3 })
+  })
+
+  it('repairs rows imported whole, so a re-import still dedupes', async () => {
+    const { runRepairs } = await import('./repairs')
+    const { hashBase } = await import('./import')
+    const db = openDb(':memory:')
+    db.prepare("INSERT INTO accounts (name, kind) VALUES ('WF Checking', 'checking')").run()
+    const cash = db.prepare("INSERT INTO categories (name, kind, sort) VALUES ('Cash', 'expense', 99)").run().lastInsertRowid
+    db.prepare("INSERT INTO rules (pattern, category_id) VALUES ('CASH BACK WITH PURCHASE', ?)").run(cash)
+    // How the old parser stored the first row: whole, filed as Groceries.
+    const desc = 'PURCHASE WITH CASH BACK        $ 100.00 AUTHORIZED ON   01/15 NUGGET MARKET #18         GRANITE BAY   CA  P586015816826024   CARD 4668'
+    const groceries = (db.prepare("SELECT id FROM categories WHERE name = 'Groceries'").get() as { id: number }).id
+    db.prepare(
+      "INSERT INTO transactions (account_id, posted_on, amount_cents, description, category_id, categorized_by, dedupe_hash) VALUES (1, '2026-01-15', -17945, ?, ?, 'manual', ?)",
+    ).run(desc, groceries, `${hashBase({ postedOn: '2026-01-15', amountCents: -17945, description: desc })}#0`)
+
+    expect(runRepairs(db).cashBackSplit).toBe(1)
+    expect(runRepairs(db).cashBackSplit).toBe(0)
+    const got = db
+      .prepare('SELECT t.amount_cents AS cents, c.name AS cat FROM transactions t LEFT JOIN categories c ON c.id = t.category_id ORDER BY t.id')
+      .all()
+    expect(got).toEqual([
+      { cents: -7945, cat: 'Groceries' },
+      { cents: -10000, cat: 'Cash' },
+    ])
+    const again = importStatement(db, { accountId: 1, filename: 'a.csv', content: CASHBACK_CSV.split('\n').slice(0, 2).join('\n'), importedBy: 't' })
+    expect(again).toMatchObject({ imported: 0, skipped: 2 })
   })
 })

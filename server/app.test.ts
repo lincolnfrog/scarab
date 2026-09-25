@@ -696,6 +696,8 @@ describe('consent-based invitations (Z9)', () => {
     expect(await pending('a@x')).toMatchObject([{ email: 'q@x', invited_by: 'a@x' }])
     expect(await pending('b@x')).toMatchObject([{ email: 'q@x', invited_by: 'b@x' }])
     // Nor can a later one from a take b's place: inviting again re-stamps a's own.
+    // Stamps are to the millisecond and these steps can share one; let the clock move so "later" is later.
+    await new Promise((r) => setTimeout(r, 5))
     expect((await invite('a@x', 'Q@x')).status).toBe(200)
     expect(count('vault_invites')).toBe(2)
     expect(await pending('b@x')).toMatchObject([{ email: 'q@x', invited_by: 'b@x' }])

@@ -30,6 +30,16 @@ export type ImportSummary = {
   skipped: number
   transfersFiled: number
 }
+/** POST /api/rules/import: what a pasted rule list changed (engine importRules). */
+export type RulesImportResult = {
+  added: number
+  updated: number
+  unchanged: number
+  /** Names of the spending categories the list created. */
+  categoriesCreated: string[]
+  /** Transactions whose category changed. */
+  refiled: number
+}
 export type ImportRecord = {
   id: number
   account_name: string
