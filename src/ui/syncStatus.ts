@@ -269,3 +269,6 @@ export function useNow(ms = 30_000): number {
   }, [ms])
   return now
 }
+
+/** Fired after a tab's price refresh, which may have had today's basket built: the sidebar re-reads its "Prices as of". */
+export const BASKET_EVENT = 'scarab-basket'

@@ -542,11 +542,15 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
   you a stale generation.
 - Deploy safety: HTML shell is `no-cache`; hashed assets immutable.
 - **Cloud Run CPU**: with request-based CPU and `--min-instances 0`, work that
-  outlives its request — the market history build, a daily basket build —
-  gets little CPU. The history build resumes from saved progress, so it still
-  finishes, but the first full build (~600 Yahoo calls) can take several
-  visits or days. Undecided: `--no-cpu-throttling`, or a scheduled ping to
-  `GET /api/basket/history`. Never change `--max-instances`.
+  outlives its request gets little CPU, and dies with the idle instance. So the
+  daily basket build runs inside the request that starts it: `GET /api/basket`
+  waits for it (≤120s), and a tab asks for it — its Investments refresh — as
+  soon as the basket it sees is from an earlier day. A day whose build was cut
+  off is retried an hour later (`BASKET_RETRY_MS`). The market history build
+  resumes from saved progress, so it still finishes, but the first full build
+  (~600 Yahoo calls) can take several visits or days. Undecided:
+  `--no-cpu-throttling`, or a scheduled ping to `GET /api/basket/history`.
+  Never change `--max-instances`.
 - **Request size**: Cloud Run's HTTP/1 front end refuses request bodies over
   32 MiB before they reach the container, below the app's 64 MB restore cap
   (`server/api4.ts` BODY_LIMITS). A household restore bigger than that needs a

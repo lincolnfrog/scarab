@@ -10,9 +10,11 @@ import { daysBetween } from './lotMath'
  * stored, and at most once per clock tick.
  *   · The clock is when fresher prices could have appeared. In a tab
  *     (zero-knowledge session) prices come from the shared daily basket, so
- *     it is `basket/status.builtAt`. On the household server the refresh
- *     asks the quote sources directly and no basket is involved, so it is
- *     the household's day.
+ *     it is `basket/status.builtAt` — or today, once that basket is from an
+ *     earlier day: today's is due, and it is the tab's refresh (its GET
+ *     /api/basket) that has the server build it. On the household server the
+ *     refresh asks the quote sources directly and no basket is involved, so
+ *     it is the household's day.
  *   · A holding needs a refresh when it has no price or its price is dated
  *     before the clock's day — unless its symbol already failed to price in
  *     this tab (not in the basket, unknown to the source): those are skipped
@@ -34,9 +36,10 @@ export function priceStale(pricedOn: string | null, today: string, days: number 
   return pricedOn === null || daysBetween(pricedOn, today) > days
 }
 
-/** The clock for this data universe: the basket's build time in a tab, the household's day on the server. */
+/** The clock for this data universe: the basket's build time in a tab (today once it's from an earlier day), the household's day on the server. */
 export function priceClock(mode: 'session' | 'household', basketBuiltAt: string | null, today: string): string | null {
-  return mode === 'session' ? basketBuiltAt : today
+  if (mode === 'household') return today
+  return basketBuiltAt !== null && basketBuiltAt.slice(0, 10) < today ? today : basketBuiltAt
 }
 
 /**

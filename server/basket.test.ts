@@ -286,6 +286,28 @@ describe('buildBasket', () => {
     expect(universeCalls()).toBe(2)
   })
 
+  it('retries a day whose attempt was cut off, an hour on — never sooner, and not once the day is built', async () => {
+    const db = mem()
+    const { f, calls } = fakeNet()
+    const universeCalls = () => calls.filter((u) => u.includes('nasdaqlisted')).length
+    const stamp = (at: string) => {
+      const put = db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
+      put.run('basket:attempted_on', at.slice(0, 10))
+      put.run('basket:attempted_at', at)
+    }
+    // Last built a week ago; today's build started at 14:50 and died with its instance (a deploy).
+    storeBasket(db, [{ symbol: 'BTC', kind: 'crypto', cents: 1, pricedOn: '2026-09-17' }], [], '2026-09-17T19:57:45.000Z')
+    stamp('2026-09-25T14:50:00.000Z')
+    expect(ensureBasket(db, f, '2026-09-25', { now: Date.parse('2026-09-25T15:30:00.000Z') })).toBeNull() // too soon
+    await ensureBasket(db, f, '2026-09-25', { now: Date.parse('2026-09-25T15:51:00.000Z') })
+    expect(universeCalls()).toBe(1)
+    // Built today: done for the day, however long ago the attempt was.
+    storeBasket(db, [{ symbol: 'BTC', kind: 'crypto', cents: 2, pricedOn: '2026-09-25' }], [], '2026-09-25T15:52:00.000Z')
+    stamp('2026-09-25T15:51:00.000Z')
+    expect(ensureBasket(db, f, '2026-09-25', { now: Date.parse('2026-09-25T23:00:00.000Z') })).toBeNull()
+    expect(universeCalls()).toBe(1)
+  })
+
   it('the basket never rides the snapshot (shared infrastructure, not household data)', async () => {
     const db = mem()
     await buildBasket(db, fakeNet().f)

@@ -27,7 +27,6 @@ export type ScenarioParams = {
   propertyGrowthMicro: number
   saveBeforeBuyCents: number
   saveAfterBuyCents: number
-  btcShockMicro: number // applied to the crypto slice at t=0; −1_000_000 = wiped out
   buyEnabled: boolean
   buyYear: number
   retireYear: number
@@ -61,7 +60,6 @@ export function defaultParams(today: string): ScenarioParams {
     propertyGrowthMicro: 20_000,
     saveBeforeBuyCents: 15_000_000, // $150k
     saveAfterBuyCents: 9_000_000, // $90k
-    btcShockMicro: 0,
     buyEnabled: true,
     buyYear: y + 1,
     retireYear: y + 22,
@@ -83,7 +81,6 @@ export function normalizeParams(input: unknown, base: ScenarioParams): ScenarioP
     'propertyGrowthMicro',
     'saveBeforeBuyCents',
     'saveAfterBuyCents',
-    'btcShockMicro',
     'buyYear',
     'retireYear',
     'retireSpendCents',
@@ -110,7 +107,6 @@ export function normalizeParams(input: unknown, base: ScenarioParams): ScenarioP
     })
   }
   if (out.volMicro < 0) bad('volMicro must be ≥ 0')
-  if (out.btcShockMicro < -1_000_000) out.btcShockMicro = -1_000_000
   if (out.endYear <= out.retireYear) bad('endYear must be after retireYear')
   if (out.retireSpendCents < 0 || out.saveBeforeBuyCents < 0 || out.saveAfterBuyCents < 0) bad('amounts must be ≥ 0')
   return out
@@ -268,11 +264,10 @@ export function toSimParams(
   draw: DrawMode,
 ): SimParams {
   const startYear = Number(today.slice(0, 4))
-  const shockedCrypto = Math.max(0, Math.round(balance.crypto * (1 + params.btcShockMicro / 1_000_000)))
   return {
     startYear,
     endYear: Math.max(params.endYear, startYear + 1),
-    liquidCents: balance.cash + balance.brokerage + balance.retirement + shockedCrypto,
+    liquidCents: balance.cash + balance.brokerage + balance.retirement + balance.crypto,
     propertyCents: balance.property,
     liabilitiesCents: balance.liabilities,
     meanReturnMicro: params.meanReturnMicro,

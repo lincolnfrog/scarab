@@ -113,10 +113,10 @@ describe('formatRoute', () => {
 })
 
 describe('SCREENS', () => {
-  it('lists every screen once, in nav order, with Compare between Future and Data & Vault', () => {
+  it('lists every screen once, in nav order: Dream Home beside Future, Compare between Future and Data & Vault', () => {
     const ids = SCREENS.map((s) => s.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(ids).toEqual(['dash', 'invest', 're', 'cash', 'goal', 'tax', 'future', 'compare', 'vault'])
+    expect(ids).toEqual(['dash', 'invest', 're', 'cash', 'tax', 'goal', 'future', 'compare', 'vault'])
     for (const id of ids) expect(isScreenId(id)).toBe(true)
     expect(isScreenId('toString')).toBe(false)
   })

@@ -26,6 +26,7 @@ import { localMode } from '../local'
 import { setParams, useRouteState } from '../router'
 import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
+import { BASKET_EVENT } from '../ui/syncStatus'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { useScreen, useScreenRoute } from '../ui/screen'
 import { toast } from '../ui/Toast'
@@ -119,8 +120,11 @@ export default function Invest() {
       if (r.history) setHistoryErrors(r.history.errors)
       const p = await load()
       // Every holding took part in this refresh (by hand or not): the same clock won't ask for them again.
+      // In a tab the refresh may have had today's basket built: remember the clock as it now stands.
       const held = p.positions.map((x) => x.symbol)
-      if (ctx.clock) ctx.memory.record(ctx.clock, failedSymbols(r.errors, held), held)
+      const clock = localMode.active ? ((await priceContext()).clock ?? ctx.clock) : ctx.clock
+      if (clock) ctx.memory.record(clock, failedSymbols(r.errors, held), held)
+      if (localMode.active) window.dispatchEvent(new Event(BASKET_EVENT))
       return { ...r, quiet, positions: p.positions }
     },
     {

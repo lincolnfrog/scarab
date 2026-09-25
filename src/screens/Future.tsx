@@ -59,7 +59,6 @@ type Knobs = {
   propertyGrowthMicro: number | null
   saveBeforeBuyCents: number | null
   saveAfterBuyCents: number | null
-  btcShockMicro: number | null
   buyEnabled: boolean
   buyYear: string
   retireYear: string
@@ -74,7 +73,6 @@ function toKnobs(p: Params): Knobs {
     propertyGrowthMicro: p.propertyGrowthMicro,
     saveBeforeBuyCents: p.saveBeforeBuyCents,
     saveAfterBuyCents: p.saveAfterBuyCents,
-    btcShockMicro: p.btcShockMicro,
     buyEnabled: p.buyEnabled,
     buyYear: String(p.buyYear),
     retireYear: String(p.retireYear),
@@ -93,7 +91,6 @@ function fromKnobs(k: Knobs, prev: Params): Omit<Params, 'events'> {
     propertyGrowthMicro: k.propertyGrowthMicro ?? prev.propertyGrowthMicro,
     saveBeforeBuyCents: Math.max(0, k.saveBeforeBuyCents ?? prev.saveBeforeBuyCents),
     saveAfterBuyCents: Math.max(0, k.saveAfterBuyCents ?? prev.saveAfterBuyCents),
-    btcShockMicro: Math.max(-1_000_000, k.btcShockMicro ?? prev.btcShockMicro),
     buyEnabled: k.buyEnabled,
     buyYear: yr(k.buyYear, prev.buyYear),
     retireYear: yr(k.retireYear, prev.retireYear),
@@ -502,7 +499,7 @@ export default function Future() {
   const color = colorOf(run.id)
   const endYear = run.result.years[run.result.years.length - 1]
 
-  type MicroKey = 'meanReturnMicro' | 'volMicro' | 'propertyGrowthMicro' | 'btcShockMicro'
+  type MicroKey = 'meanReturnMicro' | 'volMicro' | 'propertyGrowthMicro'
   type CentsKey = 'saveBeforeBuyCents' | 'saveAfterBuyCents' | 'retireSpendCents'
   type YearKey = 'buyYear' | 'retireYear' | 'endYear'
   const rateKnob = (key: MicroKey, label: string, o: { negative?: boolean; hint?: string } = {}) => (
@@ -610,7 +607,7 @@ export default function Future() {
             Assumptions · <span style={{ color }}>{run.name}</span>
           </h2>
           <div className="right muted">
-            <span aria-live="polite">{status === 'failed' ? 'not saved — edit again to retry' : status === 'saving' ? 'saving…' : 'saved'}</span> · crypto slice {fmtShort(cmp.balance!.crypto)} (the shock knob hits this before anything runs)
+            <span aria-live="polite">{status === 'failed' ? 'not saved — edit again to retry' : status === 'saving' ? 'saving…' : 'saved'}</span>
           </div>
         </div>
         <div className="scr-fields">
@@ -619,7 +616,6 @@ export default function Future() {
           {rateKnob('propertyGrowthMicro', 'Property growth', { negative: true })}
           {moneyKnob('saveBeforeBuyCents', 'Save / yr now')}
           {moneyKnob('saveAfterBuyCents', 'Save / yr after buying')}
-          {rateKnob('btcShockMicro', 'BTC shock', { negative: true, hint: 'e.g. -50' })}
         </div>
         <div className="scr-fields" style={{ marginTop: 12 }}>
           <label className="scr-check">

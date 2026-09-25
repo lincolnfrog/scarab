@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { get } from '../api'
-import { shortDate, sidebarText, useNow, useSyncStatus } from './syncStatus'
+import { BASKET_EVENT, shortDate, sidebarText, useNow, useSyncStatus } from './syncStatus'
 import '../screens/vault/vault.css'
 import './ui.css'
 
@@ -10,7 +10,8 @@ const BASKET_RECHECK_MS = 30 * 60_000
 /**
  * When the shared price basket was last built — what a session's prices are
  * as of. Asked on entering a session and when the tab comes back into view,
- * at most every 30 minutes. The same request for everyone (network-only).
+ * at most every 30 minutes, and again after a price refresh (BASKET_EVENT).
+ * The same request for everyone (network-only).
  */
 function useBasketBuiltAt(active: boolean): number | null {
   const [builtAt, setBuiltAt] = useState<number | null>(null)
@@ -18,8 +19,8 @@ function useBasketBuiltAt(active: boolean): number | null {
     if (!active) return
     let alive = true
     let last = -Infinity
-    const load = () => {
-      if (Date.now() - last < BASKET_RECHECK_MS) return
+    const load = (force = false) => {
+      if (!force && Date.now() - last < BASKET_RECHECK_MS) return
       last = Date.now()
       get<{ builtAt: string | null }>('/api/basket/status')
         .then((b) => {
@@ -32,10 +33,13 @@ function useBasketBuiltAt(active: boolean): number | null {
     const onVisible = () => {
       if (document.visibilityState === 'visible') load()
     }
+    const onRefreshed = () => load(true)
     document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener(BASKET_EVENT, onRefreshed)
     return () => {
       alive = false
       document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener(BASKET_EVENT, onRefreshed)
     }
   }, [active])
   return active ? builtAt : null

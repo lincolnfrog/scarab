@@ -46,14 +46,31 @@ api8.get('/mode', (c) =>
   }),
 )
 
+/** The longest GET /basket waits for a build before serving the basket it has — longer with none at all, still inside Cloud Run's 300s request timeout. */
+export const BASKET_WAIT_MS = 120_000
+const FIRST_BASKET_WAIT_MS = 240_000
+
 /**
- * The daily basket. Served whole, identical for every caller; refreshed at
- * most once a day in the background. A caller who finds it empty (first
- * boot) waits for the build instead.
+ * The daily basket. Served whole, identical for every caller. The first
+ * caller of the day starts that day's build and waits for it (up to
+ * BASKET_WAIT_MS), and so does anyone who asks while it runs: Cloud Run gives
+ * a container CPU only while a request is open, so a build left to run after
+ * the response crawls and dies with the idle instance — which is how prices
+ * stood still for a week. Past the wait, the basket as it is is served and
+ * the build carries on while other requests are open.
  */
 api8.get('/basket', async (c) => {
   const pending = ensureBasket(db)
-  if (pending && basketStatus(db).count === 0) await pending.catch(() => undefined)
+  if (pending) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      pending.catch(() => undefined),
+      new Promise<void>((done) => {
+        timer = setTimeout(done, basketStatus(db).count === 0 ? FIRST_BASKET_WAIT_MS : BASKET_WAIT_MS)
+      }),
+    ])
+    clearTimeout(timer)
+  }
   return c.json(getBasket(db))
 })
 api8.get('/basket/status', (c) => c.json({ ...basketStatus(db), building: isBuilding() }))

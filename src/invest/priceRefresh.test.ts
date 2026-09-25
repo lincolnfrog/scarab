@@ -52,6 +52,9 @@ describe('shouldRefresh', () => {
     expect(priceClock('household', built, '2026-09-23')).toBe('2026-09-23')
     expect(priceClock('session', built, '2026-09-23')).toBe(built)
     expect(priceClock('session', null, '2026-09-23')).toBeNull()
+    // A basket from an earlier day: today's is due, so the clock is today and the tab's refresh asks for it.
+    expect(priceClock('session', '2026-09-17T19:57:45.000Z', '2026-09-25')).toBe('2026-09-25')
+    expect(shouldRefresh(held(['BTC', '2026-09-17']), priceClock('session', '2026-09-17T19:57:45.000Z', '2026-09-25'), NONE, '2026-09-17T19:57:45.000Z')).toBe(true)
     const today = priceClock('household', null, '2026-09-23')
     expect(shouldRefresh(held(['VTI', '2026-09-22']), today, NONE)).toBe(true)
     expect(shouldRefresh(held(['VTI', '2026-09-22']), today, NONE, '2026-09-23')).toBe(false) // once a day

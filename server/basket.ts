@@ -342,24 +342,44 @@ let inflight: Promise<BuildResult> | null = null
 export const isBuilding = () => inflight !== null
 
 /**
- * Build at most once per day, and never twice at once. Returns the running
- * build so a caller with nothing to serve can await it; callers that already
- * have a basket just let it run in the background.
+ * A day's attempt that this long ago still left no basket built that day is
+ * tried again. It was cut off — a deploy replaced the instance, or Cloud Run
+ * reclaimed an idle one mid-build — or every source failed; either way the
+ * rest of the day shouldn't be lost to it, and once an hour can't hammer the
+ * sources.
+ */
+export const BASKET_RETRY_MS = 60 * 60_000
+
+/**
+ * Build once a day, and never twice at once. Returns the running build so a
+ * caller can await it — on Cloud Run a build only gets CPU while a request is
+ * open, so GET /basket waits for the one it starts.
  *
- * `force` skips the once-a-day check (a manual rebuild) but still joins a
- * build already running rather than starting a second one; throttling a
- * forced rebuild is the caller's call (basketStatus().builtAt says when the
- * last one finished).
+ * Today's attempt is stamped before it starts, so a crash mid-build doesn't
+ * retry in a loop; if the day still has no basket BASKET_RETRY_MS later, the
+ * next caller tries again.
+ *
+ * `force` skips those checks (a manual rebuild) but still joins a build
+ * already running rather than starting a second one; throttling a forced
+ * rebuild is the caller's call (basketStatus().builtAt says when the last one
+ * finished).
  */
 export function ensureBasket(
   db: DbLike,
   f: typeof fetch = fetch,
   today = new Date().toISOString().slice(0, 10),
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; now?: number } = {},
 ): Promise<BuildResult> | null {
   if (inflight) return inflight
-  if (!opts.force && meta(db, 'basket:attempted_on') === today) return null
-  setMeta(db, 'basket:attempted_on', today) // stamp first: a crash mid-build shouldn't retry in a loop
+  const now = opts.now ?? Date.now()
+  if (!opts.force && meta(db, 'basket:attempted_on') === today) {
+    const builtToday = (meta(db, 'basket:built_at') ?? '').slice(0, 10) >= today
+    const at = Date.parse(meta(db, 'basket:attempted_at') ?? '')
+    // No time recorded: attempted today by something that only stamps the day — leave it be.
+    if (builtToday || Number.isNaN(at) || now - at < BASKET_RETRY_MS) return null
+  }
+  setMeta(db, 'basket:attempted_on', today)
+  setMeta(db, 'basket:attempted_at', new Date(now).toISOString())
   inflight = buildBasket(db, f).finally(() => {
     inflight = null
   })
