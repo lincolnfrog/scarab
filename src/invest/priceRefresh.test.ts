@@ -8,6 +8,14 @@ const NONE = new Set<string>()
 describe('shouldRefresh', () => {
   const built = '2026-09-23T07:38:35.118Z' // Wednesday's basket: Tuesday's closes
 
+  it('always refreshes a holding with no price, even one the last refresh covered', () => {
+    // BTC was priced by this clock's refresh, then its account was deleted (taking its prices)
+    // and recreated: same symbol, no price. Covered or not, it asks.
+    expect(shouldRefresh(held(['BTC', null]), built, NONE, built, new Set(['BTC']))).toBe(true)
+    expect(shouldRefresh(held(['BTC', '2026-09-22']), built, NONE, built, new Set(['BTC']))).toBe(false)
+    expect(shouldRefresh(held(['BTC', null]), built, new Set(['BTC']), built, new Set(['BTC']))).toBe(false) // no quote exists: priced by hand
+  })
+
   it('refreshes when a holding is priced before the clock day, or not at all', () => {
     expect(shouldRefresh(held(['VTI', '2026-09-21']), built, NONE)).toBe(true)
     expect(shouldRefresh(held(['VTI', null]), built, NONE)).toBe(true)

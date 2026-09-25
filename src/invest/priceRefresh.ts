@@ -23,7 +23,10 @@ import { daysBetween } from './lotMath'
  *     one for the symbols that refresh covered: a basket built Saturday
  *     carries Friday's closes, and asking again would only fetch them again.
  *     A symbol that arrived after it (a trade, a vest, starting positions)
- *     took no part in it, so it still gets its one refresh on that clock.
+ *     took no part in it, so it still gets its one refresh on that clock —
+ *     and so does one with no price at all, whatever the memory says: a
+ *     symbol deleted with its account and recorded again starts with no
+ *     prices, under the same name the refresh covered.
  */
 
 /** A market price older than this is shown as stale and offered a hand-set price. */
@@ -60,7 +63,7 @@ export function shouldRefresh(
   if (again && covered === null) return false
   const day = clock.slice(0, 10)
   return positions.some(
-    (p) => !failed.has(p.symbol) && (p.priced_on === null || p.priced_on < day) && !(again && covered!.has(p.symbol)),
+    (p) => !failed.has(p.symbol) && (p.priced_on === null || (p.priced_on < day && !(again && covered!.has(p.symbol)))),
   )
 }
 
