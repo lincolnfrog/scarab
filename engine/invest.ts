@@ -604,16 +604,18 @@ export { OPENING_NOTE, RSU_VEST_NOTE, RSU_WITHHOLDING_NOTE }
 export const MAX_OPENING_ROWS = 500
 
 /**
- * Bring in lots an account already holds as of a date — pasted from a
- * statement or typed. Each row becomes a buy booked on `asOf` (Scarab's
- * records of the account start there, so a sale dated earlier can't touch
- * it) that keeps its real acquisition date in `acquired_on`, which sets its
- * holding period, and its total cost basis as the buy's total.
+ * Bring in lots an account already holds — pasted from a statement or typed.
+ * Each row becomes a buy of its total cost basis on the day it was acquired:
+ * a starting position is simply the buy it stands for, so a sale recorded
+ * afterwards takes from it like any other lot, and the account's history
+ * starts when the shares were really bought. A row with no acquisition date
+ * is booked on `asOf` (and its holding period starts there). Either way the
+ * buy is marked OPENING_NOTE: no cash changed hands for it in Scarab.
  *
  * All or nothing: every row is checked first, and if any fails nothing is
  * written and `errors` says which (by index into `rows`). Warnings never
- * block: a row with no acquisition date (its holding period then starts on
- * asOf), or a symbol this account already has trades in.
+ * block: a row with no acquisition date, or a symbol this account already
+ * has trades in.
  *
  * A new symbol's kind: the row's `assetKind`, else crypto in a crypto
  * account, else stock. A symbol already recorded keeps its kind.
@@ -664,7 +666,7 @@ export function createOpeningPositions(
     let acquiredOn: string | null = null
     if (r.acquiredOn !== undefined && r.acquiredOn !== null && r.acquiredOn !== '') {
       if (!isRealDay(r.acquiredOn)) return fail(`${symbol}: acquired must be a real yyyy-mm-dd day`)
-      if (r.acquiredOn > asOf) return fail(`${symbol}: acquired ${r.acquiredOn} is after the as-of date ${asOf}`)
+      if (r.acquiredOn > today) return fail(`${symbol}: acquired ${r.acquiredOn} is after today (${today})`)
       acquiredOn = r.acquiredOn
     }
     if (r.assetKind !== undefined && r.assetKind !== 'stock' && r.assetKind !== 'crypto')
@@ -698,7 +700,7 @@ export function createOpeningPositions(
     valid.map((v) => {
       newAsset.run(v.symbol, v.kind)
       const asset = assetOf.get(v.symbol) as { id: number }
-      return Number(insert.run(account!.id, asset.id, asOf, v.qtyMicro, v.basisCents, v.acquiredOn, OPENING_NOTE).lastInsertRowid)
+      return Number(insert.run(account!.id, asset.id, v.acquiredOn ?? asOf, v.qtyMicro, v.basisCents, v.acquiredOn, OPENING_NOTE).lastInsertRowid)
     }),
   )()
   return { created: tradeIds.length, tradeIds, errors: [], warnings }

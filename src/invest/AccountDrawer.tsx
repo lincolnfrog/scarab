@@ -153,7 +153,7 @@ export default function AccountDrawer(p: AccountDrawerProps) {
               : 'Nothing held here right now'}
           </span>
           <span className="inv-rowactions">
-            <Button size="mini" onClick={() => p.onPasteOpening(a.id)} title="Lots already held, as of a statement date">
+            <Button size="mini" onClick={() => p.onPasteOpening(a.id)} title="Lots already held, each booked on the day it was acquired">
               Paste starting positions
             </Button>
             <Button size="mini" variant="gold" onClick={() => p.onRecordTrade(a.id)}>
@@ -166,8 +166,8 @@ export default function AccountDrawer(p: AccountDrawerProps) {
             title={a.counts.trades > 0 ? 'Everything here has been sold' : 'Nothing held here yet'}
             body={
               a.counts.trades > 0
-                ? 'Its trades are in Activity. Record a buy, or paste positions as of a statement, to hold something again.'
-                : 'Paste what it holds as of a statement date — Scarab keeps each lot’s real acquisition date, so holding periods and tax come out right. Or record trades as you make them.'
+                ? 'Its trades are in Activity. Record a buy, or paste positions you hold, to hold something again.'
+                : 'Paste what it holds — each lot is recorded as a buy on the day it was acquired, so holding periods and tax come out right. Or record trades as you make them.'
             }
             action={{ label: 'Paste starting positions', onClick: () => p.onPasteOpening(a.id) }}
           />

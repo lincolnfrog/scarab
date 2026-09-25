@@ -4,11 +4,11 @@ import { addDaysIso, anniversaryIso } from '../shared/dates'
  * Lot engine. Trades in, positions out — nothing here touches the DB.
  * All money is integer cents; all quantities are integer micro-shares.
  *
- * A buy opens a lot on `acquired_on ?? traded_on`: a starting position is
- * recorded as a buy on the day Scarab's records begin (traded_on) but keeps
- * the day its shares were really acquired, which sets the holding period.
- * Trades are still processed in traded_on order — a sale can only consume a
- * lot that was on the books when it happened.
+ * A buy opens a lot on `acquired_on ?? traded_on`: a buy booked after its
+ * shares were really acquired (a transfer in, or an undated starting
+ * position's as-of day) keeps the acquisition date, which sets the holding
+ * period. Trades are still processed in traded_on order — a sale can only
+ * consume a lot that was on the books when it happened.
  *
  * Sells resolve their basis three ways:
  *  - explicit: acquired_on + basis_cents on the sell (history predates Scarab)

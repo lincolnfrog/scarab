@@ -216,6 +216,10 @@
 .inv-tablewrap { overflow-x: auto; position: relative; }
 .inv-activity td { vertical-align: middle; }
 .inv-activity .inv-actcol { width: 44px; }
+/* A row's actions stay in view when the ledger is wider than its card or drawer (macOS hides the scrollbar that would say so). */
+.inv-activity .inv-actcol,
+.inv-activity .inv-actcell { position: sticky; right: 0; z-index: 1; background: var(--card); }
+.inv-activity .inv-editrow .inv-actcell { background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)), var(--card); }
 .inv-subline { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.35; margin-top: 1px; white-space: nowrap; }
 .inv-subline .inv-tag { margin-left: 6px; height: 16px; font-size: 10px; }
 .inv-subline.inv-subwrap { white-space: normal; }

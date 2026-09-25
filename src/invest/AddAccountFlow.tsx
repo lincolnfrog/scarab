@@ -178,7 +178,7 @@ function Flow({ open, owners, institutions, today, onClose, onCreated, onNext }:
               <NextCard
                 primary
                 title="Paste what it holds"
-                body="Each lot as of a statement date — symbol, shares, cost basis, acquired. The real acquisition dates keep holding periods and tax right."
+                body="Each lot it holds — symbol, shares, total cost basis, acquired. Each is recorded as a buy on the day it was acquired, so history and tax start there."
                 onClick={() => onNext({ to: 'paste', accountId: a.id })}
               />
               <NextCard title="Record a trade" body="Start from a buy or a sale you just made." onClick={() => onNext({ to: 'trade', accountId: a.id })} />

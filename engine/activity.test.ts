@@ -20,7 +20,7 @@ function seed(db: DbLike) {
   db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Taxable', 'brokerage', 'lots')").run() // 1
   db.prepare("INSERT INTO invest_accounts (name, kind, tracking, stock_plan) VALUES ('E*Trade', 'brokerage', 'lots', 1)").run() // 2
   db.prepare("INSERT INTO assets (symbol, kind) VALUES ('ACME', 'stock')").run()
-  createOpeningPositions(db, { investAccountId: 1, asOf: '2026-08-01', rows: [{ symbol: 'VTI', qty: '10', basisCents: 200_000, acquiredOn: '2020-01-02' }] }, TODAY)
+  createOpeningPositions(db, { investAccountId: 1, asOf: '2026-08-01', rows: [{ symbol: 'VTI', qty: '10', basisCents: 200_000 }] }, TODAY) // undated: booked on its as-of day
   const trade = (b: Record<string, unknown>) =>
     createTrade(db, { investAccountId: 1, symbol: 'VTI', assetKind: 'stock', qty: '1', ...b }, TODAY)
   trade({ tradedOn: '2026-08-10', side: 'buy', totalCents: 25_000 })

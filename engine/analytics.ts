@@ -422,9 +422,14 @@ type TwrCalc = {
 /** Days in a month's period: the whole month, or up to today for the current one. */
 const periodDays = (ctx: Ctx, month: string) => Number((month === ctx.thisMonth ? ctx.today : monthEndIso(month)).slice(8, 10))
 
-/** A buy that was booked rather than bought: a starting position, or shares acquired before they were recorded. */
+/**
+ * A buy that was booked rather than bought: shares acquired before they were
+ * recorded, or a starting position with no acquisition date (booked on its
+ * as-of day). A starting position booked on the day it was acquired is that
+ * day's purchase, at its cost.
+ */
 const isBooked = (t: Line['trades'][number]) =>
-  t.side === 'buy' && (t.note === OPENING_NOTE || (t.acquired_on != null && t.acquired_on < t.traded_on))
+  t.side === 'buy' && (t.acquired_on != null ? t.acquired_on < t.traded_on : t.note === OPENING_NOTE)
 
 /**
  * A line's trades as flows, by index into the book's months. Buys put their

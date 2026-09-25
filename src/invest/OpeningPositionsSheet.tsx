@@ -8,14 +8,15 @@ import { Drawer } from '../ui/Dialog'
 import { DateInput, Field, FieldGrid, Select, useField } from '../ui/Field'
 import { useAction } from '../ui/useAction'
 import './invest.css'
+import { perShareCents } from './lotMath'
 import { inMarketList, loadMarketSymbols, type MarketSymbols } from './marketSymbols'
 
 export type OpeningAccount = { id: number; name: string }
 
 /**
- * "Bring in what you already hold": paste an account's lots as of a
- * statement date. Each becomes a buy booked on that date that keeps its real
- * acquisition date for tax (engine createOpeningPositions). The paste is
+ * "Bring in what you already hold": paste an account's lots. Each becomes a
+ * buy on the day it was acquired — an undated row on the as-of date —
+ * (engine createOpeningPositions). The paste is
  * read as it's typed (engine/positions-paste.ts, the same parser the preview
  * shows), and the engine takes all the rows or none.
  *
@@ -82,15 +83,15 @@ function Sheet({ accounts, initialAccountId, knownSymbols, today, onClose, onDon
     const out = new Map<number, RowIssue>()
     for (const r of parsed.rows) {
       const i: RowIssue = { warnings: [] }
-      if (r.acquiredOn && r.acquiredOn > asOf) i.error = `acquired after the as-of date (${asOf})`
+      if (r.acquiredOn && r.acquiredOn > today) i.error = `acquired after today (${today})`
       else if (serverErrors.has(r.line)) i.error = serverErrors.get(r.line)
-      if (!r.acquiredOn) i.warnings.push(`no acquisition date — holding period starts ${asOf}`)
+      if (!r.acquiredOn) i.warnings.push(`no acquisition date — booked on ${asOf}, and its holding period starts then`)
       if (market && !knownSymbols.has(r.symbol) && !inMarketList(market, r.symbol))
         i.warnings.push('not in the market list — fine for a fund or private stock; set its price by hand')
       out.set(r.line, i)
     }
     return out
-  }, [parsed.rows, asOf, market, knownSymbols, serverErrors])
+  }, [parsed.rows, asOf, today, market, knownSymbols, serverErrors])
 
   const blocking = parsed.errors.length + [...issues.values()].filter((i) => i.error).length
   const basisTotal = parsed.rows.reduce((s, r) => s + r.basisCents, 0)
@@ -136,7 +137,7 @@ function Sheet({ accounts, initialAccountId, knownSymbols, today, onClose, onDon
       onClose={onClose}
       dismissible={!save.busy}
       title="Starting positions"
-      subtitle="What an account already holds, one lot per row — acquisition dates kept for tax"
+      subtitle="What an account already holds, one lot per row — each recorded as a buy on the day it was acquired"
       footer={
         <>
           <span className="ui-foot-start inv-note">
@@ -158,13 +159,13 @@ function Sheet({ accounts, initialAccountId, knownSymbols, today, onClose, onDon
               ))}
             </Select>
           </Field>
-          <Field label="As of" hint="The statement date. The lots are on the books from this day; trades before it can't sell them.">
+          <Field label="Undated lots on" hint="Only for rows with no acquired date: they're booked on this day, and their holding period starts then.">
             <DateInput value={asOf} max={today} onChange={(v) => { setAsOf(v); setServerErrors(new Map()) }} />
           </Field>
         </FieldGrid>
         <Field
           label="Positions"
-          hint="Symbol · Shares · Cost basis (the lot's total) · Acquired, separated by tabs, commas or spaces — one style per paste. Copy rows from your brokerage's positions or lots page, or type them; a header row is fine."
+          hint="Symbol · Shares · Cost basis (the total paid for the lot, not per share) · Acquired, separated by tabs, commas or spaces — one style per paste. Copy rows from your brokerage's positions or lots page, or type them; a header row is fine."
         >
           <PasteArea
             autoFocus
@@ -185,7 +186,7 @@ function Sheet({ accounts, initialAccountId, knownSymbols, today, onClose, onDon
           </div>
         )}
         {parsed.rows.length > 0 && parsed.columns.acquired === null && (
-          <p className="inv-note">No acquisition dates in this paste: every lot’s holding period will start on {asOf}, so gains read as short-term.</p>
+          <p className="inv-note">No acquisition dates in this paste: every lot is booked on {asOf} and its holding period starts then, so gains read as short-term.</p>
         )}
         {parsed.rows.length > 0 && <Preview rows={parsed.rows} issues={issues} skipped={parsed.skipped.length} />}
       </div>
@@ -233,7 +234,10 @@ function Preview({ rows, issues, skipped }: { rows: PastedRow[]; issues: Map<num
                 <td className="r num muted">{r.line}</td>
                 <td><span className="tk"><span className="lg">{r.symbol}</span></span></td>
                 <td className="r num">{formatQtyMicro(r.qtyMicro)}</td>
-                <td className="r num">{formatCents(r.basisCents)}</td>
+                <td className="r num">
+                  {formatCents(r.basisCents)}
+                  {r.qtyMicro > 0 && <span className="inv-subline">{formatCents(perShareCents(r.basisCents, r.qtyMicro))}/sh</span>}
+                </td>
                 <td className="num">{r.acquiredOn ?? <span className="muted">—</span>}</td>
                 <td>
                   {/* The grid goes inside the cell: a td that is itself a grid stops being a table cell (its row's rule and tint stop short). */}

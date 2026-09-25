@@ -427,7 +427,7 @@ export function ActivityRow(p: {
         ) : (
           <>
             <span className={g > 0 ? 'pos' : g < 0 ? 'neg' : undefined}>{formatCents(g, { sign: g !== 0 })}</span>
-            <span className="inv-subline">
+            <span className="inv-subline inv-subwrap">
               {p.sheltered ? 'tax-deferred' : terms}
               {r.realized!.zero_basis_cents ? (
                 <Tooltip content={`${formatCents(r.realized!.zero_basis_cents)} of the proceeds matched no recorded lot and count as gain with $0 basis. Add the missing buy, or give the sale an entered basis.`}>
@@ -438,7 +438,7 @@ export function ActivityRow(p: {
           </>
         )}
       </td>
-      <td className="r">
+      <td className="r inv-actcell">
         {!p.locked && (
           <Menu
             label={`${r.side} ${r.symbol} ${r.traded_on} actions`}
@@ -499,7 +499,7 @@ function EditRows(p: {
           />
         </span>
       </td>
-      <td colSpan={2} className="r">
+      <td colSpan={2} className="r inv-actcell">
         <span className="inv-rowactions">
           <Button size="mini" variant="gold" busy={p.busy} onClick={p.onSave}>Save</Button>
           <Button size="mini" variant="ghost" onClick={p.onCancel}>Cancel</Button>

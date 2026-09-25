@@ -535,7 +535,7 @@ describe('starting positions (B5)', () => {
   const changes = (db: DbLike) => (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
   const AS_OF = '2026-09-01'
 
-  it('books each lot as a buy on the as-of date that keeps its real acquisition date', () => {
+  it('books each lot as a buy on the day it was acquired, and an undated one on the as-of date', () => {
     const { db, a, cb } = setup()
     const res = createOpeningPositions(
       db,
@@ -553,8 +553,8 @@ describe('starting positions (B5)', () => {
     expect(res).toMatchObject({ created: 3, errors: [], warnings: [{ row: 2, message: 'QQQ: no acquisition date — its holding period starts on 2026-09-01' }] })
     expect(res.tradeIds).toHaveLength(3)
     expect(db.prepare('SELECT traded_on, side, qty_micro, total_cents, acquired_on, note FROM trades ORDER BY id').all()).toEqual([
-      { traded_on: AS_OF, side: 'buy', qty_micro: 120_000_000, total_cents: 18_400_00, acquired_on: '2019-03-15', note: 'Opening position' },
-      { traded_on: AS_OF, side: 'buy', qty_micro: 10_000_000, total_cents: 2_500_00, acquired_on: '2026-03-02', note: 'Opening position' },
+      { traded_on: '2019-03-15', side: 'buy', qty_micro: 120_000_000, total_cents: 18_400_00, acquired_on: '2019-03-15', note: 'Opening position' },
+      { traded_on: '2026-03-02', side: 'buy', qty_micro: 10_000_000, total_cents: 2_500_00, acquired_on: '2026-03-02', note: 'Opening position' },
       { traded_on: AS_OF, side: 'buy', qty_micro: 5_000_000, total_cents: 2_000_00, acquired_on: null, note: 'Opening position' },
     ])
     // The holding period comes from the acquisition: the 2019 lot is long-term, the March one isn't yet.
@@ -588,7 +588,7 @@ describe('starting positions (B5)', () => {
           { symbol: 'VTI', qty: '10', basisCents: 1_000_00, acquiredOn: '2019-01-02' },
           { symbol: 'QQQ', qty: '-1', basisCents: 1_000_00 },
           { symbol: 'IWM', qty: '1', basisCents: -5 },
-          { symbol: 'EFA', qty: '1', basisCents: 100, acquiredOn: '2026-09-02' },
+          { symbol: 'EFA', qty: '1', basisCents: 100, acquiredOn: '2026-09-23' },
           { symbol: 'EEM', qty: '1', basisCents: 100, acquiredOn: '2019-02-30' },
           { symbol: 'BTC', qty: '1', basisCents: 100, assetKind: 'stock' },
           { symbol: 'NEW', qty: '1', basisCents: 100, assetKind: 'stock' },
@@ -601,7 +601,7 @@ describe('starting positions (B5)', () => {
     expect(res.created).toBe(0)
     expect(res.tradeIds).toEqual([])
     expect(res.errors.map((e) => e.row)).toEqual([1, 2, 3, 4, 5, 7, 8])
-    expect(res.errors.find((e) => e.row === 3)!.message).toMatch(/after the as-of date/)
+    expect(res.errors.find((e) => e.row === 3)!.message).toMatch(/after today/)
     expect(res.errors.find((e) => e.row === 5)!.message).toMatch(/already recorded as crypto/)
     expect(changes(db)).toBe(before)
     expect(count(db, 'trades')).toBe(1)
@@ -618,24 +618,34 @@ describe('starting positions (B5)', () => {
     expect(count(db, 'trades')).toBe(0)
   })
 
-  it('FIFO sells the earliest-acquired lot first, and a sale before the as-of date cannot touch it', () => {
+  it('FIFO sells the earliest-acquired lot first; an undated lot is on the books from its as-of date', () => {
     const { db, a } = setup()
     const buy = { investAccountId: a, symbol: 'VTI', assetKind: 'stock', qty: '10' }
     createTrade(db, { ...buy, side: 'buy', tradedOn: '2024-06-03', totalCents: 2_500_00 }, TODAY) // bought in Scarab, 2024
-    const [opening] = createOpeningPositions(
-      db,
-      { investAccountId: a, asOf: AS_OF, rows: [{ symbol: 'VTI', qty: '10', basisCents: 1_000_00, acquiredOn: '2019-03-15' }] },
-      TODAY,
-    ).tradeIds
-    // Naming the opening lot in a sale dated before its as-of date is refused.
-    expect(failure(() => createTrade(db, { ...buy, side: 'sell', tradedOn: '2026-08-15', totalCents: 3_000_00, soldLotTradeId: opening }, TODAY)))
-      .toMatchObject({ status: 400, message: /on the books from 2026-09-01/ })
-    // A FIFO sale after it takes the 2019 lot (long-term), not the 2024 one booked first.
-    createTrade(db, { ...buy, side: 'sell', tradedOn: '2026-09-15', totalCents: 3_000_00 }, TODAY)
+    createOpeningPositions(db, { investAccountId: a, asOf: AS_OF, rows: [{ symbol: 'VTI', qty: '10', basisCents: 1_000_00, acquiredOn: '2019-03-15' }] }, TODAY)
+    // A FIFO sale takes the 2019 lot (long-term), not the 2024 one recorded first — even dated before the paste's as-of day.
+    createTrade(db, { ...buy, side: 'sell', tradedOn: '2026-08-15', totalCents: 3_000_00 }, TODAY)
     const p = getPortfolio(db, TODAY)
     expect(p.positions[0]!.lots.map((l) => l.opened_on)).toEqual(['2024-06-03'])
     expect(p.totals).toMatchObject({ ytd_lt: 2_000_00, ytd_st: 0 })
+    expect(p.warnings).toEqual([])
     expect(getTax(db, TODAY).incomes).toMatchObject({ realizedLtCents: 2_000_00, realizedStCents: 0 })
+    // A lot pasted with no acquisition date exists from the as-of day: naming it in an earlier sale is refused.
+    const [undated] = createOpeningPositions(db, { investAccountId: a, asOf: AS_OF, rows: [{ symbol: 'VTI', qty: '1', basisCents: 100_00 }] }, TODAY).tradeIds
+    expect(failure(() => createTrade(db, { ...buy, qty: '1', side: 'sell', tradedOn: '2026-08-20', totalCents: 300_00, soldLotTradeId: undated }, TODAY)))
+      .toMatchObject({ status: 400, message: /on the books from 2026-09-01/ })
+  })
+
+  it('a sale recorded after pasting today’s lots takes from the lot it came out of', () => {
+    // Pasted as of today, acquired 2017; a sale in August then recorded. It used to
+    // find no lot on the books yet — "exceeds recorded holdings", all proceeds a gain.
+    const { db, cb } = setup()
+    createOpeningPositions(db, { investAccountId: cb, asOf: TODAY, rows: [{ symbol: 'BTC', qty: '50', basisCents: 175_000_00, acquiredOn: '2017-06-06' }] }, TODAY)
+    createTrade(db, { investAccountId: cb, symbol: 'BTC', assetKind: 'crypto', side: 'sell', tradedOn: '2026-08-17', qty: '1', totalCents: 63_603_49 }, TODAY)
+    const p = getPortfolio(db, TODAY)
+    expect(p.warnings).toEqual([])
+    expect(p.positions[0]).toMatchObject({ symbol: 'BTC', qty_micro: 49_000_000 })
+    expect(p.totals).toMatchObject({ ytd_lt: 63_603_49 - 3_500_00, ytd_st: 0 })
   })
 
   it("the wash-sale scan dates an opening lot by its acquisition, not the day it was booked", () => {
