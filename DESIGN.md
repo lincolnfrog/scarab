@@ -369,7 +369,9 @@ number.
 5. trades gains sold_lot_trade_id / acquired_on / basis_cents — specific-lot
    and explicit-basis sells. A buy may carry acquired_on too: a starting
    position or a transfer in keeps its true acquisition date.
-6. unvested_positions — one running unvested count per account+asset.
+6. unvested_positions — one row per grant (id): a running unvested count, and
+   several grants of one stock may share a plan (migration 22). A vest trade
+   names its grant in trades.grant_id.
 7. Household categories (Gardening/Alcohol/Pets/Taxes) + merchant rules;
    card-payment patterns file as Transfer.
 8. goal_settings (JSON blobs) + loan_options; brokerage ACH files as Transfer

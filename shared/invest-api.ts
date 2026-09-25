@@ -87,8 +87,9 @@ export type InvestAccountPatch = Partial<Omit<InvestAccountCreate, 'kind'>> & { 
 /** `changed` false: the patch matched what was stored and nothing was written. */
 export type InvestAccountUpdateResult = { ok: true; changed: boolean; account: InvestAccountRow }
 
-/** One unvested grant (GET /api/unvested rows). */
+/** One unvested grant (GET /api/unvested rows). A plan may hold several grants of one stock. */
 export type UnvestedRow = {
+  id: number
   invest_account_id: number
   asset_id: number
   symbol: string
@@ -314,6 +315,8 @@ export type VestBody = {
   withheldQty?: string | null
   /** Vesting more than is recorded as unvested: the rest came from a grant Scarab doesn't track. */
   allowUntracked?: boolean
+  /** The grant that vested; may be left out when the plan holds one grant of this stock. */
+  grantId?: number
 }
 export type VestResult = {
   ok: true

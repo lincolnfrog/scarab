@@ -97,7 +97,7 @@ describe("the drawer's panels", () => {
 
   it("Grants: each grant's count, value and schedule, with Vest…; the form when there are none", () => {
     const grant: UnvestedRow = {
-      invest_account_id: 2, asset_id: 2, symbol: 'ACME', account_name: 'Acme plan', qty_micro: 60_000_000, updated_on: '2026-09-01',
+      id: 7, invest_account_id: 2, asset_id: 2, symbol: 'ACME', account_name: 'Acme plan', qty_micro: 60_000_000, updated_on: '2026-09-01',
       next_vest_on: '2026-10-15', vest_every_months: 3, vest_qty_micro: 15_000_000, price_cents: 120_00, priced_on: '2026-09-21', est_cents: 7_200_00,
     }
     const t = text(renderToStaticMarkup(<GrantsPanel account={accounts[1]!} grants={[grant]} onChanged={() => {}} />))

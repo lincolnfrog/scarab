@@ -1406,26 +1406,34 @@ export function firstVestAfter(anchor: string, everyMonths: number, after: strin
   return { on, k }
 }
 
-/** The latest vest recorded in this account and asset on or after the day a schedule is anchored on. */
-function lastVestSince(db: DbLike, accountId: number, assetId: number, anchor: string): string | null {
+/**
+ * The latest vest of this grant recorded on or after the day its schedule is
+ * anchored on. A vest recorded before grants had ids (grant_id null) counts
+ * for every grant of its stock in its account, as it did then.
+ */
+function lastVestSince(db: DbLike, g: GrantKey, anchor: string): string | null {
   const r = db
     .prepare(
       `SELECT max(traded_on) AS d FROM trades
-       WHERE invest_account_id = ? AND asset_id = ? AND side = 'buy' AND note = ? AND traded_on >= ?`,
+       WHERE invest_account_id = ? AND asset_id = ? AND side = 'buy' AND note = ? AND traded_on >= ?
+         AND (grant_id = ? OR grant_id IS NULL)`,
     )
-    .get(accountId, assetId, RSU_VEST_NOTE, anchor) as { d: string | null }
+    .get(g.invest_account_id, g.asset_id, RSU_VEST_NOTE, anchor, g.id) as { d: string | null }
   return r.d
 }
 
+/** Which grant: its id, and the plan and stock it belongs to. */
+type GrantKey = { id: number; invest_account_id: number; asset_id: number }
+
 /** The next vest not yet recorded (see above). */
-function nextUnrecordedVest(db: DbLike, accountId: number, assetId: number, anchor: string, everyMonths: number): string {
-  const last = lastVestSince(db, accountId, assetId, anchor)
+function nextUnrecordedVest(db: DbLike, g: GrantKey, anchor: string, everyMonths: number): string {
+  const last = lastVestSince(db, g, anchor)
   return last === null ? anchor : firstVestAfter(anchor, everyMonths, last).on
 }
 
 /** Every unvested grant (`accountId`: one account's), valued at the latest price — never counted in net worth. */
 export function getUnvested(db: DbLike, opts: { accountId?: number } = {}): { rows: UnvestedRow[]; total_est_cents: number } {
-  const sql = `SELECT u.invest_account_id, u.qty_micro, u.updated_on, u.next_vest_on, u.vest_every_months, u.vest_qty_micro,
+  const sql = `SELECT u.id, u.invest_account_id, u.qty_micro, u.updated_on, u.next_vest_on, u.vest_every_months, u.vest_qty_micro,
               a.symbol, a.id AS asset_id, ia.name AS account_name,
               (SELECT close_cents FROM prices WHERE asset_id = a.id ORDER BY priced_on DESC LIMIT 1) AS price_cents,
               (SELECT priced_on FROM prices WHERE asset_id = a.id ORDER BY priced_on DESC LIMIT 1) AS priced_on
@@ -1434,13 +1442,13 @@ export function getUnvested(db: DbLike, opts: { accountId?: number } = {}): { ro
        JOIN invest_accounts ia ON ia.id = u.invest_account_id`
   const rows = (
     opts.accountId === undefined
-      ? db.prepare(`${sql} ORDER BY a.symbol`).all()
-      : db.prepare(`${sql} WHERE u.invest_account_id = ? ORDER BY a.symbol`).all(opts.accountId)
+      ? db.prepare(`${sql} ORDER BY a.symbol, u.id`).all()
+      : db.prepare(`${sql} WHERE u.invest_account_id = ? ORDER BY a.symbol, u.id`).all(opts.accountId)
   ) as Omit<UnvestedRow, 'est_cents'>[]
   const est = (r: { qty_micro: number; price_cents: number | null }) =>
     r.price_cents === null ? null : positionValueCents(r.qty_micro, r.price_cents)
   const next = (r: Omit<UnvestedRow, 'est_cents'>) =>
-    r.next_vest_on && r.vest_every_months ? nextUnrecordedVest(db, r.invest_account_id, r.asset_id, r.next_vest_on, r.vest_every_months) : r.next_vest_on
+    r.next_vest_on && r.vest_every_months ? nextUnrecordedVest(db, r, r.next_vest_on, r.vest_every_months) : r.next_vest_on
   return {
     rows: rows.map((r) => ({ ...r, next_vest_on: next(r), est_cents: est(r) })),
     total_est_cents: rows.reduce((s, r) => s + (est(r) ?? 0), 0),
@@ -1467,19 +1475,21 @@ function parseVestSchedule(b: VestScheduleInput) {
   return { nextVestOn: b.nextVestOn, every, qtyMicro }
 }
 
+/**
+ * Add a grant, or change one. With `id`, that grant: its unvested count and
+ * schedule (`qty` '0' removes it). Without, a new grant of `symbol` — a plan
+ * can hold several of the same stock, each with its own schedule — except
+ * that `qty` '0' without an id clears every grant of that stock in the plan.
+ */
 export function putUnvested(
   db: DbLike,
-  b: { investAccountId?: number; symbol?: string; qty?: string } & VestScheduleInput,
+  b: { investAccountId?: number; symbol?: string; qty?: string; id?: number } & VestScheduleInput,
   today: string,
 ) {
-  if (!b.investAccountId || !b.symbol?.trim() || b.qty == null) bad('investAccountId, symbol, qty required')
+  if (!b.investAccountId || b.qty == null || (b.id === undefined && !b.symbol?.trim())) bad('investAccountId, symbol (or id), qty required')
   if (!db.prepare("SELECT id FROM invest_accounts WHERE id = ? AND tracking = 'lots' AND stock_plan = 1").get(b.investAccountId))
     notFound('no such employee stock plan — turn on “Employee stock plan” in the account’s Settings on Investments')
   const schedule = parseVestSchedule(b)
-  const typed = b.symbol!.trim().toUpperCase()
-  const known = findAsset(db, typed)
-  if (known && known.kind !== 'stock') bad(`${known.symbol} is recorded as crypto — grants are company stock`)
-  const symbol = known?.symbol ?? typed
   const clear = String(b.qty).trim() === '0'
   // Everything is checked before the first write: a refused grant leaves no asset behind (and a tab session clean).
   let qtyMicro = 0
@@ -1489,6 +1499,52 @@ export function putUnvested(
     } catch (e) {
       throw new ApiError(400, e instanceof Error ? e.message : 'bad qty')
     }
+  const setSchedule = (g: GrantKey, cur: { next_vest_on: string | null; vest_every_months: number | null } | undefined) => {
+    if (schedule === undefined) return
+    // A form sends back the next vest it was shown. When that and the
+    // cadence are unchanged, the schedule is too: keep its anchor, whose
+    // day of the month the shown date may have clamped (Jun 30 of a Mar 31 grant).
+    const unchanged =
+      schedule !== null &&
+      cur?.next_vest_on != null &&
+      cur.vest_every_months === schedule.every &&
+      nextUnrecordedVest(db, g, cur.next_vest_on, cur.vest_every_months) === schedule.nextVestOn
+    db.prepare('UPDATE unvested_positions SET next_vest_on = ?, vest_every_months = ?, vest_qty_micro = ? WHERE id = ?').run(
+      unchanged ? cur!.next_vest_on : (schedule?.nextVestOn ?? null),
+      schedule?.every ?? null,
+      schedule?.qtyMicro ?? null,
+      g.id,
+    )
+  }
+
+  // One grant, by id.
+  if (b.id !== undefined) {
+    const g = (Number.isSafeInteger(b.id)
+      ? db
+          .prepare(
+            `SELECT u.id, u.invest_account_id, u.asset_id, u.next_vest_on, u.vest_every_months, a.symbol
+             FROM unvested_positions u JOIN assets a ON a.id = u.asset_id WHERE u.id = ? AND u.invest_account_id = ?`,
+          )
+          .get(b.id, b.investAccountId)
+      : undefined) as (GrantKey & { next_vest_on: string | null; vest_every_months: number | null; symbol: string }) | undefined
+    if (!g) notFound('no such grant in this plan')
+    if (b.symbol !== undefined && b.symbol.trim().toUpperCase() !== g!.symbol) bad("a grant's stock can't be changed — clear it and add another")
+    db.transaction(() => {
+      if (clear) {
+        db.prepare('DELETE FROM unvested_positions WHERE id = ?').run(g!.id)
+        dropOrphanAssets(db, g!.asset_id)
+        return
+      }
+      db.prepare('UPDATE unvested_positions SET qty_micro = ?, updated_on = ? WHERE id = ?').run(qtyMicro, today, g!.id)
+      setSchedule(g!, g)
+    })()
+    return { ok: true as const, id: clear ? null : g!.id, qtyMicro }
+  }
+
+  const typed = b.symbol!.trim().toUpperCase()
+  const known = findAsset(db, typed)
+  if (known && known.kind !== 'stock') bad(`${known.symbol} is recorded as crypto — grants are company stock`)
+  const symbol = known?.symbol ?? typed
   if (clear) {
     // Clearing a grant Scarab never recorded changes nothing; clearing one drops an asset nothing else refers to.
     if (known)
@@ -1496,41 +1552,27 @@ export function putUnvested(
         db.prepare('DELETE FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?').run(b.investAccountId, known.id)
         dropOrphanAssets(db, known.id)
       })()
-    return { ok: true as const, qtyMicro: 0 }
+    return { ok: true as const, id: null, qtyMicro: 0 }
   }
-  db.transaction(() => {
+  const id = db.transaction(() => {
     db.prepare("INSERT INTO assets (symbol, kind) VALUES (?, 'stock') ON CONFLICT (symbol) DO NOTHING").run(symbol)
     const asset = db.prepare('SELECT id FROM assets WHERE symbol = ?').get(symbol) as { id: number }
-    const cur = db
-      .prepare('SELECT next_vest_on, vest_every_months FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?')
-      .get(b.investAccountId, asset.id) as { next_vest_on: string | null; vest_every_months: number | null } | undefined
-    db.prepare(
-      `INSERT INTO unvested_positions (invest_account_id, asset_id, qty_micro, updated_on)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT (invest_account_id, asset_id)
-       DO UPDATE SET qty_micro = excluded.qty_micro, updated_on = excluded.updated_on`,
-    ).run(b.investAccountId, asset.id, qtyMicro, today)
-    if (schedule !== undefined) {
-      // A form sends back the next vest it was shown. When that and the
-      // cadence are unchanged, the schedule is too: keep its anchor, whose
-      // day of the month the shown date may have clamped (Jun 30 of a Mar 31 grant).
-      const unchanged =
-        schedule !== null &&
-        cur?.next_vest_on != null &&
-        cur.vest_every_months === schedule.every &&
-        nextUnrecordedVest(db, b.investAccountId!, asset.id, cur.next_vest_on, cur.vest_every_months) === schedule.nextVestOn
-      db.prepare(
-        'UPDATE unvested_positions SET next_vest_on = ?, vest_every_months = ?, vest_qty_micro = ? WHERE invest_account_id = ? AND asset_id = ?',
-      ).run(unchanged ? cur!.next_vest_on : (schedule?.nextVestOn ?? null), schedule?.every ?? null, schedule?.qtyMicro ?? null, b.investAccountId, asset.id)
-    }
+    const grantId = Number(
+      db
+        .prepare('INSERT INTO unvested_positions (invest_account_id, asset_id, qty_micro, updated_on) VALUES (?, ?, ?, ?)')
+        .run(b.investAccountId, asset.id, qtyMicro, today).lastInsertRowid,
+    )
+    setSchedule({ id: grantId, invest_account_id: b.investAccountId!, asset_id: asset.id }, undefined)
+    return grantId
   })()
-  return { ok: true as const, qtyMicro }
+  return { ok: true as const, id, qtyMicro }
 }
 
 /**
  * Shares vested: record them as a buy at vest-day value (the cost basis, and
  * the income Taxes counts) in the employee stock plan, and lower the unvested
- * count by the gross shares. Vesting more than is recorded as unvested is
+ * count of the grant they came from (`grantId`; it may be left out when the
+ * plan holds a single grant of that stock) by the gross shares. Vesting more than is recorded as unvested is
  * refused — usually a typo, and silently clamping it would hide the mistake —
  * unless `allowUntracked` says the extra shares came from a grant Scarab
  * never tracked.
@@ -1552,6 +1594,7 @@ export function vestUnvested(
     totalCents?: number
     withheldQty?: string | null
     allowUntracked?: boolean
+    grantId?: number
   },
   today: string,
 ): VestResult {
@@ -1589,9 +1632,15 @@ export function vestUnvested(
   if (!asset) notFound('no such asset')
   const symbol = asset!.symbol
   if (asset!.kind !== 'stock') bad(`${symbol} is not a stock — only stock grants vest`)
-  const cur = db
-    .prepare('SELECT qty_micro FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?')
-    .get(b.investAccountId, asset!.id) as { qty_micro: number } | undefined
+  const grants = db
+    .prepare('SELECT id, qty_micro FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ? ORDER BY id')
+    .all(b.investAccountId, asset!.id) as { id: number; qty_micro: number }[]
+  let cur: { id: number; qty_micro: number } | undefined
+  if (b.grantId !== undefined && b.grantId !== null) {
+    cur = grants.find((g) => g.id === b.grantId)
+    if (!cur) notFound(`no such ${symbol} grant in this plan`)
+  } else if (grants.length > 1) bad(`this plan holds ${grants.length} ${symbol} grants — say which one vested (grantId)`)
+  else cur = grants[0]
   const unvested = cur?.qty_micro ?? 0
   if (qtyMicro > unvested && b.allowUntracked !== true)
     bad(
@@ -1604,10 +1653,10 @@ export function vestUnvested(
   return db.transaction(() => {
     const trade = db
       .prepare(
-        `INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents, note)
-         VALUES (?, ?, ?, 'buy', ?, ?, ?)`,
+        `INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents, note, grant_id)
+         VALUES (?, ?, ?, 'buy', ?, ?, ?, ?)`,
       )
-      .run(b.investAccountId, asset!.id, b.tradedOn, qtyMicro, b.totalCents, RSU_VEST_NOTE)
+      .run(b.investAccountId, asset!.id, b.tradedOn, qtyMicro, b.totalCents, RSU_VEST_NOTE, cur?.id ?? null)
     const tradeId = Number(trade.lastInsertRowid)
     let withholdingTradeId: number | null = null
     if (withheldMicro > 0)
@@ -1622,20 +1671,11 @@ export function vestUnvested(
     let remaining = 0
     if (cur) {
       remaining = Math.max(0, cur.qty_micro - qtyMicro)
-      if (remaining === 0)
-        db.prepare('DELETE FROM unvested_positions WHERE invest_account_id = ? AND asset_id = ?').run(
-          b.investAccountId,
-          asset!.id,
-        )
+      if (remaining === 0) db.prepare('DELETE FROM unvested_positions WHERE id = ?').run(cur.id)
       // The vest trade itself is what moves the schedule on: the next vest
       // is derived from the ledger (see getUnvested), and the anchor stays.
       else
-        db.prepare('UPDATE unvested_positions SET qty_micro = ?, updated_on = ? WHERE invest_account_id = ? AND asset_id = ?').run(
-          remaining,
-          today,
-          b.investAccountId,
-          asset!.id,
-        )
+        db.prepare('UPDATE unvested_positions SET qty_micro = ?, updated_on = ? WHERE id = ?').run(remaining, today, cur.id)
     }
     return {
       ok: true as const,

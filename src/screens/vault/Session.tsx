@@ -72,7 +72,7 @@ export function SessionCard(p: {
     // The screens remount on unlock, so everything worth saying goes in toasts.
     if (r.notice) toast.info(r.notice)
     toast.success(`Vault v${r.version} unlocked in this tab`)
-    if (r.loaded.upgraded.length)
+    if (r.loaded.older)
       toast.info(
         `This snapshot was written by an older Scarab (schema v${r.loaded.from}) and was brought up to v${CURRENT_VERSION} as it loaded — it saves that way on its own.`,
       )

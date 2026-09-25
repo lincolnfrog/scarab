@@ -1,0 +1,1009 @@
+{
+ "scarab": true,
+ "schemaVersion": 21,
+ "exportedAt": "2026-09-25T16:04:26.022Z",
+ "tables": {
+  "app_meta": [],
+  "accounts": [
+   {
+    "id": 1,
+    "name": "Checking",
+    "kind": "checking",
+    "external_id": null,
+    "created_at": "2026-09-25 16:04:26",
+    "opening_cents": 0
+   }
+  ],
+  "categories": [
+   {
+    "id": 1,
+    "name": "Salary",
+    "kind": "income",
+    "sort": 0
+   },
+   {
+    "id": 2,
+    "name": "Consulting",
+    "kind": "income",
+    "sort": 1
+   },
+   {
+    "id": 3,
+    "name": "RSU / Stock",
+    "kind": "income",
+    "sort": 2
+   },
+   {
+    "id": 4,
+    "name": "Dividends & interest",
+    "kind": "income",
+    "sort": 3
+   },
+   {
+    "id": 5,
+    "name": "Other income",
+    "kind": "income",
+    "sort": 4
+   },
+   {
+    "id": 6,
+    "name": "Housing",
+    "kind": "expense",
+    "sort": 10
+   },
+   {
+    "id": 7,
+    "name": "Groceries",
+    "kind": "expense",
+    "sort": 11
+   },
+   {
+    "id": 8,
+    "name": "Dining",
+    "kind": "expense",
+    "sort": 12
+   },
+   {
+    "id": 9,
+    "name": "Shopping",
+    "kind": "expense",
+    "sort": 13
+   },
+   {
+    "id": 10,
+    "name": "Travel",
+    "kind": "expense",
+    "sort": 14
+   },
+   {
+    "id": 11,
+    "name": "Utilities",
+    "kind": "expense",
+    "sort": 15
+   },
+   {
+    "id": 12,
+    "name": "Insurance",
+    "kind": "expense",
+    "sort": 16
+   },
+   {
+    "id": 13,
+    "name": "Transportation",
+    "kind": "expense",
+    "sort": 17
+   },
+   {
+    "id": 14,
+    "name": "Health",
+    "kind": "expense",
+    "sort": 18
+   },
+   {
+    "id": 15,
+    "name": "Subscriptions",
+    "kind": "expense",
+    "sort": 19
+   },
+   {
+    "id": 16,
+    "name": "Other",
+    "kind": "expense",
+    "sort": 20
+   },
+   {
+    "id": 17,
+    "name": "Transfer",
+    "kind": "transfer",
+    "sort": 30
+   },
+   {
+    "id": 18,
+    "name": "Gardening",
+    "kind": "expense",
+    "sort": 21
+   },
+   {
+    "id": 19,
+    "name": "Alcohol",
+    "kind": "expense",
+    "sort": 22
+   },
+   {
+    "id": 20,
+    "name": "Pets",
+    "kind": "expense",
+    "sort": 23
+   },
+   {
+    "id": 21,
+    "name": "Taxes",
+    "kind": "expense",
+    "sort": 24
+   }
+  ],
+  "imports": [
+   {
+    "id": 1,
+    "account_id": 1,
+    "filename": "checking.csv",
+    "format": "csv-generic",
+    "rows_total": 3,
+    "rows_imported": 3,
+    "rows_skipped": 0,
+    "imported_by": "max@example.com",
+    "imported_at": "2026-09-25 16:04:26"
+   }
+  ],
+  "transactions": [
+   {
+    "id": 1,
+    "account_id": 1,
+    "posted_on": "2026-09-01",
+    "amount_cents": 400000,
+    "description": "ACME PAYROLL",
+    "category_id": 1,
+    "categorized_by": "rule:27",
+    "import_id": 1,
+    "dedupe_hash": "a6a3a2a65eaf161d5290#0",
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 2,
+    "account_id": 1,
+    "posted_on": "2026-09-03",
+    "amount_cents": -4250,
+    "description": "TST* SOME BISTRO",
+    "category_id": 8,
+    "categorized_by": "rule:61",
+    "import_id": 1,
+    "dedupe_hash": "c4cb033147d7a31e7dac#0",
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 3,
+    "account_id": 1,
+    "posted_on": "2026-09-10",
+    "amount_cents": -12000,
+    "description": "PG&E WEB ONLINE",
+    "category_id": 11,
+    "categorized_by": "rule:9",
+    "import_id": 1,
+    "dedupe_hash": "73f35ec9b53e7fff1c5c#0",
+    "created_at": "2026-09-25 16:04:26"
+   }
+  ],
+  "rules": [
+   {
+    "id": 1,
+    "pattern": "WHOLE FOODS",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 2,
+    "pattern": "TRADER JOE",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 3,
+    "pattern": "SAFEWAY",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 4,
+    "pattern": "COSTCO",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 5,
+    "pattern": "INSTACART",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 6,
+    "pattern": "MORTGAGE",
+    "category_id": 6,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 7,
+    "pattern": "MR. COOPER",
+    "category_id": 6,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 8,
+    "pattern": "MR COOPER",
+    "category_id": 6,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 9,
+    "pattern": "PG&E",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 10,
+    "pattern": "PGANDE",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 11,
+    "pattern": "SO CAL EDISON",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 12,
+    "pattern": "SOCALGAS",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 13,
+    "pattern": "COX COMM",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 14,
+    "pattern": "AMAZON",
+    "category_id": 9,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 15,
+    "pattern": "TARGET",
+    "category_id": 9,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 16,
+    "pattern": "NETFLIX",
+    "category_id": 15,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 17,
+    "pattern": "SPOTIFY",
+    "category_id": 15,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 18,
+    "pattern": "APPLE.COM/BILL",
+    "category_id": 15,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 19,
+    "pattern": "UBER",
+    "category_id": 13,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 20,
+    "pattern": "LYFT",
+    "category_id": 13,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 21,
+    "pattern": "SHELL OIL",
+    "category_id": 13,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 22,
+    "pattern": "CHEVRON",
+    "category_id": 13,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 23,
+    "pattern": "ONLINE TRANSFER",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 24,
+    "pattern": "ZELLE",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 25,
+    "pattern": "VENMO",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 26,
+    "pattern": "WEALTHFRONT EDI",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 27,
+    "pattern": "PAYROLL",
+    "category_id": 1,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 28,
+    "pattern": "DIRECT DEP",
+    "category_id": 1,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 29,
+    "pattern": "INTEREST PAYMENT",
+    "category_id": 4,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 30,
+    "pattern": "DIVIDEND",
+    "category_id": 4,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 31,
+    "pattern": "SITEONE LANDSCAPE",
+    "category_id": 18,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 32,
+    "pattern": "NURSERY",
+    "category_id": 18,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 33,
+    "pattern": "ARBORICULTURAL",
+    "category_id": 18,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 34,
+    "pattern": "TOTAL WINE",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 35,
+    "pattern": "BEVERAGES & MORE",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 36,
+    "pattern": "BEVMO",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 37,
+    "pattern": "BOTTLE SHOP",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 38,
+    "pattern": "LIQUOR",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 39,
+    "pattern": "WINERY",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 40,
+    "pattern": "BREWING",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 41,
+    "pattern": "BREWERY",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 42,
+    "pattern": "ALEHOUSE",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 43,
+    "pattern": "TAPROOM",
+    "category_id": 19,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 44,
+    "pattern": "VETERINARY",
+    "category_id": 20,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 45,
+    "pattern": "CHEWY.COM",
+    "category_id": 20,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 46,
+    "pattern": "PETSMART",
+    "category_id": 20,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 47,
+    "pattern": "PETCO",
+    "category_id": 20,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 48,
+    "pattern": "THEFARMERSDOG",
+    "category_id": 20,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 49,
+    "pattern": "USATAXPYMT",
+    "category_id": 21,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 50,
+    "pattern": "FRANCHISE TAX BO",
+    "category_id": 21,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 51,
+    "pattern": "POOL SERVICE",
+    "category_id": 6,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 52,
+    "pattern": "CLEANING SERVICE",
+    "category_id": 6,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 53,
+    "pattern": "CITY OF",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 54,
+    "pattern": "WASTE MANAGEMENT",
+    "category_id": 11,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 55,
+    "pattern": "STATE FARM",
+    "category_id": 12,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 56,
+    "pattern": "WHOLEFDS",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 57,
+    "pattern": "SPROUTS",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 58,
+    "pattern": "KROGER",
+    "category_id": 7,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 59,
+    "pattern": "DOORDASH",
+    "category_id": 8,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 60,
+    "pattern": "IN-N-OUT",
+    "category_id": 8,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 61,
+    "pattern": "TST*",
+    "category_id": 8,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 62,
+    "pattern": "SQ *",
+    "category_id": 8,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 63,
+    "pattern": "VRBO",
+    "category_id": 10,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 64,
+    "pattern": "AIRBNB",
+    "category_id": 10,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 65,
+    "pattern": "SOUTHWES",
+    "category_id": 10,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 66,
+    "pattern": "HOTEL",
+    "category_id": 10,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 67,
+    "pattern": "EXPEDIA",
+    "category_id": 10,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 68,
+    "pattern": "THREDUP",
+    "category_id": 9,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 69,
+    "pattern": "NORDSTROM",
+    "category_id": 9,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 70,
+    "pattern": "KAISER",
+    "category_id": 14,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 71,
+    "pattern": "PARAMOUNT+",
+    "category_id": 15,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 72,
+    "pattern": "PRIME VIDEO",
+    "category_id": 15,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 73,
+    "pattern": "YOUTUBEPREM",
+    "category_id": 15,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 74,
+    "pattern": "BIG O TIRES",
+    "category_id": 13,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 75,
+    "pattern": "RIVIAN",
+    "category_id": 13,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 76,
+    "pattern": "AUTOPAY",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 77,
+    "pattern": "PAYMENT THANK YOU",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 78,
+    "pattern": "PAYMENT, THANK YOU",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 79,
+    "pattern": "AUTOMATIC PAYMENT",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 80,
+    "pattern": "GOLDMAN SACHS",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 81,
+    "pattern": "MORGAN STANLEY",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   },
+   {
+    "id": 82,
+    "pattern": "COINBASE",
+    "category_id": 17,
+    "priority": 0,
+    "created_at": "2026-09-25 16:04:26"
+   }
+  ],
+  "budgets": [
+   {
+    "category_id": 8,
+    "monthly_cents": 30000
+   }
+  ],
+  "invest_accounts": [
+   {
+    "id": 1,
+    "name": "Vanguard",
+    "kind": "brokerage",
+    "tracking": "lots",
+    "created_at": "2026-09-25 16:04:26",
+    "stock_plan": 0,
+    "subtype": null,
+    "institution": null,
+    "owner": null,
+    "mask": null,
+    "sort": 0
+   },
+   {
+    "id": 2,
+    "name": "Coinbase",
+    "kind": "crypto",
+    "tracking": "lots",
+    "created_at": "2026-09-25 16:04:26",
+    "stock_plan": 0,
+    "subtype": null,
+    "institution": null,
+    "owner": null,
+    "mask": null,
+    "sort": 0
+   },
+   {
+    "id": 3,
+    "name": "Morgan Stanley",
+    "kind": "brokerage",
+    "tracking": "lots",
+    "created_at": "2026-09-25 16:04:26",
+    "stock_plan": 1,
+    "subtype": null,
+    "institution": null,
+    "owner": null,
+    "mask": null,
+    "sort": 0
+   },
+   {
+    "id": 4,
+    "name": "Fidelity 401(k)",
+    "kind": "retirement",
+    "tracking": "balance",
+    "created_at": "2026-09-25 16:04:26",
+    "stock_plan": 0,
+    "subtype": null,
+    "institution": null,
+    "owner": null,
+    "mask": null,
+    "sort": 0
+   }
+  ],
+  "assets": [
+   {
+    "id": 1,
+    "symbol": "VTI",
+    "name": null,
+    "kind": "stock"
+   },
+   {
+    "id": 2,
+    "symbol": "VXUS",
+    "name": null,
+    "kind": "stock"
+   },
+   {
+    "id": 3,
+    "symbol": "BTC",
+    "name": null,
+    "kind": "crypto"
+   },
+   {
+    "id": 4,
+    "symbol": "ACME",
+    "name": null,
+    "kind": "stock"
+   }
+  ],
+  "trades": [
+   {
+    "id": 1,
+    "invest_account_id": 1,
+    "asset_id": 1,
+    "traded_on": "2026-03-02",
+    "side": "buy",
+    "qty_micro": 10000000,
+    "total_cents": 250000,
+    "note": null,
+    "created_at": "2026-09-25 16:04:26",
+    "sold_lot_trade_id": null,
+    "acquired_on": null,
+    "basis_cents": null
+   },
+   {
+    "id": 2,
+    "invest_account_id": 1,
+    "asset_id": 2,
+    "traded_on": "2019-04-01",
+    "side": "buy",
+    "qty_micro": 20000000,
+    "total_cents": 100000,
+    "note": "Opening position",
+    "created_at": "2026-09-25 16:04:26",
+    "sold_lot_trade_id": null,
+    "acquired_on": "2019-04-01",
+    "basis_cents": null
+   },
+   {
+    "id": 3,
+    "invest_account_id": 2,
+    "asset_id": 3,
+    "traded_on": "2017-06-06",
+    "side": "buy",
+    "qty_micro": 500000,
+    "total_cents": 1000000,
+    "note": "Opening position",
+    "created_at": "2026-09-25 16:04:26",
+    "sold_lot_trade_id": null,
+    "acquired_on": "2017-06-06",
+    "basis_cents": null
+   },
+   {
+    "id": 4,
+    "invest_account_id": 3,
+    "asset_id": 4,
+    "traded_on": "2026-08-15",
+    "side": "buy",
+    "qty_micro": 50000000,
+    "total_cents": 500000,
+    "note": "RSU vest",
+    "created_at": "2026-09-25 16:04:26",
+    "sold_lot_trade_id": null,
+    "acquired_on": null,
+    "basis_cents": null
+   },
+   {
+    "id": 5,
+    "invest_account_id": 3,
+    "asset_id": 4,
+    "traded_on": "2026-08-15",
+    "side": "sell",
+    "qty_micro": 18000000,
+    "total_cents": 180000,
+    "note": "RSU withholding",
+    "created_at": "2026-09-25 16:04:26",
+    "sold_lot_trade_id": 4,
+    "acquired_on": null,
+    "basis_cents": null
+   }
+  ],
+  "prices": [],
+  "prices_daily": [],
+  "balance_snapshots": [
+   {
+    "invest_account_id": 4,
+    "balanced_on": "2026-06-30",
+    "balance_cents": 18000000
+   }
+  ],
+  "properties": [
+   {
+    "id": 1,
+    "name": "Home",
+    "purchased_on": "2015-05-01",
+    "purchase_cents": 90000000,
+    "created_at": "2026-09-25 16:04:26"
+   }
+  ],
+  "property_valuations": [
+   {
+    "property_id": 1,
+    "valued_on": "2026-09-20",
+    "value_cents": 122500000,
+    "source": "manual"
+   }
+  ],
+  "liabilities": [
+   {
+    "id": 1,
+    "property_id": 1,
+    "name": "Mortgage",
+    "rate_micro": 30000,
+    "created_at": "2026-09-25 16:04:26"
+   }
+  ],
+  "liability_balances": [
+   {
+    "liability_id": 1,
+    "balanced_on": "2026-09-01",
+    "balance_cents": 60000000
+   }
+  ],
+  "rsu_vests": [],
+  "unvested_positions": [
+   {
+    "invest_account_id": 3,
+    "asset_id": 4,
+    "qty_micro": 350000000,
+    "updated_on": "2026-09-25",
+    "next_vest_on": "2026-11-15",
+    "vest_every_months": 3,
+    "vest_qty_micro": 50000000
+   }
+  ],
+  "goal_settings": [],
+  "pay_sources": [
+   {
+    "id": 1,
+    "earner": "Max",
+    "employer": "Acme",
+    "cadence": "biweekly",
+    "paid_on": "2026-09-18",
+    "gross_cents": 600000,
+    "retirement_cents": 0,
+    "benefits_cents": 0,
+    "fed_withheld_cents": 120000,
+    "state_withheld_cents": 0,
+    "ytd_gross_cents": null,
+    "ytd_retirement_cents": null,
+    "ytd_benefits_cents": null,
+    "ytd_fed_withheld_cents": null,
+    "ytd_state_withheld_cents": null,
+    "invest_account_id": 3,
+    "sort": 1
+   }
+  ],
+  "loan_options": [],
+  "scenarios": []
+ }
+}

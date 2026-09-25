@@ -10,6 +10,7 @@ import {
   deleteBalanceSnapshot,
   deleteTrade,
   getInvestAccount,
+  getUnvested,
   findAsset,
   getCheckin,
   getPortfolio,
@@ -368,7 +369,7 @@ describe('vesting RSUs', () => {
     expect(failure(() => putUnvested(db, { investAccountId: planId, symbol: 'NEWCO', qty: 'abc' }, TODAY))).toMatchObject({ status: 400 })
     expect(failure(() => putUnvested(db, { investAccountId: planId, symbol: 'NEWCO', qty: '10', nextVestOn: '2026-10-01', vestEveryMonths: 3, vestQty: 'x' }, TODAY))).toMatchObject({ status: 400 })
     // Clearing a grant Scarab never recorded changes nothing.
-    expect(putUnvested(db, { investAccountId: planId, symbol: 'ZZZ', qty: '0' }, TODAY)).toEqual({ ok: true, qtyMicro: 0 })
+    expect(putUnvested(db, { investAccountId: planId, symbol: 'ZZZ', qty: '0' }, TODAY)).toEqual({ ok: true, id: null, qtyMicro: 0 })
     expect(totalChanges(db)).toBe(before)
     expect(listAssets(db).map((a) => a.symbol)).toEqual(['ACME'])
 
@@ -383,6 +384,33 @@ describe('vesting RSUs', () => {
     putUnvested(db, { investAccountId: planId, symbol: 'ACME', qty: '0' }, TODAY)
     expect(count(db, 'unvested_positions')).toBe(0)
     expect(listAssets(db).map((a) => a.symbol)).toEqual(['ACME'])
+  })
+
+  it('holds several grants of one stock, each with its own count, schedule and vests', () => {
+    const { db, planId, vest } = plan()
+    const first = getUnvested(db).rows[0]!.id
+    putUnvested(db, { investAccountId: planId, id: first, qty: '100', nextVestOn: '2026-08-01', vestEveryMonths: 3, vestQty: '25' }, TODAY)
+    // A second ACME grant is added beside the first, not over it.
+    const second = putUnvested(db, { investAccountId: planId, symbol: 'ACME', qty: '60', nextVestOn: '2026-09-01', vestEveryMonths: 6, vestQty: '15' }, TODAY).id!
+    expect(getUnvested(db).rows.map((g) => [g.id, g.qty_micro, g.next_vest_on])).toEqual([
+      [first, 100_000_000, '2026-08-01'],
+      [second, 60_000_000, '2026-09-01'],
+    ])
+    // With two, a vest must say which grant. It lowers that one and moves only its schedule on:
+    // the first grant's Aug 1 vest is still due, though a vest of the same stock came after it.
+    expect(failure(() => vest({ qty: '15', tradedOn: '2026-09-20' }))).toMatchObject({ status: 400, message: expect.stringMatching(/2 ACME grants/) })
+    vest({ qty: '15', tradedOn: '2026-09-20', grantId: second })
+    expect(getUnvested(db).rows.map((g) => [g.id, g.qty_micro, g.next_vest_on])).toEqual([
+      [first, 100_000_000, '2026-08-01'],
+      [second, 45_000_000, '2027-03-01'],
+    ])
+    // Editing or clearing one leaves the other alone.
+    putUnvested(db, { investAccountId: planId, id: first, qty: '90' }, TODAY)
+    putUnvested(db, { investAccountId: planId, id: second, qty: '0' }, TODAY)
+    expect(getUnvested(db).rows.map((g) => [g.id, g.qty_micro])).toEqual([[first, 90_000_000]])
+    expect(failure(() => putUnvested(db, { investAccountId: planId, id: second, qty: '5' }, TODAY))).toMatchObject({ status: 404 })
+    // One grant left: a vest may leave it unnamed again.
+    expect(vest({ qty: '25' })).toMatchObject({ remainingQtyMicro: 65_000_000 })
   })
 })
 

@@ -107,8 +107,8 @@ describe('the vest flow (B9)', () => {
   it('the request, and the FMV prefill only from a close dated the vest day', () => {
     const p = vestPlan(form(), TODAY)
     if (!('plan' in p)) throw new Error('expected a plan')
-    expect(vestBody({ accountId: 2, symbol: 'ACME', date: '2026-08-15', grossMicro: 25_000_000, plan: p.plan, allowUntracked: false })).toEqual({
-      investAccountId: 2, symbol: 'ACME', qty: '25', tradedOn: '2026-08-15', totalCents: 10_000_00, withheldQty: '9',
+    expect(vestBody({ accountId: 2, grantId: 7, symbol: 'ACME', date: '2026-08-15', grossMicro: 25_000_000, plan: p.plan, allowUntracked: false })).toEqual({
+      investAccountId: 2, grantId: 7, symbol: 'ACME', qty: '25', tradedOn: '2026-08-15', totalCents: 10_000_00, withheldQty: '9',
     })
     const basket = { cents: 401_00, pricedOn: '2026-08-14' }
     const stored = { cents: 399_00, pricedOn: '2026-08-15' }
@@ -122,7 +122,7 @@ describe('the vest flow (B9)', () => {
 
   it('the summary says income, what was withheld (a $0 sale, not cash), and what stays', () => {
     const grant: UnvestedRow = {
-      invest_account_id: 2, asset_id: 4, symbol: 'ACME', account_name: 'Acme plan', qty_micro: 100_000_000, updated_on: '2026-08-01',
+      id: 7, invest_account_id: 2, asset_id: 4, symbol: 'ACME', account_name: 'Acme plan', qty_micro: 100_000_000, updated_on: '2026-08-01',
       next_vest_on: '2026-08-15', vest_every_months: 3, vest_qty_micro: 25_000_000, price_cents: 400_00, priced_on: '2026-08-15', est_cents: 40_000_00,
     }
     const p = vestPlan(form(), TODAY)
@@ -136,17 +136,17 @@ describe('the vest flow (B9)', () => {
 
   it('Edit grant sends the count and the schedule — kept, changed or cleared', () => {
     const u: UnvestedRow = {
-      invest_account_id: 2, asset_id: 4, symbol: 'ACME', account_name: 'Acme plan', qty_micro: 100_000_000, updated_on: '2026-08-01',
+      id: 7, invest_account_id: 2, asset_id: 4, symbol: 'ACME', account_name: 'Acme plan', qty_micro: 100_000_000, updated_on: '2026-08-01',
       next_vest_on: '2026-11-15', vest_every_months: 3, vest_qty_micro: 25_000_000, price_cents: null, priced_on: null, est_cents: null,
     }
     expect(grantEditBody(u, { qtyMicro: 90_000_000, vestQtyMicro: 30_000_000, vestEveryMonths: '6', nextVestOn: '2027-02-15' })).toEqual({
-      body: { investAccountId: 2, symbol: 'ACME', qty: '90', nextVestOn: '2027-02-15', vestEveryMonths: 6, vestQty: '30' },
+      body: { investAccountId: 2, id: 7, qty: '90', nextVestOn: '2027-02-15', vestEveryMonths: 6, vestQty: '30' },
     })
     expect(grantEditBody(u, { qtyMicro: 90_000_000, vestQtyMicro: null, vestEveryMonths: '3', nextVestOn: '' })).toEqual({
-      body: { investAccountId: 2, symbol: 'ACME', qty: '90', nextVestOn: '' },
+      body: { investAccountId: 2, id: 7, qty: '90', nextVestOn: '' },
     })
     const bare = { ...u, next_vest_on: null, vest_every_months: null, vest_qty_micro: null }
-    expect(grantEditBody(bare, { qtyMicro: 5_000_000, vestQtyMicro: null, vestEveryMonths: '3', nextVestOn: '' })).toEqual({ body: { investAccountId: 2, symbol: 'ACME', qty: '5' } })
+    expect(grantEditBody(bare, { qtyMicro: 5_000_000, vestQtyMicro: null, vestEveryMonths: '3', nextVestOn: '' })).toEqual({ body: { investAccountId: 2, id: 7, qty: '5' } })
     expect(grantEditBody(u, { qtyMicro: null, vestQtyMicro: null, vestEveryMonths: '3', nextVestOn: '' })).toEqual({ error: expect.stringMatching(/Clear grant/) })
     expect(grantEditBody(u, { qtyMicro: 5_000_000, vestQtyMicro: 1_000_000, vestEveryMonths: '3', nextVestOn: '' })).toEqual({ error: expect.stringMatching(/or neither/) })
   })

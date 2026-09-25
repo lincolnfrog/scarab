@@ -34,11 +34,12 @@ import { matchRoute, policyOf, type LocalCtx } from './local/table'
 export type VaultSession = { rawDataKey: Uint8Array; header: VaultHeader; version: number }
 
 /**
- * What loading a snapshot did: the version it was written at, and which
- * tier-C upgrades this engine had to replay to read it (see
- * engine/upgrades.ts).
+ * What loading a snapshot did: the version it was written at, which tier-C
+ * upgrades this engine had to replay to read it (see engine/upgrades.ts), and
+ * whether it was written by an earlier version at all — an additive migration
+ * replays nothing, but the vault still holds the older version until a save.
  */
-export type SnapshotLoad = { from: number; upgraded: number[] }
+export type SnapshotLoad = { from: number; upgraded: number[]; older: boolean }
 
 type LocalState = {
   db: BrowserDb | null
@@ -154,10 +155,10 @@ export async function enterLocalMode(
   const prev = state.db
   state.db = db
   state.vault = vault
-  // An empty start has nothing saved yet; so does a snapshot this engine had to
-  // upgrade on the way in — the stored copy is still the older one until a save
-  // reseals it at the current version.
-  state.dirty = dump === null || (loaded !== null && loaded.upgraded.length > 0)
+  // An empty start has nothing saved yet; so does a snapshot an earlier version
+  // wrote — the stored copy is still the older one until a save reseals it at
+  // the current version (which is what lets the floor rise: engine/fixtures/README.md).
+  state.dirty = dump === null || (loaded !== null && loaded.older)
   state.writes = 0
   state.dataRevision++
   if (prev && prev !== db) {

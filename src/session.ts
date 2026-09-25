@@ -483,15 +483,15 @@ async function boot(dump: Dump, session: VaultSession, stored: Stored, baseline:
   if (localMode.active) {
     loaded = await loadLocalDump(dump)
     localMode.setVault(session)
-    // An upgraded snapshot is NOT what the vault holds — leave the tab dirty so
-    // the next save reseals it at the current version.
-    if (loaded.upgraded.length === 0) localMode.markSaved(session.version)
+    // A snapshot an earlier version wrote is NOT what this one would save — leave
+    // the tab dirty so the next save reseals it at the current version.
+    if (!loaded.older) localMode.markSaved(session.version)
   } else {
     // A non-null dump always yields a load; the null is for an empty start.
-    loaded = (await enterLocalMode(dump, session)) ?? { from: dump.schemaVersion, upgraded: [] }
+    loaded = (await enterLocalMode(dump, session)) ?? { from: dump.schemaVersion, upgraded: [], older: false }
   }
   // What the courier holds at this version, so the next upload says which blob it replaces.
-  if (baseline && loaded.upgraded.length === 0) void queue.loaded(session, dump, stored)
+  if (baseline && !loaded.older) void queue.loaded(session, dump, stored)
   else void queue.known(session.version, stored.sha256)
   // A snapshot this engine had to upgrade (tier C) is rewritten by the next save: the server's history keeps the copy
   // the older engine wrote — pinned, past the ordinary retention — in case the upgrade got something wrong.
@@ -1627,6 +1627,8 @@ export type OpenedSnapshot = {
   counts: Record<string, number> | null
   unreadable: string | null
   upgraded: number[]
+  /** Written by an earlier schema version (whether or not it needed upgrades replayed). */
+  older: boolean
 }
 
 /** Authenticated plaintext → a snapshot, or a clear refusal. */
@@ -1644,7 +1646,7 @@ function decodeSnapshot(plaintext: Uint8Array): Dump {
 }
 
 /** Load `dump` into a throwaway in-tab database, to count its rows and prove this engine reads it. The tab's data is untouched. */
-async function inspect(dump: Dump): Promise<Pick<OpenedSnapshot, 'counts' | 'unreadable' | 'upgraded'>> {
+async function inspect(dump: Dump): Promise<Pick<OpenedSnapshot, 'counts' | 'unreadable' | 'upgraded' | 'older'>> {
   const [{ openBrowserDb }, { migrate }, { loadDump, TABLES }, wasmUrl] = await Promise.all([
     import('../engine/sqljs-db'),
     import('../engine/migrations'),
@@ -1658,9 +1660,9 @@ async function inspect(dump: Dump): Promise<Pick<OpenedSnapshot, 'counts' | 'unr
     const counts: Record<string, number> = {}
     for (const t of TABLES)
       counts[t] = (db.prepare(`SELECT count(*) AS n FROM ${t}${t === 'app_meta' ? " WHERE key NOT LIKE 'basket:%'" : ''}`).get() as { n: number }).n
-    return { counts, unreadable: null, upgraded: loaded.upgraded }
+    return { counts, unreadable: null, upgraded: loaded.upgraded, older: loaded.older }
   } catch (e) {
-    return { counts: null, unreadable: e instanceof Error ? e.message : String(e), upgraded: [] }
+    return { counts: null, unreadable: e instanceof Error ? e.message : String(e), upgraded: [], older: false }
   } finally {
     db.close()
   }

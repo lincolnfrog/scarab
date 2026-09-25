@@ -62,13 +62,12 @@ import type { Dump } from './snapshot'
  *
  * ---
  *
- * NOT IN PRODUCTION YET. Until Scarab is, there are no vaults worth carrying
- * forward, so the registry stays empty and the floor sits at the current
- * version: an older snapshot is refused rather than upgraded, and the machinery
- * is proven by `engine/snapshot-compat.test.ts` against synthetic entries. The
- * day we call it production: freeze a fixture of that version (see
- * engine/fixtures/README.md), lower `minReadable` to it, and start adding
- * entries for every tier-C migration from then on.
+ * VAULTS HOLD REAL DATA SINCE v21 (2026-09-25). The oldest fixture under
+ * engine/fixtures/ is the promise: a vault written at that version or later
+ * must keep loading. A tier-B migration needs nothing here; a tier-C one needs
+ * an entry below, and the fixture test is what notices a missing one. While a
+ * single vault exists, the floor may follow it up once it has been resaved at
+ * a newer version — the procedure is in engine/fixtures/README.md.
  */
 export type Upgrade = {
   before?: (dump: Dump) => Dump
@@ -87,8 +86,8 @@ export type Compat = { minReadable: number; upgrades: Record<number, Upgrade> }
 /** The engine's own version — what `dumpDb` stamps on everything it writes. */
 export const CURRENT_VERSION = migrations.length
 
-/** The shipped contract. Empty until production; see the note above. */
-export const SNAPSHOT_COMPAT: Compat = { minReadable: CURRENT_VERSION, upgrades: {} }
+/** The shipped contract: v21 onward (see the note above). */
+export const SNAPSHOT_COMPAT: Compat = { minReadable: 21, upgrades: {} }
 
 export const MIN_READABLE_VERSION = SNAPSHOT_COMPAT.minReadable
 

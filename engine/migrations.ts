@@ -454,6 +454,30 @@ export const migrations: string[] = [
    DROP TABLE vault_invites;
    ALTER TABLE vault_invites_21 RENAME TO vault_invites;
    CREATE INDEX vault_invites_household ON vault_invites (household)`,
+
+  // 22 — a stock plan can hold several grants of the same stock (two Morgan
+  // Stanley grants on different schedules): unvested_positions was keyed by
+  // (account, asset), so a second grant overwrote the first. Each grant gets
+  // its own id; a vest records which grant it came from, so each grant's next
+  // vest follows its own releases. Additive for a snapshot (tier B): an older
+  // dump's grant rows carry no id and get one, its trades no grant_id.
+  `CREATE TABLE unvested_positions_22 (
+     id                INTEGER PRIMARY KEY,
+     invest_account_id INTEGER NOT NULL REFERENCES invest_accounts(id),
+     asset_id          INTEGER NOT NULL REFERENCES assets(id),
+     qty_micro         INTEGER NOT NULL CHECK (qty_micro >= 0),
+     updated_on        TEXT NOT NULL,
+     next_vest_on      TEXT,
+     vest_every_months INTEGER,
+     vest_qty_micro    INTEGER
+   );
+   INSERT INTO unvested_positions_22 (invest_account_id, asset_id, qty_micro, updated_on, next_vest_on, vest_every_months, vest_qty_micro)
+     SELECT invest_account_id, asset_id, qty_micro, updated_on, next_vest_on, vest_every_months, vest_qty_micro
+     FROM unvested_positions ORDER BY invest_account_id, asset_id;
+   DROP TABLE unvested_positions;
+   ALTER TABLE unvested_positions_22 RENAME TO unvested_positions;
+   CREATE INDEX unvested_positions_holding ON unvested_positions (invest_account_id, asset_id);
+   ALTER TABLE trades ADD COLUMN grant_id INTEGER`,
 ]
 
 export function migrate(db: DbLike): void {

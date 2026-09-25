@@ -77,9 +77,10 @@ export function vestPlan(f: VestForm, today: string): { plan: VestPlan } | { err
 }
 
 /** The request a valid plan stands for. */
-export function vestBody(o: { accountId: number; symbol: string; date: string; grossMicro: number; plan: VestPlan; allowUntracked: boolean }): VestBody {
+export function vestBody(o: { accountId: number; grantId: number; symbol: string; date: string; grossMicro: number; plan: VestPlan; allowUntracked: boolean }): VestBody {
   return {
     investAccountId: o.accountId,
+    grantId: o.grantId,
     symbol: o.symbol,
     qty: qtyParam(o.grossMicro),
     tradedOn: o.date,

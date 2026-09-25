@@ -189,6 +189,7 @@ describe('Data & Vault cards', () => {
       counts: { accounts: 3 },
       unreadable: null,
       upgraded: [],
+      older: false,
     } as unknown as import('../../session').OpenedSnapshot
     const seen = { seq: 42, sha256: 'a'.repeat(64), at: '2026-09-20T12:00:00Z', creds: [] }
     const render = (behind: import('../../session').BackupBehind | null) => {
@@ -271,6 +272,7 @@ describe('Data & Vault cards', () => {
       counts: { accounts: 2, transactions: 140, trades: 0 },
       unreadable: null,
       upgraded: [20],
+      older: true,
     }
     showSnapshot(snap)
     const t = text(renderToStaticMarkup(<SnapshotPreviewHost />))

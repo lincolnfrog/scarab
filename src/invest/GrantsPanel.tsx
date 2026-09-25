@@ -19,7 +19,8 @@ import VestDialog from './VestDialog'
 import './invest.css'
 
 /**
- * An employee stock plan's unvested grants — one running count per grant,
+ * An employee stock plan's unvested grants — one running count per grant
+ * (several of the same stock is fine: each keeps its own count and schedule),
  * with an optional vest cadence Taxes projects the year from. When shares
  * vest, "Vest…" records them from the release: the gross shares as a buy at
  * vest-day value (their cost basis), any shares withheld for tax as a $0
@@ -62,7 +63,7 @@ export default function GrantsPanel({ account, grants, onChanged }: {
     },
     {
       success: (f) =>
-        `Unvested ${f.symbol.trim().toUpperCase()} set to ${formatQtyMicro(f.qtyMicro!)} shares` +
+        `Added a ${f.symbol.trim().toUpperCase()} grant of ${formatQtyMicro(f.qtyMicro!)} unvested shares` +
         (f.nextVestOn ? ` · ${formatQtyMicro(f.vestQtyMicro!)} every ${f.vestEveryMonths} mo from ${f.nextVestOn}` : ''),
       errorPrefix: "Couldn't save the grant",
       onDone: () => {
@@ -73,7 +74,7 @@ export default function GrantsPanel({ account, grants, onChanged }: {
   )
 
   const updateGrant = useAction(
-    (u: UnvestedRow, change: { qty: string; nextVestOn?: '' }) => put('/api/unvested', { investAccountId: u.invest_account_id, symbol: u.symbol, ...change }),
+    (u: UnvestedRow, change: { qty: string; nextVestOn?: '' }) => put('/api/unvested', { investAccountId: u.invest_account_id, id: u.id, ...change }),
     { success: 'Grant updated', errorPrefix: "Couldn't update the grant", onDone: onChanged },
   )
   // The vest or edit dialog: which grant (kept through the exit fade, so focus
@@ -89,7 +90,7 @@ export default function GrantsPanel({ account, grants, onChanged }: {
   async function clearGrant(u: UnvestedRow) {
     const ok = await confirm({
       title: `Clear unvested ${u.symbol}?`,
-      body: `Removes the ${formatQtyMicro(u.qty_micro)} unvested shares in ${u.account_name} and their schedule. Vests already recorded stay.`,
+      body: `Removes this grant: its ${formatQtyMicro(u.qty_micro)} unvested shares in ${u.account_name} and their schedule. Other grants and vests already recorded stay.`,
       confirmLabel: 'Clear grant',
       danger: true,
     })
@@ -130,7 +131,7 @@ export default function GrantsPanel({ account, grants, onChanged }: {
                     { label: 'Clear grant…', danger: true, onSelect: () => void clearGrant(u) },
                   ]
                   return (
-                    <tr key={u.asset_id}>
+                    <tr key={u.id}>
                       <td>
                         <span className="tk"><span className="lg">{u.symbol}</span></span>
                         <span className="inv-subline">updated {u.updated_on}</span>
@@ -197,7 +198,7 @@ export default function GrantsPanel({ account, grants, onChanged }: {
               <option value="12">year</option>
             </Select>
           </Field>
-          <Field label="Next vest" hint="Blank keeps the current schedule">
+          <Field label="Next vest" hint="Optional, with shares per vest">
             <DateInput value={grant.nextVestOn} onChange={(nextVestOn) => setGrant({ ...grant, nextVestOn })} />
           </Field>
         </FieldGrid>
@@ -227,7 +228,7 @@ export function grantEditBody(u: UnvestedRow, f: EditForm): { body: Record<strin
   return {
     body: {
       investAccountId: u.invest_account_id,
-      symbol: u.symbol,
+      id: u.id,
       qty: qtyParam(f.qtyMicro),
       ...(scheduled
         ? { nextVestOn: f.nextVestOn, vestEveryMonths: Number(f.vestEveryMonths), vestQty: qtyParam(f.vestQtyMicro!) }

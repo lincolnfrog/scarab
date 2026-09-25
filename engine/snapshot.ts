@@ -87,7 +87,7 @@ export function dumpDb(db: DbLike): Dump {
  *
  * Returns which upgrades ran, so callers can say so out loud.
  */
-export function loadDump(db: DbLike, dump: Dump, compat: Compat = SNAPSHOT_COMPAT): { from: number; upgraded: number[] } {
+export function loadDump(db: DbLike, dump: Dump, compat: Compat = SNAPSHOT_COMPAT): { from: number; upgraded: number[]; older: boolean } {
   if (!dump.scarab || !dump.tables) throw new Error('not a Scarab export')
   const why = readabilityError(dump.schemaVersion, compat)
   if (why) throw new Error(why)
@@ -132,7 +132,9 @@ export function loadDump(db: DbLike, dump: Dump, compat: Compat = SNAPSHOT_COMPA
   } finally {
     db.pragma('foreign_keys = ON')
   }
-  return { from: dump.schemaVersion, upgraded: plan.map((u) => u.version) }
+  // `older`: written by an earlier engine, with or without upgrades to replay (an additive migration needs none) —
+  // either way what was loaded is not what a save at this version would write.
+  return { from: dump.schemaVersion, upgraded: plan.map((u) => u.version), older: dump.schemaVersion < CURRENT_VERSION }
 }
 
 /**

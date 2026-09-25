@@ -90,7 +90,7 @@ export default function VestDialog({ open, grant, today, onClose, onDone }: {
     const bad = unparsedField(form.current)
     if (bad) return bad.focus()
     if (!plan || f.grossMicro === null || (over > 0 && !untracked)) return
-    void record.run(vestBody({ accountId: grant.invest_account_id, symbol: grant.symbol, date: f.date, grossMicro: f.grossMicro, plan, allowUntracked: over > 0 }))
+    void record.run(vestBody({ accountId: grant.invest_account_id, grantId: grant.id, symbol: grant.symbol, date: f.date, grossMicro: f.grossMicro, plan, allowUntracked: over > 0 }))
   }
 
   const missing = (v: unknown) => (tried && (v === null || v === '') ? 'Required' : null)

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
 import type { DbLike } from './db'
 import { migrate } from './migrations'
+import { getUnvested } from './invest'
 import { listInvestAccounts } from './services'
 import { type Dump, dumpDb, loadDump } from './snapshot'
 import { openBrowserDb } from './sqljs-db'
@@ -104,7 +105,7 @@ describe('the upgrade machinery, against a synthetic contract', () => {
       const log: string[] = []
       const fresh = engine === 'sql.js' ? await browser() : server()
       const loaded = loadDump(fresh, old, synthetic(log))
-      expect(loaded, engine).toEqual({ from: OLD, upgraded: [CURRENT_VERSION - 1, CURRENT_VERSION] })
+      expect(loaded, engine).toEqual({ from: OLD, upgraded: [CURRENT_VERSION - 1, CURRENT_VERSION], older: true })
       expect(log, engine).toEqual([
         `before:${CURRENT_VERSION - 1}`,
         `before:${CURRENT_VERSION}`,
@@ -140,7 +141,7 @@ describe('the upgrade machinery, against a synthetic contract', () => {
       const dump = dumpDb(db)
       const log: string[] = []
       const fresh = engine === 'sql.js' ? await browser() : server()
-      expect(loadDump(fresh, dump, synthetic(log)), engine).toEqual({ from: CURRENT_VERSION, upgraded: [] })
+      expect(loadDump(fresh, dump, synthetic(log)), engine).toEqual({ from: CURRENT_VERSION, upgraded: [], older: false })
       expect(log, engine).toEqual([])
       expect(fresh.prepare('SELECT stock_plan FROM invest_accounts ORDER BY id').all(), engine).toEqual([{ stock_plan: 0 }, { stock_plan: 0 }])
     }
@@ -243,6 +244,18 @@ describe('the shipped contract stays honest', () => {
       expect(v, `upgrades[${v}]`).toBeLessThanOrEqual(CURRENT_VERSION)
     }
     expect(upgradesFor(CURRENT_VERSION)).toEqual([])
+  })
+
+  it('v21, the first production vault: its stock-plan grant loads with an id and keeps its schedule', async () => {
+    const dump = JSON.parse(readFileSync(new URL('snapshot-v21.json', fixtureDir), 'utf8')) as Dump
+    for (const [engine, db] of await both()) {
+      // Nothing to replay (migration 22 only adds), but it is older: an unlock must reseal it at this version.
+      expect(loadDump(db, dump), engine).toEqual({ from: 21, upgraded: [], older: true })
+      expect(getUnvested(db).rows.map((g) => [g.symbol, g.qty_micro, g.next_vest_on]), engine).toEqual([['ACME', 350_000_000, '2026-11-15']])
+      expect(getUnvested(db).rows[0]!.id, engine).toBeGreaterThan(0)
+      // Its vest predates grant ids: recorded against no grant, it still counts for the only one.
+      expect(db.prepare("SELECT grant_id FROM trades WHERE note = 'RSU vest'").all(), engine).toEqual([{ grant_id: null }])
+    }
   })
 
   it('every checked-in fixture loads on both engines', async () => {

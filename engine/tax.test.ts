@@ -463,6 +463,8 @@ describe('harvesting', () => {
 })
 
 describe('vest schedules', () => {
+  // Changing a grant names it; putUnvested without an id adds another.
+  const grant = (db: DbLike) => getUnvested(db).rows[0]!.id
   it('addMonths clamps to the end of the target month', () => {
     expect(addMonths('2026-01-31', 1)).toBe('2026-02-28')
     expect(addMonths('2026-11-15', 3)).toBe('2027-02-15')
@@ -476,7 +478,7 @@ describe('vest schedules', () => {
     let p = projectVests(db, '2026-08-27')
     expect(p.events.map((e) => [e.vest_on, e.qty_micro])).toEqual([['2026-10-01', 25_000_000]])
     // monthly: Oct, Nov, Dec → 25 + 15 + nothing
-    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '40', nextVestOn: '2026-10-01', vestEveryMonths: 1, vestQty: '25' }, '2026-08-27')
+    putUnvested(db, { investAccountId: 1, id: grant(db), qty: '40', nextVestOn: '2026-10-01', vestEveryMonths: 1, vestQty: '25' }, '2026-08-27')
     p = projectVests(db, '2026-08-27')
     expect(p.events.map((e) => e.qty_micro)).toEqual([25_000_000, 15_000_000])
     expect(p.cents).toBe($(16_000)) // 40 sh × $400
@@ -490,9 +492,9 @@ describe('vest schedules', () => {
     const db = openDb(':memory:') as unknown as DbLike
     seed(db)
     putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2026-10-01', vestEveryMonths: 3, vestQty: '25' }, '2026-08-27')
-    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90' }, '2026-08-27')
+    putUnvested(db, { investAccountId: 1, id: grant(db), qty: '90' }, '2026-08-27')
     expect(projectVests(db, '2026-08-27').events.length).toBe(1)
-    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: '' }, '2026-08-27')
+    putUnvested(db, { investAccountId: 1, id: grant(db), qty: '90', nextVestOn: '' }, '2026-08-27')
     expect(projectVests(db, '2026-08-27').events.length).toBe(0)
     expect(() => putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: '2026-10-01', vestEveryMonths: 0, vestQty: '25' }, '2026-08-27')).toThrow()
     expect(() => putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: 'soon', vestEveryMonths: 3, vestQty: '25' }, '2026-08-27')).toThrow()
@@ -520,14 +522,14 @@ describe('vest schedules', () => {
     vest('2026-03-31')
     expect(next()).toBe('2026-06-30')
     // Saving the grant form as it was shown (next Jun 30, every 3 months) changes nothing: the anchor keeps its 31st.
-    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '90', nextVestOn: '2026-06-30', vestEveryMonths: 3, vestQty: '10' }, '2026-04-01')
+    putUnvested(db, { investAccountId: 1, id: grant(db), qty: '90', nextVestOn: '2026-06-30', vestEveryMonths: 3, vestQty: '10' }, '2026-04-01')
     expect(db.prepare('SELECT next_vest_on FROM unvested_positions').get()).toEqual({ next_vest_on: '2026-03-31' })
     vest('2026-06-30')
     vest('2026-09-30')
     expect(next()).toBe('2026-12-31')
     expect(projectVests(db, '2026-10-01').events.map((e) => e.vest_on)).toEqual(['2026-12-31'])
     // A monthly cadence from Jan 31 lands on each month's end, Feb 28 included.
-    putUnvested(db, { investAccountId: 1, symbol: 'ACME', qty: '100', nextVestOn: '2027-01-31', vestEveryMonths: 1, vestQty: '10' }, '2026-10-01')
+    putUnvested(db, { investAccountId: 1, id: grant(db), qty: '100', nextVestOn: '2027-01-31', vestEveryMonths: 1, vestQty: '10' }, '2026-10-01')
     expect(projectVests(db, '2027-01-01').events.map((e) => e.vest_on).slice(0, 4)).toEqual(['2027-01-31', '2027-02-28', '2027-03-31', '2027-04-30'])
     // Deleting a recorded vest makes it due again.
     vest('2027-01-31')

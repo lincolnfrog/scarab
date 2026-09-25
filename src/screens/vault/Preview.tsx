@@ -73,7 +73,7 @@ function notes(s: OpenedSnapshot): { text: string; tone?: 'down' }[] {
   if (src.kind === 'backup' && relationOf(s)?.sameVault === false)
     out.push({ text: 'This backup is from a different vault. Restoring puts its data in this one; this vault’s passkeys and recovery code stay as they are.' })
   if (s.unreadable) out.push({ text: `This version of Scarab can’t load it: ${s.unreadable}`, tone: 'down' })
-  else if (s.upgraded.length) out.push({ text: `Written by an older Scarab (schema v${s.schemaVersion}); it is brought up to date as it loads.` })
+  else if (s.older) out.push({ text: `Written by an older Scarab (schema v${s.schemaVersion}); it is brought up to date as it loads.` })
   return out
 }
 

@@ -55,7 +55,7 @@ export function BackupsCard() {
         if (!ok) return
         const loaded = await loadLocalDump(dump) // the screens remount: say it in toasts
         toast.success(session ? 'Loaded into this tab; saving to the vault' : 'Loaded into this tab — create a vault to keep it')
-        if (loaded.upgraded.length) toast.info(`The file was schema v${loaded.from}; it was brought up to v${CURRENT_VERSION} as it loaded.`)
+        if (loaded.older) toast.info(`The file was schema v${loaded.from}; it was brought up to v${CURRENT_VERSION} as it loaded.`)
       } else {
         const ok = await confirm({
           title: 'Replace all server data with this export file?',

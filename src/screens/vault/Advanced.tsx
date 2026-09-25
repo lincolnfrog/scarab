@@ -108,7 +108,7 @@ export function AdvancedCard(p: {
       migrate(db)
       const loaded = loadDump(db, dump)
       const txCount = (db.prepare('SELECT count(*) AS n FROM transactions').get() as { n: number }).n
-      const upgraded = loaded.upgraded.length ? ` → v${CURRENT_VERSION} (upgraded ${loaded.upgraded.join(', ')})` : ''
+      const upgraded = loaded.older ? ` → v${CURRENT_VERSION}${loaded.upgraded.length ? ` (upgraded ${loaded.upgraded.join(', ')})` : ''}` : ''
       lines.push(`Database rebuilt in a scratch engine: ${txCount} transactions, schema v${loaded.from}${upgraded} (${(performance.now() - t1).toFixed(0)}ms)`)
       const t2 = performance.now()
       const localSeries = netWorthSeries(db, today())
