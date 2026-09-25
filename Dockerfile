@@ -22,6 +22,8 @@ RUN tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin && rm /tmp/litestream.tar.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
+# seed/ holds the prebuilt market history when one was built (npm run seed:history); else just .gitkeep.
+COPY --from=build /app/seed ./seed
 COPY package.json litestream.yml entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 

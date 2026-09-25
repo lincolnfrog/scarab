@@ -523,7 +523,7 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
 | Damodaran histretSP + Minneapolis Fed CPI | bundled historical real returns (`engine/history.ts`) | Static, hand-refreshed yearly; not fetched at runtime so ZK mode stays offline-clean. |
 | NASDAQ Trader SymDir | quote-basket universe (all US-listed symbols), security names, ETF flag | `nasdaqlisted.txt` + `otherlisted.txt`, pipe-delimited, keyless. Names lose the "- Common Stock" boilerplate. Datacenter IPs may 403 (as Yahoo does); the build is best-effort and keeps yesterday's rows on failure. |
 | Yahoo v8 spark (batched) | basket quotes | ~200 symbols per call; v7 quote (crumb+cookie) is the fallback when spark returns nothing. Batches fail piecemeal: a symbol a build misses keeps its last (dated) quote for 14 days before it drops out. |
-| Yahoo v8 spark, `range=10y&interval=1mo` | monthly market history (`server/history-pack.ts`, GET /api/basket/history): month-end closes for the whole basket universe, one file for every caller | **20 symbols per call at most** (more is a 400), so a full build is ~600 calls: one call per 1.5s, ≤160 per run, runs ≥20 min apart, ≤640 a day, resumable (progress saved every 10 batches), and the first 429/403/5xx/unreadable reply pauses it until the next UTC day. Runs start only when someone asks for the file (or a household's series catalog), never on a timer. v8 replies carry no exchange zone, but US listings' monthly bars open at New York midnight (04:00/05:00Z) and crypto's at 00:00Z, so the UTC month is right; the live bar for the month in progress is last and wins. An unknown symbol is simply absent from the reply. Stored delta-encoded in app_meta `basket:history:v1` (~4 MB JSON, ~1.5 MB gzipped); rebuilt once a month has closed, and each daily basket build merges its quotes into the month in progress. A tab keeps the file in memory for `bench:*` and copies only its traded assets' month ends into `prices` (engine/prices.ts `applyMonthlyHistory`). |
+| Yahoo v8 spark, `range=10y&interval=1mo` | monthly market history (`server/history-pack.ts`, GET /api/basket/history): month-end closes for the whole basket universe, one file for every caller | **20 symbols per call at most** (more is a 400), so a full build is ~600 calls: one call per 1.5s, ≤160 per run, runs ≥20 min apart, ≤640 a day, resumable (progress saved every 10 batches), and the first 429/403/5xx/unreadable reply pauses it until the next UTC day. Runs start only when someone asks for the file (or a household's series catalog), never on a timer. v8 replies carry no exchange zone, but US listings' monthly bars open at New York midnight (04:00/05:00Z) and crypto's at 00:00Z, so the UTC month is right; the live bar for the month in progress is last and wins. An unknown symbol is simply absent from the reply. Stored delta-encoded in app_meta `basket:history:v1` (~4 MB JSON, ~1.5 MB gzipped); rebuilt once a month has closed, and each daily basket build merges its quotes into the month in progress. A fresh server doesn't crawl for its first file: `npm run seed:history` builds it locally (same builder, budgets lifted) into `seed/history-pack.json.gz` — gitignored, since it is Yahoo-derived, but uploaded by `.gcloudignore` and copied into the image — and boot stores it via `seedHistoryPack` whenever it is newer than the server's. A tab keeps the file in memory for `bench:*` and copies only its traded assets' month ends into `prices` (engine/prices.ts `applyMonthlyHistory`). |
 | CoinGecko /coins/markets | basket crypto quotes and names | top ~500 by market cap, keyless, browser-CORS-friendly. A failed crypto source leaves yesterday's crypto rows alone (the basket is replaced per kind). |
 | SimpleFIN | (planned, household mode) | $1.50/mo, read-only tokens via MX. Fundamentally in tension with ZK mode — see PRIVACY.md. |
 
@@ -655,7 +655,7 @@ Dark-only, desktop-first: no screen scrolls the page sideways at 1100px (a
 wide table scrolls inside its card), and the drawers and the add-account flow
 fit 390px. Tokens in
 `src/styles.css`; the authoritative mockup is linked in CLAUDE.md. Surfaces
-#0a0d12/#0e1219/#161b24; ink #f2efe6/#a8adb8/#6e7480; gold accent #e3b23c
+#0a0d12/#0e1219/#161b24; ink #f2efe6/#a8adb8/#828893; gold accent #e3b23c
 reserved for nav/CTAs/goal (and the focus ring). Chart series fixed order
 (CVD-validated on #161b24): gold #bd8a26, lapis #5b8def, malachite #24a06e,
 amethyst #8f7fe8, carnelian #d95f42, faience #2b9cb8. Up/down #34c77b/#e5605c
@@ -690,9 +690,9 @@ charts step with ←/→. CSS is area-prefixed: `.ui-*` (primitives), `.scr-*`
 (screens), `.inv-*` (Investments), `.ch-*` (charts), `.zk-*` (vault and
 session).
 
-**Charts** are hand-rolled SVG: TimeChart for every trend (money charts sit on
-a $0 baseline by default; `baseline="fit"` would give the mockup's fitted
-look), BigChart for daily price history, `viz.tsx` for the donut and bars.
+**Charts** are hand-rolled SVG: TimeChart for every trend (axes fit the data by
+default, as in the mockup — stacks still start at $0; money charts carry a
+Lin/Log switch, with Log offered only while every value in view is above 0), BigChart for daily price history, `viz.tsx` for the donut and bars.
 Crosshair tooltips that flip rather than clip; legends whenever ≥2 series;
 one y-axis only (Compare rebases instead of a second axis); rebasing refuses a
 series at or below 0 at the anchor; estimated (at-cost) stretches are dashed;
@@ -701,6 +701,5 @@ log scales tick at 1/2/5×10^k and fall back to linear when the range is under
 pins a slot per series); gold only for the goal, nav, CTAs and focus; up/down
 only for gains and losses.
 
-**Open decision**: `--ink-3` measures 3.68:1 on `--card`, under 4.5:1 for the
-11px card titles. Nudge it to about #7d8390, or use `--ink-2` for text under
-12px — a token change, so it waits for a yes.
+`--ink-3` is #828893 (2026-09-24, was #6e7480): 4.84:1 on `--card`, so the
+11px card titles clear 4.5:1.

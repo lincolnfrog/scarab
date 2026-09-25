@@ -327,18 +327,20 @@ Migrations #18–#21. DESIGN.md §7 has the roadmap view; this is the checklist.
 
 Decisions for the user:
 
-- [ ] **Production origin** before the real vault: map scarab.one (passkeys
-      bind to the hostname for life; `run.app` is on the Public Suffix List),
-      or accept re-registering every passkey later.
-- [ ] **`--ink-3` contrast**: 3.68:1 on `--card`, under 4.5:1 for 11px card
-      titles. Nudge to about #7d8390, or use `--ink-2` under 12px. A token
-      change, so it waits for a yes.
-- [ ] **Cloud Run CPU for the market history build**: with request-based CPU a
-      build that outlives its request crawls (it resumes, so the first full
-      build may take days of visits). `--no-cpu-throttling`, or a scheduled
-      ping to `GET /api/basket/history`. Never touch `--max-instances`.
-- [ ] Money trend charts sit on a $0 baseline; the mockup fits them to the
-      data (`baseline="fit"`, one prop per card).
+- [ ] **Production origin** before the real vault: scarab.one (user setting
+      it up 2026-09-24). Passkeys bind to the hostname for life, and the RP ID
+      pin to scarab.one is already in src/passkey.ts.
+- [x] **`--ink-3` contrast**: now #828893, 4.84:1 on `--card` (2026-09-24).
+- [x] **First market-history build** (2026-09-24): built locally with
+      `npm run seed:history` into `seed/history-pack.json.gz` (gitignored:
+      Yahoo-derived data; shipped via `.gcloudignore` + Dockerfile), stored at
+      boot by `seedHistoryPack` when newer than the server's. Re-run and
+      redeploy to refresh it.
+- [ ] Monthly rebuilds on Cloud Run still crawl under request-based CPU (the
+      served file stays current meanwhile via daily basket merges). If that
+      matters: `--no-cpu-throttling` or a scheduled ping; never `--max-instances`.
+- [x] Money trend charts fit the data (TimeChart default `baseline="fit"`;
+      stacks keep $0) and carry a Lin/Log switch (2026-09-24).
 
 Engineering:
 

@@ -105,8 +105,11 @@ export type TimeChartProps = {
   rug?: TRug[]
   /** Units of the raw values: cents, a micro-fraction (1_000_000 = 100%), or index-micro (1_000_000 = 100). */
   unit?: 'cents' | 'pct' | 'index'
+  /** The initial y scale (default linear). With the toggle shown, the person can switch it. */
   scale?: 'linear' | 'log'
-  /** 'zero' keeps 0 on the axis (default for money); 'fit' hugs the data (default otherwise). */
+  /** Show a Linear/Log switch in the header. Default: on for money values, off otherwise. */
+  scaleToggle?: boolean
+  /** 'fit' hugs the data (default); 'zero' keeps 0 on the axis. A stack always starts at 0. */
   baseline?: 'zero' | 'fit'
   /** 'rebased' reads 100 at each line's anchor, 'pct' reads % change from it. Thresholds, bands and point marks are raw-unit and drop out. */
   transform?: 'value' | 'rebased' | 'pct'
@@ -241,7 +244,10 @@ export function TimeChart(p: TimeChartProps) {
 
   const presetList: TPreset[] = p.presets === false ? NONE : (p.presets ?? DEFAULT_PRESETS)
   const unit: AxisUnit = tf === 'rebased' ? 'index' : tf === 'pct' ? 'pct' : (p.unit ?? 'cents')
-  const baseline = p.baseline ?? (tf === 'value' && unit === 'cents' ? 'zero' : 'fit')
+  const baseline = p.baseline ?? 'fit'
+  const showScaleToggle = p.scaleToggle ?? (tf === 'value' && unit === 'cents')
+  const [scalePick, setScalePick] = useState<'linear' | 'log'>(p.scale ?? 'linear')
+  const scale = showScaleToggle ? scalePick : (p.scale ?? 'linear')
 
   const m = useMemo(() => {
     const parsed = series.map((s): Parsed => {
@@ -333,7 +339,8 @@ export function TimeChart(p: TimeChartProps) {
     let lo = ys.length ? Math.min(...ys) : 0
     let hi = ys.length ? Math.max(...ys) : 1
     const plotH = Math.max(40, H - PAD_T - PAD_B)
-    const log = p.scale === 'log' && lo > 0 && !stacking // a stack's heights only add up on a linear axis
+    const logOk = lo > 0 && !stacking // a stack's heights only add up on a linear axis; log can't show 0 or less
+    const log = scale === 'log' && logOk
     let yOf: (v: number) => number
     let ticks: number[]
     if (log) {
@@ -343,7 +350,7 @@ export function TimeChart(p: TimeChartProps) {
       yOf = (v) => PAD_T + ((lHi - Math.log10(Math.max(v, 1e-12))) * plotH) / (lHi - lLo)
       ticks = logTicks(lo, hi, Math.max(3, Math.floor(plotH / 32)))
     } else {
-      if (baseline === 'zero') {
+      if (baseline === 'zero' || stacking) {
         lo = Math.min(lo, 0)
         hi = Math.max(hi, 0)
       }
@@ -510,8 +517,10 @@ export function TimeChart(p: TimeChartProps) {
       hasData,
       fixedAnchor,
       dollars: unit === 'cents' && wantsDollars(raws),
+      logOk,
+      log,
     }
-  }, [series, d.bands, d.markers, d.thresholds, d.pointMarks, d.rug, today, hiddenKey, tf, p.anchorT, unit, p.scale, baseline, presetPick, zoom, W, H, presetList])
+  }, [series, d.bands, d.markers, d.thresholds, d.pointMarks, d.rug, today, hiddenKey, tf, p.anchorT, unit, scale, baseline, presetPick, zoom, W, H, presetList])
 
   /* ---------------- the drawn window, reported ---------------- */
   const onWindow = useRef(p.onWindow)
@@ -718,8 +727,19 @@ export function TimeChart(p: TimeChartProps) {
     m.offered.length >= 2 ? (
       <Segmented<TPreset> aria-label="Range" value={m.preset} onChange={pickPreset} options={m.offered.map((v) => ({ value: v, label: v }))} />
     ) : null
+  const scaleNode = showScaleToggle ? (
+    <Segmented<'linear' | 'log'>
+      aria-label="Scale"
+      value={m.log ? 'log' : 'linear'}
+      onChange={setScalePick}
+      options={[
+        { value: 'linear', label: 'Lin' },
+        { value: 'log', label: 'Log', disabled: !m.logOk, title: m.logOk ? 'Logarithmic: equal steps are equal % changes' : 'Log needs every value in view above zero' },
+      ]}
+    />
+  ) : null
   const legendFoot = p.legendAt === 'foot'
-  const showHead = !!(p.title || p.lead || p.actions || presetsNode || m.zoomed || (!legendFoot && legendNode && legendItems.length >= 2))
+  const showHead = !!(p.title || p.lead || p.actions || presetsNode || scaleNode || m.zoomed || (!legendFoot && legendNode && legendItems.length >= 2))
 
   const r = c !== null ? readingsAt(c) : null
   const first = r?.rows.find((x) => x.y !== null)
@@ -762,6 +782,7 @@ export function TimeChart(p: TimeChartProps) {
                 Reset zoom
               </Button>
             )}
+            {scaleNode}
             {presetsNode}
           </div>
         </div>

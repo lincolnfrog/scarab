@@ -1,0 +1,17 @@
+# What `gcloud run deploy --source .` uploads. Without this file gcloud falls
+# back to .gitignore, which (deliberately) excludes the market-history seed —
+# Yahoo-derived data we ship in the image but don't publish in the repo.
+.gcloudignore
+.git
+.gitignore
+.claude/
+node_modules/
+dist/
+dist-server/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+.DS_Store
+seed/.build.db*

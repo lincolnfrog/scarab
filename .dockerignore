@@ -7,3 +7,4 @@ dist-server
 .env
 .env.*
 .git
+seed/.build.db*

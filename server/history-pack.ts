@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
-import { gzip } from 'node:zlib'
+import { gunzipSync, gzip } from 'node:zlib'
 import type { MarketHistory } from '../engine/analytics'
 import type { DbLike } from '../engine/db'
 import { applyMonthlyHistory, decodeMonthly, encodeMonthly, isHistoryPack, packMarket, type MonthClose } from '../engine/prices'
@@ -144,6 +144,29 @@ export function storePack(db: DbLike, pack: HistoryPack): void {
   })()
   // Compress it now, off the event loop, so the first GET after the daily build doesn't wait for it.
   cacheBody(etag, json)
+}
+
+/**
+ * Seed the file from a build made elsewhere (scripts/build-history-pack.ts,
+ * shipped in the image as seed/history-pack.json.gz), so a fresh server serves
+ * history from its first request instead of crawling through ~630 calls. It is
+ * public market data, identical for everyone. A seed only ever moves the file
+ * forward: it is stored when there is none, or when it covers a later closed
+ * month (or the same month, fresher) than the one stored; the daily basket
+ * merges and monthly rebuilds carry on from it as usual.
+ */
+export function seedHistoryPack(db: DbLike, gz: Uint8Array): 'seeded' | 'kept' | 'invalid' {
+  let pack: unknown
+  try {
+    pack = JSON.parse(gunzipSync(gz).toString('utf8'))
+  } catch {
+    return 'invalid'
+  }
+  if (!isHistoryPack(pack)) return 'invalid'
+  const head = readHead(db)
+  if (head && (head.final > pack.final || (head.final === pack.final && head.asOf >= pack.asOf))) return 'kept'
+  storePack(db, pack)
+  return 'seeded'
 }
 
 /** For GET /api/basket: is there a file, and which one. */

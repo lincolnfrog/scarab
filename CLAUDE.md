@@ -57,7 +57,7 @@ Match it when building screens (layout, copy tone, chart anatomy).
 
 ## Design tokens (source: mockup, `src/styles.css`)
 
-- Surfaces: page #0a0d12 · plane #0e1219 · card #161b24. Ink #f2efe6/#a8adb8/#6e7480.
+- Surfaces: page #0a0d12 · plane #0e1219 · card #161b24. Ink #f2efe6/#a8adb8/#828893 (ink-3 ≥4.5:1 on card).
 - Accent gold #e3b23c (nav/CTAs/goal only). Status: up #34c77b, down #e5605c —
   reserved for gains/losses, never series colors.
 - Chart series, fixed order (CVD-validated on #161b24 — don't restep):

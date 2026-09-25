@@ -17,7 +17,7 @@
   --line-strong: rgba(255, 255, 255, 0.13);
   --ink: #f2efe6;
   --ink-2: #a8adb8;
-  --ink-3: #6e7480;
+  --ink-3: #828893; /* 4.84:1 on --card (was #6e7480, 3.68:1) */
   --gold: #e3b23c;
   --gold-dim: rgba(227, 178, 60, 0.14);
   --s1: #bd8a26; /* gold */

@@ -17,6 +17,7 @@ import {
   mergeQuotes,
   packResponse,
   parseSparkHistory,
+  seedHistoryPack,
   serverMarket,
   storePack,
   type HistoryRunOptions,
@@ -574,5 +575,40 @@ describe('GET /api/basket/history and the routes around it', () => {
     const again = (await (await app.request('/api/prices/history', { method: 'POST' })).json()) as { written: number }
     expect(again.written).toBe(0)
     expect(network).not.toHaveBeenCalled()
+  })
+})
+
+/* ---------- the prebuilt seed ---------- */
+
+describe('seedHistoryPack', () => {
+  const file = (final: string, asOf: string, sym = 'VTI'): HistoryPack => ({
+    v: 1, start: '2016-09', final, asOf, builtAt: `${asOf}T00:00:00.000Z`, stock: { [sym]: [0, 10_000, 100] }, crypto: {},
+  })
+  const gz = (p: unknown) => gzipSync(JSON.stringify(p))
+
+  it('stores a seed when there is no file, so history is served from the first request', () => {
+    const db = mem()
+    expect(seedHistoryPack(db, gz(file('2026-08', '2026-09-24')))).toBe('seeded')
+    expect(historyStatus(db)).toMatchObject({ ready: true, final: '2026-08', asOf: '2026-09-24' })
+    expect(Object.keys(loadPack(db)!.stock)).toEqual(['VTI'])
+  })
+
+  it('only ever moves the file forward: an older or equal seed keeps what the server built since', () => {
+    const db = mem()
+    storePack(db, file('2026-09', '2026-10-02', 'NEWER'))
+    expect(seedHistoryPack(db, gz(file('2026-08', '2026-09-24')))).toBe('kept')
+    expect(seedHistoryPack(db, gz(file('2026-09', '2026-10-02')))).toBe('kept')
+    expect(Object.keys(loadPack(db)!.stock)).toEqual(['NEWER'])
+    expect(seedHistoryPack(db, gz(file('2026-09', '2026-10-05')))).toBe('seeded') // same month, fresher
+    expect(seedHistoryPack(db, gz(file('2026-10', '2026-11-01')))).toBe('seeded')
+    expect(historyStatus(db).final).toBe('2026-10')
+  })
+
+  it('ignores a corrupt or malformed seed and leaves the stored file alone', () => {
+    const db = mem()
+    storePack(db, file('2026-08', '2026-09-24'))
+    expect(seedHistoryPack(db, new Uint8Array([1, 2, 3]))).toBe('invalid')
+    expect(seedHistoryPack(db, gz({ v: 2, nope: true }))).toBe('invalid')
+    expect(historyStatus(db).final).toBe('2026-08')
   })
 })
