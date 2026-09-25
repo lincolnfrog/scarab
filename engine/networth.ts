@@ -34,8 +34,18 @@ const LATEST = '9999-99-99' // string-compare sentinel: after any date at all
  * anchor) also counts its cash — the anchor plus what later trades did to it
  * (engine/holdings.ts cashAt) — so a sale moves value from shares to cash
  * instead of out of net worth. Without an anchor it counts holdings alone.
+ *
+ * `knownBy` (a day, or a monthEnd sentinel) keeps only what Scarab already had
+ * a value for by then — an investment account with a trade or balance, a
+ * property with a valuation, a liability with a balance on or before it — so
+ * comparing two of its points shows change, not data entered since. Without
+ * it, a house bought in 2015 and first valued this month is worth its 2015
+ * price every month before this one. Bank accounts always count: their
+ * opening balance is the value before their first transaction.
  */
-export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
+export function netWorthSeries(db: DbLike, today: string, opts: { knownBy?: string } = {}): NetWorthPoint[] {
+  const knownBy = opts.knownBy
+  const known = (dates: readonly string[]) => knownBy === undefined || dates.some((d) => d <= knownBy)
   const txMonths = db
     .prepare("SELECT min(substr(posted_on,1,7)) AS lo FROM transactions")
     .get() as { lo: string | null }
@@ -120,6 +130,21 @@ export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
       [...groupBy(rows, (t) => t.asset_id)].map(([assetId, list]) => ({ assetId, trades: list, n: 0, pos: null })),
     )
 
+  const knownInvest = new Set(
+    investAccounts
+      .filter((ia) => known([...(tradesBy.get(ia.id) ?? []).map((t) => t.traded_on), ...(snapsBy.get(ia.id) ?? []).map((s) => s.balanced_on)]))
+      .map((ia) => ia.id),
+  )
+  // A property with no valuation at all is its purchase price throughout: known once bought.
+  const knownProps = new Set(
+    props
+      .filter((p) => {
+        const v = valsBy.get(p.id)
+        return v ? known(v.map((x) => x.valued_on)) : known(p.purchased_on ? [p.purchased_on] : [])
+      })
+      .map((p) => p.id),
+  )
+
   return months.map((month) => {
     const cutoff = monthEnd(month)
     const current = month === thisMonth
@@ -133,6 +158,7 @@ export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
     }
 
     for (const ia of investAccounts) {
+      if (!knownInvest.has(ia.id)) continue
       let value = 0
       const anchors = snapsBy.get(ia.id) ?? []
       if (ia.tracking === 'balance') {
@@ -160,12 +186,14 @@ export function netWorthSeries(db: DbLike, today: string): NetWorthPoint[] {
     }
 
     for (const p of props) {
+      if (!knownProps.has(p.id)) continue
       const val = lastOnOrBefore(valsBy.get(p.id), (v) => v.valued_on, cutoff)
       if (val) c.property += val.value_cents
       else if (p.purchased_on && p.purchased_on <= cutoff && p.purchase_cents) c.property += p.purchase_cents
     }
 
     for (const rows of liabsBy.values()) {
+      if (!known(rows.map((l) => l.balanced_on))) continue
       const bal = lastOnOrBefore(rows, (l) => l.balanced_on, cutoff)
       if (bal) c.liabilities -= bal.balance_cents
     }

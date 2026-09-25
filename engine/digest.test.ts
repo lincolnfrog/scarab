@@ -44,6 +44,29 @@ describe('getDigest', () => {
     expect(d.notable).toBe(true)
   })
 
+  it('counts change only in what it already had a value for — not a house, loan or account entered since', () => {
+    const db = mem()
+    db.prepare("INSERT INTO accounts (name, kind) VALUES ('Checking', 'checking')").run()
+    tx(db, '2026-07-15', $(10_000), 'PAYROLL')
+    tx(db, '2026-09-10', $(4_000), 'PAYROLL') // a real change since August
+    lastSeen(db, 'max@x', '2026-08-15 00:00:00')
+    // Bought in 2015, first valued this month: the gain is eleven years', not September's.
+    db.prepare("INSERT INTO properties (name, purchased_on, purchase_cents) VALUES ('Home', '2015-05-01', ?)").run($(900_000))
+    db.prepare("INSERT INTO property_valuations (property_id, valued_on, value_cents) VALUES (1, '2026-09-20', ?)").run($(1_225_000))
+    db.prepare("INSERT INTO liabilities (property_id, name) VALUES (1, 'Mortgage')").run()
+    db.prepare("INSERT INTO liability_balances (liability_id, balanced_on, balance_cents) VALUES (1, '2026-09-20', ?)").run($(600_000))
+    db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Schwab', 'brokerage', 'balance')").run()
+    db.prepare("INSERT INTO balance_snapshots (invest_account_id, balanced_on, balance_cents) VALUES (1, '2026-09-25', ?)").run($(2_194_025))
+
+    const d = getDigest(db, 'max@x', '2026-09-25')
+    expect(d.netWorth).toMatchObject({ baselineMonth: '2026-08', deltaCents: $(4_000), drivers: [{ name: 'cash', deltaCents: $(4_000) }] })
+    // The headline total is still everything.
+    expect(d.netWorth!.totalCents).toBe($(14_000 + 1_225_000 - 600_000 + 2_194_025))
+    // A second valuation is change: the house moves from its August value.
+    db.prepare("INSERT INTO property_valuations (property_id, valued_on, value_cents) VALUES (1, '2026-08-01', ?)").run($(1_200_000))
+    expect(getDigest(db, 'max@x', '2026-09-25').netWorth!.drivers).toContainEqual({ name: 'property', deltaCents: $(25_000) })
+  })
+
   it('ack quiets the card until something new lands', () => {
     const db = mem()
     db.prepare("INSERT INTO accounts (name, kind) VALUES ('Checking', 'checking')").run()

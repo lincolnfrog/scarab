@@ -80,19 +80,26 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
   // --- net worth vs a baseline month-end ---------------------------------
   const series = netWorthSeries(db, today)
   let netWorth: Digest['netWorth'] = null
+  let comparableSeries: NetWorthPoint[] = series
   if (!sameDay && series.length >= 2) {
     const current = series[series.length - 1]!
     const sinceMonth = sinceDay.slice(0, 7)
     const baselineMonth = sinceMonth === current.month ? series[series.length - 2]!.month : sinceMonth
-    let base: NetWorthPoint | undefined
-    for (const p of series) if (p.month <= baselineMonth) base = p
-    if (base && base.month !== current.month) {
-      const drivers = [...ASSET_CLASSES.map((k) => ({ name: k as string, deltaCents: current[k] - base[k] })),
-        { name: 'liabilities', deltaCents: current.liabilities - base.liabilities }]
+    let at: string | undefined
+    for (const p of series) if (p.month <= baselineMonth) at = p.month
+    if (at && at !== current.month) {
+      // The change counts only what Scarab already had a value for at the baseline: an account,
+      // a house or a loan first entered since is new data, not a gain or a loss.
+      const comparable = netWorthSeries(db, today, { knownBy: `${at}-99` })
+      const base = comparable.find((p) => p.month === at)!
+      const now = comparable[comparable.length - 1]!
+      const drivers = [...ASSET_CLASSES.map((k) => ({ name: k as string, deltaCents: now[k] - base[k] })),
+        { name: 'liabilities', deltaCents: now.liabilities - base.liabilities }]
         .filter((d) => d.deltaCents !== 0)
         .sort((a, b) => Math.abs(b.deltaCents) - Math.abs(a.deltaCents))
         .slice(0, 3)
-      netWorth = { baselineMonth: base.month, totalCents: current.total, deltaCents: current.total - base.total, drivers }
+      netWorth = { baselineMonth: at, totalCents: current.total, deltaCents: now.total - base.total, drivers }
+      comparableSeries = comparable
     }
   }
 
@@ -112,10 +119,10 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
 
   // --- allocation drift ---------------------------------------------------
   const allocationDrift: DriftRow[] = []
-  if (series.length >= 2 && netWorth) {
-    const current = series[series.length - 1]!
+  if (comparableSeries.length >= 2 && netWorth) {
+    const current = comparableSeries[comparableSeries.length - 1]!
     let base: NetWorthPoint | undefined
-    for (const p of series) if (p.month <= netWorth.baselineMonth) base = p
+    for (const p of comparableSeries) if (p.month <= netWorth.baselineMonth) base = p
     if (base) {
       const tot = (p: NetWorthPoint) => ASSET_CLASSES.reduce((s, k) => s + p[k], 0)
       const ct = tot(current)
