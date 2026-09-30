@@ -683,7 +683,7 @@ export default function Taxes() {
           </div>
         </div>
         {hasPaychecks ? (
-          <div className="scr-tablewrap">
+          <div className="scr-tablewrap ui-tablewrap">
             <table>
               <thead>
                 <tr>
@@ -800,7 +800,7 @@ export default function Taxes() {
                 </Field>
               </FieldGrid>
             </Group>
-            <Group title="This paycheck" note="one regular pay period — leave stock comp out, it comes from the ledger">
+            <Group title="This paycheck" note="one regular pay period — leave stock comp out, it comes from the ledger; Social Security and Medicare are worked out from gross pay, so skip those lines">
               <FieldGrid min={140}>
                 <Field label="Gross pay">
                   <MoneyInput value={pay.grossCents} onChange={(c) => setP({ grossCents: c })} />

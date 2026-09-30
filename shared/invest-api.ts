@@ -290,6 +290,12 @@ export type TradePreview = {
   parts: TradePreviewPart[]
   zeroBasisCents: number
   estTaxCents: number | null
+  /**
+   * What the estimate assumed about the rest of the year: its other ordinary
+   * income, and whether any wages (paychecks or a wages figure) are entered on
+   * Taxes. Null when there is no estimate.
+   */
+  taxIncome: { ordinaryCents: number; wagesEntered: boolean } | null
   taxYear: number
   warnings: string[]
   washSale: { risk: boolean; buys: WashBuy[]; upcomingVest: WashVest | null; lossSales: WashLossSale[] }

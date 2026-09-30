@@ -67,6 +67,11 @@ Match it when building screens (layout, copy tone, chart anatomy).
   with tabular-nums for number columns.
 - Charts are hand-rolled SVG (no chart library); crosshair+tooltip on
   line/area, per-mark hover on bars; legends whenever ≥2 series.
+- Responsive (DESIGN.md §8 Layout): shell tiers ≥1080 sidebar · 720–1079
+  rail · <720 topbar + tab bar; `.screens` stays the only scroller. Lay cards
+  out with container queries (`grid`, `card`), not the viewport, and keep a
+  phone-only layout's threshold below the narrowest desktop card it lives in.
+  `styles.css` loads *after* ui/screens/vault.css — beat it with specificity.
 
 ## Commands
 

@@ -634,7 +634,7 @@ export default function Future() {
       <FutureFan runs={cmp.runs} selectedId={run.id} baselineId={base.id} params={run.params} buys={buys} thresholdPct={cmp.thresholdPct} />
       <div className="card c3">
         <h2>{run.name}</h2>
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div className="scr-odds">
           <div>
             <div className="muted">Crossing date · ≥{cmp.thresholdPct}% odds</div>
             <div className="heronum" style={{ fontSize: 36, color }}>{run.crossingYear ?? '—'}</div>
@@ -685,6 +685,7 @@ export default function Future() {
           <h2>Side by side</h2>
           <div className="right muted">deltas vs {base.name} · {draw === 'historical' ? 'historical sequences' : 'lognormal draws'}</div>
         </div>
+        <div className="ui-tablewrap ui-pin1">
         <table>
           <thead>
             <tr>
@@ -737,6 +738,7 @@ export default function Future() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* ---------- price a decision ---------- */}

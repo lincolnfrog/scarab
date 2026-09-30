@@ -23,17 +23,20 @@ import { withViewTransition } from './ui/motion'
 
 export type ScreenId = 'dash' | 'invest' | 're' | 'cash' | 'goal' | 'tax' | 'future' | 'compare' | 'vault'
 
-/** Every screen, in nav order, with the name the nav, the page heading and the route announcement use. */
-export const SCREENS: readonly { id: ScreenId; label: string }[] = [
-  { id: 'dash', label: 'Dashboard' },
-  { id: 'invest', label: 'Investments' },
-  { id: 're', label: 'Real estate' },
-  { id: 'cash', label: 'Cash & budget' },
-  { id: 'tax', label: 'Taxes' },
-  { id: 'goal', label: 'Dream Home' },
-  { id: 'future', label: 'Future' },
-  { id: 'compare', label: 'Compare' },
-  { id: 'vault', label: 'Data & Vault' },
+/**
+ * Every screen, in nav order, with the name the nav, the page heading and the route announcement use —
+ * and `short`, the one the tablet rail and the phone tab bar print under an icon.
+ */
+export const SCREENS: readonly { id: ScreenId; label: string; short: string }[] = [
+  { id: 'dash', label: 'Dashboard', short: 'Dashboard' },
+  { id: 'invest', label: 'Investments', short: 'Investments' },
+  { id: 're', label: 'Real estate', short: 'Real estate' },
+  { id: 'cash', label: 'Cash & budget', short: 'Cash' },
+  { id: 'tax', label: 'Taxes', short: 'Taxes' },
+  { id: 'goal', label: 'Dream Home', short: 'Dream Home' },
+  { id: 'future', label: 'Future', short: 'Future' },
+  { id: 'compare', label: 'Compare', short: 'Compare' },
+  { id: 'vault', label: 'Data & Vault', short: 'Vault' },
 ]
 
 const IDS: ReadonlySet<string> = new Set(SCREENS.map((s) => s.id))

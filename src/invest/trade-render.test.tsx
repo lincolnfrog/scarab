@@ -22,6 +22,7 @@ const pv = (over: Partial<TradePreview> = {}): TradePreview => ({
   parts: [],
   zeroBasisCents: 0,
   estTaxCents: 0,
+  taxIncome: null,
   taxYear: 2026,
   warnings: [],
   washSale: noWash,
@@ -76,6 +77,17 @@ describe('the trade preview says what recording would do', () => {
     // No change still says why: netted with the year so far, at the Taxes settings.
     expect(flat).toMatch(/Estimated tax no change to this year’s tax On your 2026 return, netted/)
     expect(pane(pv({ realized: { stCents: 0, ltCents: 2_000_00 }, estTaxCents: 300_00 }))).toMatch(/Estimated tax ≈ \$300\.00 On your 2026 return/)
+  })
+
+  it('says what income the estimate assumed, and flags it as likely low when no wages are entered', () => {
+    // A $60k long-term gain with nothing else on Taxes: mostly the 0% federal bracket, so the estimate is small.
+    const gain = { realized: { stCents: 0, ltCents: 60_102_93 }, estTaxCents: 2_936_78 }
+    const bare = pane(pv({ ...gain, taxIncome: { ordinaryCents: 12_000_00, wagesEntered: false } }))
+    expect(bare).toMatch(/at your Taxes settings, with \$12,000\.00 of other income\./)
+    expect(bare).toMatch(/Likely too low — no wages or paychecks are entered for 2026\..*Add them on Taxes for a real estimate\./)
+    const full = pane(pv({ ...gain, estTaxCents: 16_888_92, taxIncome: { ordinaryCents: 300_000_00, wagesEntered: true } }))
+    expect(full).toMatch(/with \$300,000\.00 of other income\./)
+    expect(full).not.toMatch(/Likely too low/)
   })
 
   it('a buy near a taxable loss sale warns that it could disallow it; otherwise it says there is no trap', () => {

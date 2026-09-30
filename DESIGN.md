@@ -45,9 +45,10 @@ Two deployment modes, one codebase:
 ```
 src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             know which universe answers.
-  App.tsx     The shell: boot (/api/mode → the front door or the app), sidebar,
-            topbar (⌘K hint, SyncChip), DialogHost, CommandPalette, ToastHost,
-            and one ScreenSlot per screen visited. Screens are code-split
+  App.tsx     The shell: boot (/api/mode → the front door or the app), sidebar
+            (a rail on a tablet), topbar (⌘K hint, SyncChip), a phone's tab
+            bar and More sheet (§8 Layout), DialogHost, CommandPalette,
+            ToastHost, and one ScreenSlot per screen visited. Screens are code-split
             (lazy loaders read with use(); the one being opened loads with the
             boot requests, the rest in the background) and kept alive in
             React <Activity>: a hidden screen is display:none with its effects
@@ -657,17 +658,42 @@ holdings (2026-09-09), the passkey-only vault and a two-member household
 
 ## 8. Design system
 
-Dark-only, desktop-first: no screen scrolls the page sideways at 1100px (a
-wide table scrolls inside its card), and the drawers and the add-account flow
-fit 390px. Tokens in
-`src/styles.css`; the authoritative mockup is linked in CLAUDE.md. Surfaces
+Dark-only. The mockup is drawn for a desktop; every screen also works from a
+320px phone up, and nothing scrolls the page sideways at any width (a wide
+table scrolls inside its card). Tokens in
+`src/styles.css`; the authoritative mockup is linked in CLAUDE.md.
+
+**Layout.** One scroller at every size — `.screens` (#main) — so per-screen
+scroll restore, the modal scroll lock and the screen crossfade work the same
+everywhere, and a drag on the chrome can't pull the page into a reload. The
+shell has three tiers: ≥1080px the sidebar; 720–1079px the sidebar folds to a
+rail (icons over SCREENS' `short` labels); <720px a compact topbar (the
+wordmark, which swaps to the screen's name once its heading scrolls away;
+search; the session dot) over a tab bar (App's `TABS` — Dashboard,
+Investments, Cash, Dream Home — then More, a sheet with the rest, the data
+status and who's signed in). Content answers the room it is given, not the
+window: `.grid12` is a size container (`grid`) whose spans collapse to full
+width under 800px (the net-worth tiles pair up), and each grid card and dialog
+body is one too (`card`), so a table can turn into two-line list rows on a
+phone (Recent activity, Holdings, Transactions, Recurring, loan options) or
+scroll with its label column pinned (`.ui-tablewrap.ui-pin1`: the payment
+matrix, side-by-side scenarios). Those thresholds sit below the narrowest
+desktop card each table lives in, so the desktop keeps the mockup. On a phone
+dialogs and drawers are sheets from the bottom edge (the command palette hangs
+from the top, clear of the keyboard); card headers stack; safe-area insets
+are honoured (`viewport-fit=cover`). Touch: controls grow (`--control-h` 40px,
+mini 32px), text fields and selects set 16px (below that iOS zooms on focus),
+and a tapped chart mark keeps its tooltip until the next tap. Cascade note:
+`main.tsx` imports App before `styles.css`, so `ui.css`, `screens.css` and
+`vault.css` load *before* it — a rule there that must beat one in
+`styles.css` needs the higher specificity. Surfaces
 #0a0d12/#0e1219/#161b24; ink #f2efe6/#a8adb8/#828893; gold accent #e3b23c
 reserved for nav/CTAs/goal (and the focus ring). Chart series fixed order
 (CVD-validated on #161b24): gold #bd8a26, lapis #5b8def, malachite #24a06e,
 amethyst #8f7fe8, carnelian #d95f42, faience #2b9cb8. Up/down #34c77b/#e5605c
 are reserved for gains/losses, never series. Marcellus (bundled woff2, OFL)
 for display; ui-monospace tabular-nums for number columns. One control
-height: `--control-h` 34px, `--control-h-mini` 28px.
+height: `--control-h` 34px, `--control-h-mini` 28px (40 and 32 on touch).
 
 **Motion** is CSS-first. Tokens on `:root`: `--ease-out`, `--ease-io`,
 `--dur-1` 90ms (hover, press), `--dur-2` 180ms (popovers, dialogs, toasts),

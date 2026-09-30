@@ -3,6 +3,7 @@ import type { InvestAccountRow } from '../../engine/invest'
 import type { PortfolioLot, PortfolioPosition, TradeBody, TradePreview } from '../../shared/invest-api'
 import { formatCents, formatQtyMicro } from '../../shared/money'
 import { post } from '../api'
+import { Link } from '../router'
 import { localMode } from '../local'
 import { Button } from '../ui/Button'
 import { Drawer } from '../ui/Dialog'
@@ -551,7 +552,17 @@ export function PreviewPane({ state, side, today, complaint }: { state: PreviewS
             )}
           </div>
           {!pv.sheltered && pv.estTaxCents !== null && (
-            <p className="inv-note">On your {pv.taxYear} return, netted with this year’s other gains and losses at your Taxes settings.</p>
+            <p className="inv-note">
+              On your {pv.taxYear} return, netted with this year’s other gains and losses at your Taxes settings
+              {pv.taxIncome ? `, with ${formatCents(pv.taxIncome.ordinaryCents)} of other income` : ''}.
+            </p>
+          )}
+          {pv.taxIncome && !pv.taxIncome.wagesEntered && pv.estTaxCents !== 0 && (
+            <div className="inv-callout" role="note">
+              <b>Likely too low</b> — no wages or paychecks are entered for {pv.taxYear}. The rate on a gain depends on the rest of
+              your income; with little of it, most of a long-term gain falls in the 0% federal bracket.{' '}
+              <Link to={{ screen: 'tax' }}>Add them on Taxes</Link> for a real estimate.
+            </div>
           )}
         </>
       )}

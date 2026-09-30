@@ -71,9 +71,57 @@
 
 /* ---------- tables ---------- */
 
-/* A wide table scrolls inside its card instead of widening the screen. */
-.scr-tablewrap { overflow-x: auto; }
+/* A wide table scrolls inside its card instead of widening the screen. (Positioned, so a visually hidden
+   header label — absolute — stays inside it instead of stretching the page on a phone.) */
+.scr-tablewrap { overflow-x: auto; position: relative; }
 .scr-tablewrap > table { min-width: 640px; }
+
+/* Dream Home's loan options on a phone: the option and its monthly P&I on top; its rate, term, points
+   and note below — the column to compare runs straight down the right edge. The picked row keeps its wash. */
+@container card (width < 520px) {
+  .scr-loans,
+  .scr-loans tbody { display: block; }
+  /* A list now, not a table to scroll: no scroller, no edge fade (the picked row's wash bleeds past it). */
+  .ui-tablewrap:has(> .scr-loans) { overflow: visible; mask-image: none; animation: none; }
+  .ui-tablewrap > .scr-loans { width: auto; min-width: 0; }
+  .scr-loans thead { display: none; }
+  .scr-loans tr {
+    display: grid;
+    grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'pk nm nm nm nm pi'
+      '.  rt tm pt nt rm';
+    align-items: center;
+    gap: 2px 10px;
+    margin-inline: -8px;
+    padding: 9px 8px;
+    border-bottom: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .scr-loans tr:last-child { border-bottom: 0; }
+  .scr-loans td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
+  .scr-loans tbody tr:hover td,
+  .scr-loans .selrow td { background: none; }
+  .scr-loans .selrow { background: var(--gold-dim); }
+  .scr-loans td:nth-child(1) { grid-area: pk; }
+  .scr-loans td:nth-child(2) { grid-area: nm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scr-loans td:nth-child(3) { grid-area: rt; }
+  .scr-loans td:nth-child(4) { grid-area: tm; }
+  .scr-loans td:nth-child(5) { grid-area: pt; }
+  .scr-loans td:nth-child(5)::after { content: ' pts'; }
+  .scr-loans td:nth-child(6) { grid-area: pi; }
+  .scr-loans td:nth-child(7) { grid-area: nt; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scr-loans td:nth-child(8) { grid-area: rm; }
+  .scr-loans :is(td:nth-child(3), td:nth-child(4), td:nth-child(5), td:nth-child(7)) { font-size: 12px; color: var(--ink-2); text-align: left; }
+}
+
+/* Dream Home's fund: the figure and its target, then the pace — on a line of its own once there's no room beside. */
+.scr-fundhead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
+.scr-fundhead > :is(.sub2, .tag) { margin-left: auto; }
+@container card (width < 520px) {
+  .scr-fundhead > :is(.sub2, .tag) { margin-left: 0; flex-basis: 100%; }
+  .scr-fundhead > .tag { flex-basis: auto; }
+}
 td .scr-cellsub { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
 td.scr-act { width: 1%; white-space: nowrap; text-align: right; padding-top: 3px; padding-bottom: 3px; }
 
@@ -89,6 +137,15 @@ td.scr-act { width: 1%; white-space: nowrap; text-align: right; padding-top: 3px
 
 /* The Taxes paychecks table: the earner cell carries cadence and stub date on a second line. */
 td.scr-who { min-width: 156px; }
+
+/* The Future odds card: a column beside the fan chart; once the grid stacks its cards (a phone, a tablet),
+   the crossing date heads it and the other three figures share a row. */
+.scr-odds { display: grid; gap: 14px; }
+@container grid (width < 800px) {
+  .scr-odds { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 16px; }
+  .scr-odds > :first-child,
+  .scr-odds > .topline { grid-column: 1 / -1; }
+}
 
 /* The Future "Crossing at __ % odds" box: two digits, in the rail beside the draw pills. */
 .scr-threshold.ui-input { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -150,6 +207,10 @@ td.scr-who { min-width: 156px; }
 /* The header's pills take the squeeze and wrap; the button beside them never does (F29: '+ Scenario' broke onto two lines). */
 .scr-pills { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 0; flex: 0 1 auto; }
 .shead .right > .btn { white-space: nowrap; flex-shrink: 0; }
+/* A phone's header stacks and reads from the left (styles.css), the pills with it. */
+@media (width < 720px) {
+  .scr-pills { justify-content: flex-start; }
+}
 
 /* ---------- Cash transactions ---------- */
 
@@ -157,8 +218,78 @@ td.scr-who { min-width: 156px; }
 .scr-txhead { flex-wrap: wrap; }
 .scr-txhead .right { flex-wrap: wrap; justify-content: flex-end; }
 td.scr-none { padding: 18px 10px; text-align: center; }
-.scr-more { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.scr-more { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .scr-tipline { display: block; }
+
+/* Narrower than a desktop card, the description (and a recurring merchant) takes what the other columns
+   leave and ellipsizes, so a long bank string never pushes the amount past the card's edge. */
+@container card (width < 900px) {
+  :is(.scr-txlist, .scr-recurring) td.desc { max-width: 0; width: 100%; }
+}
+
+/* A phone lists them as a bank app does: what and how much on top, the particulars in a quieter line
+   below. The table stays a table in the markup; only its layout changes. */
+@container card (width < 520px) {
+  /* Filters: the search box across the top, then the pickers two to a row. (.h4row too: styles.css loads
+     after this file, and its `.h4row .right` would otherwise win.) */
+  .h4row.scr-txhead > .right { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .scr-txhead > .right > select { width: 100%; }
+  .scr-txhead .search { grid-column: 1 / -1; order: -1; }
+  .scr-txhead .search input { width: 100%; }
+  .scr-txhead > .right > .muted { align-self: center; }
+
+  :is(.scr-txlist, .scr-recurring),
+  :is(.scr-txlist, .scr-recurring) tbody { display: block; }
+  :is(.scr-txlist, .scr-recurring) thead { display: none; }
+  :is(.scr-txlist, .scr-recurring) tr {
+    display: grid;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  :is(.scr-txlist, .scr-recurring) tr:last-child { border-bottom: 0; }
+  :is(.scr-txlist, .scr-recurring) td { display: block; min-width: 0; padding: 0; border: 0; }
+  :is(.scr-txlist, .scr-recurring) tbody tr:hover td { background: none; }
+  :is(.scr-txlist, .scr-recurring) td.desc { max-width: none; width: auto; }
+
+  /* Transactions: the description and amount; then the date, the account and the category picker. */
+  .scr-txlist tr {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'desc desc desc amt'
+      'date acct cat cat';
+  }
+  .scr-txlist td:nth-child(1) { grid-area: date; font-size: 12px; }
+  .scr-txlist td:nth-child(2) { grid-area: desc; }
+  .scr-txlist td:nth-child(3) { grid-area: acct; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .scr-txlist td:nth-child(4) { grid-area: cat; justify-self: end; }
+  .scr-txlist td:nth-child(4) select { max-width: 10em; field-sizing: content; } /* hugs the chosen category, not the longest one */
+  /* A chosen category reads as a quiet inline picker (its box shows on focus); an unset one keeps its dashed box. */
+  .scr-txlist td:nth-child(4) select:not(.unset, :focus-visible) { background-color: transparent; border-color: transparent; color: var(--ink-2); padding-right: 2px; }
+  .scr-txlist td:nth-child(5) { grid-area: amt; }
+  .scr-txlist td.scr-none { grid-area: auto; grid-column: 1 / -1; }
+
+  /* Recurring: the merchant and its typical charge; then category, cadence, when next, and any flag.
+     The last charge goes — a creeping price is flagged by its tag. */
+  .scr-recurring tr {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'm m m typ'
+      'cat cad nxt tag';
+    font-size: 12px;
+  }
+  .scr-recurring td:nth-child(1) { grid-area: m; font-size: 13px; }
+  .scr-recurring td:nth-child(1) .scr-link { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  .scr-recurring td:nth-child(2) { grid-area: cat; }
+  .scr-recurring td:nth-child(3) { grid-area: cad; color: var(--ink-3); }
+  .scr-recurring td:nth-child(4) { grid-area: typ; font-size: 12.5px; }
+  .scr-recurring td:nth-child(5) { display: none; }
+  .scr-recurring td:nth-child(6) { grid-area: nxt; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scr-recurring td:nth-child(6)::before { content: 'next '; }
+  .scr-recurring td:nth-child(7) { grid-area: tag; }
+  .scr-recurring td:nth-child(7):empty { display: none; }
+}
 
 /* ---------- ⌘K command palette (src/ui/CommandPalette.tsx) ---------- */
 
@@ -177,6 +308,19 @@ td.scr-none { padding: 18px 10px; text-align: center; }
 @media (prefers-reduced-motion: reduce) {
   .ui-dialog:has(.scr-cmdk),
   .ui-dialog:not([open]):has(.scr-cmdk) { transform: none; }
+}
+
+/* Phones: a full-width card near the top edge, so the keyboard its search box raises covers nothing it lists. */
+@media (width < 720px) {
+  .ui-dialog:has(.scr-cmdk) {
+    margin: calc(8px + env(safe-area-inset-top, 0px)) 8px auto;
+    width: auto;
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px));
+    border-width: 1px;
+    border-radius: 14px;
+  }
+  .scr-cmdk-list { max-height: min(420px, 42dvh); }
+  .ui-dialog:has(.scr-cmdk) .ui-dialog-foot { display: none; } /* only keyboard hints, for a device without one */
 }
 
 .scr-cmdk-input.ui-input { width: 100%; font-size: 15px; padding: 9px 12px; min-height: 40px; }

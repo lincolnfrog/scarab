@@ -114,6 +114,9 @@
 .zk-banner[data-tone='down'] .zk-banner-dot { background: var(--down); }
 .zk-banner-text { min-width: 0; }
 .zk-banner > .btn { margin-left: auto; flex: none; }
+@media (width < 720px) {
+  .zk-banner { padding: 8px calc(12px + env(safe-area-inset-right, 0px)) 8px calc(16px + env(safe-area-inset-left, 0px)); }
+}
 @keyframes zk-banner-in { from { opacity: 0; transform: translateY(-4px); } }
 
 /* The conflict sheet: one row per way out. */

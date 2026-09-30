@@ -6,7 +6,7 @@ import { ChartTip, TipRow, type TipPoint } from './chart/ChartTip'
 import { fmtAxis } from './chart/format'
 import { DOWN_VAR, UP_VAR } from './chart/palette'
 import { indexTicks, niceTicks } from './chart/scale'
-import { useBarNav } from './chart/useBarNav'
+import { hoverEnd, useBarNav } from './chart/useBarNav'
 import { useChartSize } from './chart/useChartSize'
 import { growStyle, useGrow } from './chart/useGrow'
 import './chart/chart.css'
@@ -127,7 +127,7 @@ export function GroupedBars({
       aria-label={label}
       aria-describedby={n ? `${uid}-d` : undefined}
       {...nav.focusProps}
-      onPointerLeave={() => nav.setHover(null)}
+      {...hoverEnd(() => nav.setHover(null))}
     >
       {W > 0 && (
         <svg width={W} height={H} aria-hidden="true">
@@ -240,7 +240,7 @@ export function HBars({
       aria-roledescription="bar chart"
       aria-label={ariaLabel}
       {...nav.focusProps}
-      onPointerLeave={() => nav.setHover(null)}
+      {...hoverEnd(() => nav.setHover(null))}
     >
       {W > 0 && (
         <svg width={W} height={n * rowH + 4} aria-hidden="true">
@@ -361,7 +361,7 @@ export function Bullets({ data, month }: { data: { name: string; actual: number;
         aria-roledescription="bar chart"
         aria-label={`Budget plan vs actual${month ? `, ${fmtMonth(month, true)}` : ''}`}
         {...nav.focusProps}
-        onPointerLeave={() => nav.setHover(null)}
+        {...hoverEnd(() => nav.setHover(null))}
       >
         {W > 0 && (
           <svg width={W} height={layout.height} aria-hidden="true">
@@ -502,7 +502,7 @@ export function Donut({ data, centerLabel = 'total' }: { data: { name: string; c
                   opacity={hover === null || hover === i ? 1 : 0.45}
                   onPointerEnter={() => enter(i)}
                   onPointerMove={move}
-                  onPointerLeave={leave}
+                  {...hoverEnd(leave)}
                 />
               )
             })}
@@ -515,7 +515,7 @@ export function Donut({ data, centerLabel = 'total' }: { data: { name: string; c
           </svg>
           <div className="ch-donut-legend">
             {shown.map((d, i) => (
-              <div key={d.name} className="r" onPointerEnter={() => enter(i)} onPointerLeave={leave} style={{ opacity: hover === null || hover === i ? 1 : 0.5 }}>
+              <div key={d.name} className="r" onPointerEnter={() => enter(i)} {...hoverEnd(leave)} style={{ opacity: hover === null || hover === i ? 1 : 0.5 }}>
                 <span className="sw" style={{ background: d.color }} />
                 <span className="nm">{d.name}</span>
                 <span className="vl">{share(d.cents)}%</span>

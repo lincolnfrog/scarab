@@ -85,7 +85,7 @@ export default function RecurringCard(p: {
           {' '}<span className="muted">= {formatCents(s.budgetCents)} budgeted − {formatCents(s.spentCents)} spent − ≈{formatCents(s.upcomingBillsCents)} in bills still coming{s.bills.length > 0 && ` (${s.bills.slice(0, 3).map((x) => x.merchant).join(', ')}${s.bills.length > 3 ? '…' : ''})`}</span>
         </div>
       )}
-      <table>
+      <table className="scr-recurring">
         <thead>
           <tr>
             <th>Merchant</th><th>Category</th><th>Cadence</th>

@@ -329,7 +329,8 @@ export function PaletteHint() {
         <circle cx="11" cy="11" r="6.5" />
         <path d="M16 16l4.5 4.5" />
       </svg>
-      Search
+      {/* A phone's topbar keeps only the magnifier (ui.css); the word stays as its name. */}
+      <span className="ui-cmdk-word">Search</span>
       <kbd className="ui-kbd">{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
     </button>
   )

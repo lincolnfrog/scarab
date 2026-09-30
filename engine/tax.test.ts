@@ -834,6 +834,20 @@ describe('previewTrade: what a trade would do, written nowhere (B7)', () => {
     expect(getTax(db, TODAY).tax.totalCents - taxBefore).toBe(p.estTaxCents)
   })
 
+  it('says what income its estimate assumed: a big long-term gain with no wages entered is mostly 0% federal', () => {
+    const { db, t } = setup()
+    t(1, 2, '2017-06-25', 'buy', 50, $(175_000))
+    const body = sell({ qty: '1', totalCents: $(63_602.93) })
+    putTaxSettings(db, { wagesAnnualCents: 0, otherIncomeCents: 0 })
+    const bare = previewTrade(db, body, TODAY)
+    expect(bare.taxIncome).toEqual({ ordinaryCents: 0, wagesEntered: false })
+    putTaxSettings(db, { wagesAnnualCents: $(300_000) })
+    const full = previewTrade(db, body, TODAY)
+    expect(full.taxIncome).toEqual({ ordinaryCents: $(300_000), wagesEntered: true })
+    // 15% federal + 3.8% NIIT + California at that income, against a sliver without it.
+    expect(full.estTaxCents!).toBeGreaterThan(5 * bare.estTaxCents!)
+  })
+
   it('a taxable loss sale warns of a buy in an IRA and of a vest coming up (wash sales)', () => {
     const { db, t } = setup()
     t(1, 3, '2026-02-02', 'buy', 10, $(5_000)) // taxable ACME at $500 (trade 1)

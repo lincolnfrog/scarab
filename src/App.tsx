@@ -19,6 +19,7 @@ import { lastRoute, navigate, parseHash, SCREENS, useRoute, type ScreenId } from
 import type { Mode } from './session'
 import { Button } from './ui/Button'
 import { CommandPalette, PaletteHint } from './ui/CommandPalette'
+import { Dialog } from './ui/Dialog'
 import { confirm, DialogHost } from './ui/dialogs'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 import { announce } from './ui/LiveRegion'
@@ -42,6 +43,18 @@ const ICONS: Record<ScreenId, string> = {
   compare: 'M3 17l5-6 4 3 9-8M3 9l5 4 4-1 9 6',
   vault: 'M12 3l7 4v5c0 4.6-3 7.7-7 9-4-1.3-7-4.4-7-9V7z M9 12l2 2 4-4',
 }
+
+function NavIcon({ d, size = 16 }: { d: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  )
+}
+
+/** The phone's tab bar: the screens worth a glance on the go. The rest are one tap away under More. */
+const TABS: readonly ScreenId[] = ['dash', 'invest', 'cash', 'goal']
+const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01'
 
 /**
  * Where each screen's code lives. Screens are split out of the entry bundle:
@@ -113,6 +126,10 @@ function LazyFrontDoor(p: { mode: Mode; onEnter: () => void; onHousehold: () => 
 }
 
 const LABEL = Object.fromEntries(SCREENS.map((s) => [s.id, s.label])) as Record<ScreenId, string>
+const SHORT = Object.fromEntries(SCREENS.map((s) => [s.id, s.short])) as Record<ScreenId, string>
+
+/** Back to where that screen was left: its filters (params) are part of what it's showing. */
+const goTo = (id: ScreenId) => navigate({ screen: id, params: lastRoute(id)?.params })
 
 type Me = { email: string }
 type Boot = { phase: 'loading' } | { phase: 'failed'; reason: string } | { phase: 'ready'; me: Me | null; mode: Mode }
@@ -340,6 +357,19 @@ function Shell({ me }: { me: Me | null }) {
     return () => cancelAnimationFrame(raf)
   }, [ind, indReady])
 
+  // Phones: once the heading scrolls away, the topbar names the screen in the wordmark's place.
+  const [titled, setTitled] = useState(false)
+  useEffect(() => {
+    const el = h1.current
+    const root = scroller.current
+    if (!el || !root || typeof IntersectionObserver !== 'function') return
+    const io = new IntersectionObserver(([e]) => setTitled(!!e && !e.isIntersecting), { root })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  const [more, setMore] = useState(false)
+
   return (
     <div className="app">
       <a
@@ -371,13 +401,12 @@ function Shell({ me }: { me: Me | null }) {
               type="button"
               className={s.id === active ? 'on' : undefined}
               aria-current={s.id === active ? 'page' : undefined}
-              // Back to where that screen was left: its filters (params) are part of what it's showing.
-              onClick={() => navigate({ screen: s.id, params: lastRoute(s.id)?.params })}
+              aria-label={s.label} // the rail shows the short label; the name stays the whole one
+              onClick={() => goTo(s.id)}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d={ICONS[s.id]} />
-              </svg>
-              {s.label}
+              <NavIcon d={ICONS[s.id]} />
+              <span className="nav-label">{s.label}</span>
+              <span className="nav-short">{s.short}</span>
             </button>
           ))}
         </nav>
@@ -385,22 +414,21 @@ function Shell({ me }: { me: Me | null }) {
       </aside>
 
       <div className="main">
-        <div className="topbar">
+        <div className="topbar" data-titled={titled || undefined}>
+          {/* Phones only (the sidebar's logo is gone): the wordmark, or the screen once its heading has scrolled away. */}
+          <span className="topbar-brand" aria-hidden="true">
+            <ScarabMark size={24} />
+            <span className="topbar-names">
+              <span className="topbar-word">SCARAB</span>
+              <span className="topbar-title">{label}</span>
+            </span>
+          </span>
           <span className="where">
             Scarab {data.startsWith('s') ? 'session' : 'household'} · <b>{label}</b>
           </span>
           <PaletteHint />
           <SyncChip />
-          <span className="who">
-            {me ? (
-              <>
-                signed in as <b>{me.email}</b>
-                {me.email !== 'dev@localhost' && ' · via IAP'}
-              </>
-            ) : (
-              'not signed in'
-            )}
-          </span>
+          <Who me={me} />
         </div>
 
         <main id="main" className="screens" ref={scroller} onScroll={onScroll}>
@@ -416,8 +444,93 @@ function Shell({ me }: { me: Me | null }) {
             <ScreenSlot key={s.id} id={s.id} label={s.label} active={s.id === active} data={data} headerHost={hosts[s.id] ?? null} />
           ))}
         </main>
+
+        <TabBar active={active} moreOpen={more} onMore={() => setMore(true)} />
+        <MoreSheet open={more} onClose={() => setMore(false)} active={active} me={me} />
       </div>
     </div>
+  )
+}
+
+function Who({ me }: { me: Me | null }) {
+  return (
+    <span className="who">
+      {me ? (
+        <>
+          signed in as <b>{me.email}</b>
+          {me.email !== 'dev@localhost' && ' · via IAP'}
+        </>
+      ) : (
+        'not signed in'
+      )}
+    </span>
+  )
+}
+
+/**
+ * Phones: the sidebar's job at the bottom of the screen, in thumb's reach — the
+ * TABS, then More for the rest. More wears the gold while one of those screens is up.
+ */
+function TabBar({ active, moreOpen, onMore }: { active: ScreenId; moreOpen: boolean; onMore: () => void }) {
+  const elsewhere = !TABS.includes(active)
+  return (
+    <nav className="tabbar" aria-label="Screens">
+      {TABS.map((id) => (
+        <button key={id} type="button" className="tab" aria-current={id === active ? 'page' : undefined} aria-label={LABEL[id]} onClick={() => goTo(id)}>
+          <span className="tab-ico">
+            <NavIcon d={ICONS[id]} size={20} />
+          </span>
+          <span className="tab-label">{SHORT[id]}</span>
+        </button>
+      ))}
+      <button
+        type="button"
+        className={elsewhere ? 'tab on' : 'tab'}
+        aria-haspopup="dialog"
+        aria-expanded={moreOpen}
+        aria-label={elsewhere ? `More screens (showing ${LABEL[active]})` : 'More screens'}
+        onClick={onMore}
+      >
+        <span className="tab-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+            <path d={MORE_ICON} />
+          </svg>
+        </span>
+        <span className="tab-label">More</span>
+      </button>
+    </nav>
+  )
+}
+
+/** The tab bar's More: the screens it has no room for, then what the sidebar's footer and the topbar say on a wide screen. */
+function MoreSheet({ open, onClose, active, me }: { open: boolean; onClose: () => void; active: ScreenId; me: Me | null }) {
+  return (
+    <Dialog open={open} onClose={onClose} title="More" width={420}>
+      <nav className="more-nav" aria-label="More screens">
+        {SCREENS.filter((s) => !TABS.includes(s.id)).map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className="more-item"
+            aria-current={s.id === active ? 'page' : undefined}
+            onClick={() => {
+              onClose()
+              goTo(s.id)
+            }}
+          >
+            <NavIcon d={ICONS[s.id]} size={18} />
+            <span className="more-label">{s.label}</span>
+            <svg className="more-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
+        ))}
+      </nav>
+      <div className="more-foot">
+        <SidebarStatus />
+        <Who me={me} />
+      </div>
+    </Dialog>
   )
 }
 

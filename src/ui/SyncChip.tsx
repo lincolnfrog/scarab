@@ -147,7 +147,8 @@ export function SyncChip() {
         onClick={() => setOpen((o) => !o)}
       >
         <span className="ui-sync-dot" aria-hidden="true" />
-        {label}
+        {/* A phone's topbar keeps only the dot (ui.css): the banner below it carries anything that needs the person. */}
+        <span className="ui-sync-label">{label}</span>
       </button>
       {s.household && <Avatars household={s.household} identity={s.identity} />}
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} align="end" aria-label="Session status" className="ui-syncpop">

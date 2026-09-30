@@ -83,6 +83,16 @@ body,
 #root {
   height: 100%;
 }
+html {
+  /* Phones in landscape would otherwise inflate the text. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* The page itself never scrolls (.screens does): a drag on the topbar or tab bar
+     mustn't rubber-band the whole app, or pull it into a reload that ends a vault session. */
+  overscroll-behavior-y: none;
+  /* Taps answer with each control's own :active state, not the browser's grey flash. */
+  -webkit-tap-highlight-color: transparent;
+}
 body {
   background: var(--page);
   color: var(--ink);
@@ -91,6 +101,8 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
+/* No double-tap zoom on controls: a second tap is a second press. */
+:where(button, a, input, select, textarea, label, summary) { touch-action: manipulation; }
 
 /* No browser blue. Every anchor takes its text colour from where it sits, and
    one with no class of its own (a bare router <Link>) gets the in-app link
@@ -110,22 +122,36 @@ body {
   text-decoration-color: currentColor;
 }
 
+/* ---------- the shell ----------
+   One scroller at every size — .screens (#main): App keeps each screen's
+   scroll position in it, a modal locks it, the screen crossfade names it, and
+   the page around it never moves. What frames it depends on the width:
+     ≥ 1080px    the sidebar and the topbar
+     720–1079px  the sidebar folds to a rail, each icon over its short label
+     < 720px     a compact topbar (wordmark, search, session) above, and below
+                 a tab bar (App's TABS, then More for the rest)
+   Screens lay out by the width they are given (container queries on
+   .grid12), never by the window's — the rail and the sidebar change it. */
 .app {
   display: flex;
   height: 100%;
-  min-width: 1100px;
   background: var(--plane);
 }
 
 /* ---------- sidebar ---------- */
 .side {
-  width: 208px;
+  width: calc(208px + env(safe-area-inset-left, 0px));
   flex: none;
   background: #0c1017;
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   padding: 18px 12px;
+  padding-left: calc(12px + env(safe-area-inset-left, 0px));
+  /* A short window (a phone on its side) scrolls the nav rather than clipping it. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
 }
 .logo {
   display: flex;
@@ -191,6 +217,37 @@ body {
 }
 .nav-ind.ready { transition: transform var(--dur-3) var(--ease-out), height var(--dur-3) var(--ease-out); }
 .nav.has-ind button.on { background: none; border-left-color: transparent; }
+.nav button > svg { flex: none; }
+.nav-short { display: none; }
+
+/* The rail: the same nav, folded to icons over their short labels (SCREENS' `short`). The status footer
+   goes — the topbar still says whose data this is, and a session's chip says how saved it is. */
+@media (720px <= width < 1080px) {
+  .side {
+    width: calc(88px + env(safe-area-inset-left, 0px));
+    padding: 14px 6px;
+    padding-left: calc(6px + env(safe-area-inset-left, 0px));
+  }
+  .side .logo { justify-content: center; padding: 4px 0 14px; margin-bottom: 10px; }
+  .side .logo span { display: none; }
+  .nav button {
+    flex-direction: column;
+    gap: 5px;
+    padding: 9px 2px 8px;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    text-align: center;
+  }
+  .nav button > svg { width: 19px; height: 19px; }
+  .nav-label { display: none; }
+  .nav-short { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side .foot { display: none; }
+}
+@media (width < 720px) {
+  .side { display: none; }
+}
 
 /* Keyboard users' first Tab: jump past the nav to the screen heading. */
 .skiplink {
@@ -230,9 +287,11 @@ body {
   align-items: center;
   gap: 14px;
   padding: 13px 22px;
+  padding-right: calc(22px + env(safe-area-inset-right, 0px));
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.015);
 }
+.topbar-brand { display: none; }
 .topbar .where {
   font-size: 13px;
   color: var(--ink-3);
@@ -245,6 +304,11 @@ body {
   margin-left: auto;
   font-size: 12.5px;
   color: var(--ink-3);
+  /* On a rail-width window it gives way first. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar .who b {
   color: var(--ink-2);
@@ -253,15 +317,132 @@ body {
 /* The right-hand cluster starts at the ⌘K hint: then the session chip, then who's signed in. */
 .topbar .ui-cmdk-hint { margin-left: auto; }
 .topbar .ui-cmdk-hint ~ :is(.ui-sync, .who) { margin-left: 0; }
+.topbar .where { white-space: nowrap; }
 
 .screens {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 22px;
+  padding-right: calc(22px + env(safe-area-inset-right, 0px));
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   /* Screen changes crossfade as one unit (see "motion" at the end). */
   view-transition-name: screen;
   /* A modal locks this scroller (overflow: hidden); keep its gutter so the layout doesn't shift. */
   scrollbar-gutter: stable;
 }
+
+/* ---------- phones: compact topbar, tab bar ---------- */
+.tabbar { display: none; }
+@media (width < 720px) {
+  .topbar {
+    gap: 4px;
+    min-height: calc(54px + env(safe-area-inset-top, 0px));
+    padding: calc(7px + env(safe-area-inset-top, 0px)) calc(8px + env(safe-area-inset-right, 0px)) 7px calc(16px + env(safe-area-inset-left, 0px));
+    background: #0c1017;
+  }
+  .topbar .where,
+  .topbar .who { display: none; }
+  .topbar .ui-cmdk-hint { margin-left: 0; }
+  .topbar-brand { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: auto; }
+  .topbar-brand > svg { flex: none; }
+  /* The wordmark and the screen's name share one cell and trade places as the heading leaves (App). */
+  .topbar-names { display: grid; min-width: 0; font-family: var(--disp); color: var(--ink); }
+  .topbar-word,
+  .topbar-title {
+    grid-area: 1 / 1;
+    align-self: center;
+    white-space: nowrap;
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
+  }
+  .topbar-word { font-size: 15px; letter-spacing: 0.22em; }
+  .topbar-title { font-size: 18px; letter-spacing: 0.03em; overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateY(6px); }
+  .topbar[data-titled] .topbar-word { opacity: 0; transform: translateY(-6px); }
+  .topbar[data-titled] .topbar-title { opacity: 1; transform: none; }
+
+  .screens {
+    padding: 16px calc(16px + env(safe-area-inset-right, 0px)) 28px calc(16px + env(safe-area-inset-left, 0px));
+  }
+
+  .tabbar {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    flex: none;
+    padding: 5px calc(4px + env(safe-area-inset-right, 0px)) max(5px, env(safe-area-inset-bottom, 0px)) calc(4px + env(safe-area-inset-left, 0px));
+    background: #0c1017;
+    border-top: 1px solid var(--line);
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    padding: 3px 1px 2px;
+    background: none;
+    border: 0;
+    border-radius: 12px;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 14px;
+    cursor: pointer;
+    transition: color var(--dur-1) var(--ease-out);
+  }
+  .tab-ico {
+    display: grid;
+    place-items: center;
+    width: 54px;
+    max-width: 100%;
+    height: 30px;
+    border-radius: 999px;
+    transition: background-color var(--dur-2) var(--ease-out);
+  }
+  .tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab:active .tab-ico { background: rgba(255, 255, 255, 0.07); }
+  .tab:is([aria-current='page'], .on) { color: var(--gold); }
+  .tab:is([aria-current='page'], .on) .tab-ico { background: var(--gold-dim); }
+  .tab:focus-visible { outline-offset: -2px; }
+}
+
+/* The tab bar's More sheet (a Dialog, so a bottom sheet on a phone — ui.css). */
+.more-nav { display: grid; gap: 2px; margin: 0 -8px; }
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 48px;
+  padding: 0 10px;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+.more-item > svg:first-child { color: var(--ink-2); flex: none; }
+.more-item:hover,
+.more-item:active { background: rgba(255, 255, 255, 0.05); }
+.more-item[aria-current='page'] { background: var(--gold-dim); color: var(--gold); }
+.more-item[aria-current='page'] > svg:first-child { color: var(--gold); }
+.more-label { flex: 1; min-width: 0; }
+.more-chev { flex: none; color: var(--ink-3); }
+.more-foot {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.more-foot .foot { font-size: 12.5px; }
+.more-foot .who b { color: var(--ink-2); font-weight: 600; overflow-wrap: anywhere; }
 .shead {
   display: flex;
   align-items: baseline;
@@ -269,6 +450,7 @@ body {
   margin-bottom: 16px;
 }
 .shead h1 {
+  flex: none; /* the description beside it gives way first; the title never breaks */
   font-family: var(--disp);
   font-weight: 400;
   font-size: 24px;
@@ -287,6 +469,20 @@ body {
 /* One slot per visited screen (HeaderSlot portals into it); only the showing screen's is laid out. */
 .shead-slot { display: contents; }
 .shead-slot[hidden] { display: none; }
+/* A phone stacks the header: the title, a two-line description, then the actions on a row of their own. */
+@media (width < 720px) {
+  .shead { flex-wrap: wrap; gap: 4px 12px; margin-bottom: 14px; }
+  .shead h1 { font-size: 26px; line-height: 1.2; }
+  .shead .sub {
+    flex-basis: 100%;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .shead .right { flex-basis: 100%; margin: 8px 0 0; flex-wrap: wrap; justify-content: flex-start; }
+}
 
 .card {
   background: var(--card);
@@ -341,16 +537,24 @@ body {
   color: var(--gold);
 }
 
+@media (width < 720px) {
+  .card { padding: 14px; }
+}
+
 /* ---------- Phase I: cash & budget ---------- */
+/* The screens' card grid. It is a size container: the spans below answer the width the grid is given
+   (the window minus the sidebar or rail), so a card never lays out for room it doesn't have. */
 .grid12 {
+  container: grid / inline-size;
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 14px;
   max-width: 1240px;
 }
 .grid12 .card {
   margin: 0;
   max-width: none;
+  min-width: 0;
 }
 .card.wide {
   max-width: 1240px;
@@ -364,6 +568,18 @@ body {
 .c5 { grid-column: span 5; }
 .c8 { grid-column: span 8; }
 .c12 { grid-column: span 12; }
+/* Narrower than the mockup's grid was drawn for (it held 848px at its narrowest): every card takes the
+   full width, in reading order, except the net-worth tiles, which pair up two by two. */
+@container grid (width < 800px) {
+  .c3, .c4, .c5, .c6, .c7, .c8, .c9 { grid-column: span 12; }
+  .c3.ch-stat { grid-column: span 6; }
+}
+@media (width < 720px) {
+  .grid12 { gap: 12px; }
+}
+/* Each card on the grid is a size container too, so its insides can answer a phone's width
+   (a dialog's body is another — ui.css). */
+.grid12 > .card { container: card / inline-size; }
 
 /* A screen whose code is still loading (App's ScreenLoading) — shown only if the wait is long enough to notice. */
 .screen-loading { animation: screen-loading-in 400ms var(--ease-out) 250ms both; }
@@ -382,6 +598,21 @@ body {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+/* A card header that runs out of room wraps its right-hand cluster onto a row of its own. On a phone
+   that row sits under the title, left-aligned — except a lone button, which keeps its place beside it.
+   (A phone rule rather than a card-width one: a desktop's narrow column cards keep the mockup's header.) */
+.h4row { flex-wrap: wrap; row-gap: 8px; }
+.h4row:has(> .right > .btn:only-child) { flex-wrap: nowrap; } /* the title wraps its words instead */
+.h4row .right { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+@media (width < 720px) {
+  .h4row > .right:not(:has(> .btn:only-child)) {
+    flex-basis: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    row-gap: 8px;
+  }
 }
 
 .muted { color: var(--ink-3); font-size: 12px; }
@@ -411,6 +642,7 @@ body {
   background: var(--card-hi);
   color: var(--ink);
   cursor: pointer;
+  white-space: nowrap; /* a squeezed row wraps around a button, never through its label */
   transition:
     background-color var(--dur-1) var(--ease-out),
     border-color var(--dur-1) var(--ease-out),
@@ -446,7 +678,12 @@ body {
 
 .importbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .importmsg { margin-top: 10px; }
-.frontdoor { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+.frontdoor { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+@media (width < 720px) {
+  .frontdoor {
+    padding: max(16px, env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
+  }
+}
 /* "Can't reach Scarab" (App boot): the front door's frame, with the reason set off below the explanation. */
 .card.bootfail { max-width: 480px; width: 100%; }
 .bootfail .logo { margin-bottom: 18px; }

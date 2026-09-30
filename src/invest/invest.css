@@ -32,6 +32,47 @@
 /* The percent under a gain or loss takes its row's up/down colour. */
 .inv-holdings .inv-subtone { color: inherit; }
 
+/* A phone (a card or drawer under 520px — the desktop's narrowest Holdings card, c8 at 1080, is wider): each
+   row reads as two lines, the way a brokerage app lists positions — the symbol and its value on top;
+   quantity × price, and the gain with its percent, below. The header goes (top right is the value, under
+   it the gain); the cost basis stays in the drawer. Account and lot rows keep the same shape, indented
+   under their symbol, with their wash across the row. */
+@container card (width < 520px) {
+  .inv-holdings,
+  .inv-holdings tbody { display: block; }
+  .inv-holdings thead { display: none; }
+  .inv-holdings tr {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'a a a v'
+      'q p . u';
+    align-items: center;
+    gap: 2px 6px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .inv-holdings tbody tr:last-child { border-bottom: 0; }
+  .inv-holdings td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
+  .inv-holdings tbody tr:hover td { background: none; }
+  .inv-holdings td:nth-child(1) { grid-area: a; }
+  .inv-holdings td:nth-child(2) { grid-area: q; font-size: 12px; color: var(--ink-2); }
+  .inv-holdings td:nth-child(3) { grid-area: p; text-align: left; font-size: 12px; color: var(--ink-2); }
+  .inv-holdings td:nth-child(4) { grid-area: v; }
+  .inv-holdings td:nth-child(5) { grid-area: u; }
+  /* "49 × $84,399.00" — the × only where a price follows. */
+  .inv-holdings tr:has(> td:nth-child(3):not(:empty)) > td:nth-child(2):not(:empty)::after { content: ' ×'; color: var(--ink-3); }
+  .inv-holdings td:nth-child(4) .inv-subline { display: none; }
+  .inv-holdings td:nth-child(5) .inv-subline { display: inline; margin-left: 6px; }
+  /* A price's manual/stale tag follows the price here, rather than sitting before it. */
+  .inv-holdings .inv-price { flex-direction: row-reverse; flex-wrap: wrap; justify-content: flex-end; }
+  .inv-holdings :is(.inv-acctrow, .inv-lotrow) { margin-inline: -8px; padding-inline: 8px; }
+  .inv-holdings .inv-acctrow { background: rgba(255, 255, 255, 0.025); }
+  .inv-holdings .inv-lotrow { background: rgba(255, 255, 255, 0.012); }
+  .inv-holdings .inv-cashrow { border-top: 1px dashed var(--line-strong); }
+  .inv-holdings .inv-cashrow td { border-top: 0; }
+}
+
 /* A small neutral tag: holding term, account type, "tax-deferred". Never gold, never up/down. */
 .inv-tag {
   display: inline-flex;
@@ -292,6 +333,37 @@
 .inv-tile-skel:hover { background: var(--plane); border-color: var(--line); }
 /* Old number, not an error: a hollow neutral ring — never --down. */
 .inv-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-2); }
+
+/* A phone: one account per row, in two lines — who and what it's worth, then its type and what it holds —
+   so ten accounts are a glance rather than a long scroll. */
+@container card (width < 520px) {
+  .inv-strip { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  /* The name and the second line both span the flexible middle column, so only the value sizes the right one. */
+  .inv-tile {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: none;
+    grid-template-areas:
+      'head head v'
+      'sub foot foot';
+    align-items: center;
+    gap: 4px 10px;
+    padding: 10px 12px;
+  }
+  .inv-tile-head { grid-area: head; }
+  .inv-tile-v { grid-area: v; font-size: 16px; text-align: right; }
+  .inv-tile-sub { grid-area: sub; }
+  .inv-tile-foot { grid-area: foot; }
+  .inv-tile-skel { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; min-height: 52px; }
+  .inv-tile-add {
+    grid-template-columns: none;
+    grid-template-areas: none;
+    grid-auto-flow: column;
+    justify-content: center;
+    align-content: center;
+    gap: 8px;
+    min-height: 52px;
+  }
+}
 
 /* Owner avatars (the mockup's .av pair). */
 .inv-avs { display: inline-flex; flex: none; }

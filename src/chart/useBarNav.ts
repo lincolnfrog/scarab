@@ -1,5 +1,19 @@
-import { useState, type FocusEvent, type KeyboardEvent } from 'react'
+import { useState, type FocusEvent, type KeyboardEvent, type PointerEvent } from 'react'
 import { navStep } from './barsModel'
+
+/**
+ * When a pointer's hover over a chart ends. A mouse leaving ends it; a finger lifting doesn't — on a
+ * phone a tap is the only way to point at a mark, so its tooltip stays until the next tap moves it or the
+ * chart loses focus. A touch that turns into a scroll (pointercancel) ends it at once.
+ */
+export function hoverEnd(clear: () => void) {
+  return {
+    onPointerLeave: (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') clear()
+    },
+    onPointerCancel: clear,
+  }
+}
 
 /**
  * Hover + keyboard for a bar chart's marks, the bar-chart twin of

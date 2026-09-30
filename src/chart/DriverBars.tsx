@@ -3,6 +3,7 @@ import { formatCents, formatDollars } from '../../shared/money'
 import { Link, type RouteTarget } from '../router'
 import { ChartTip, TipRow } from './ChartTip'
 import { signColor } from './palette'
+import { hoverEnd } from './useBarNav'
 import { useChartSize } from './useChartSize'
 import { growStyle, useGrow } from './useGrow'
 import './chart.css'
@@ -41,7 +42,7 @@ export function DriverBars({ rows, tipTitle, ariaLabel }: { rows: DriverRow[]; t
       ref={ref}
       role="list"
       aria-label={ariaLabel}
-      onPointerLeave={() => setHover(null)}
+      {...hoverEnd(() => setHover(null))}
     >
       {rows.map((r, i) => {
         const w = halfPct(r.cents)

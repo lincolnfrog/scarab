@@ -999,9 +999,27 @@ export function computeTaxYear(db: DbLike, today: string) {
  * limit all count. Negative when a loss saves tax.
  */
 export function realizedTaxDelta(db: DbLike, today: string, stCents: number, ltCents: number): number {
+  return realizedTaxEstimate(db, today, stCents, ltCents).deltaCents
+}
+
+/**
+ * realizedTaxDelta, with what it rested on: the year's other ordinary income
+ * (wages, other income, vests, dividends) and whether any wages were entered
+ * at all. A gain's rate hangs on the rest of the year's income — with none
+ * entered, most of a long-term gain lands in the 0% federal bracket — so a
+ * preview says so rather than show a figure that only looks precise.
+ */
+export function realizedTaxEstimate(
+  db: DbLike,
+  today: string,
+  stCents: number,
+  ltCents: number,
+): { deltaCents: number; ordinaryCents: number; wagesEntered: boolean } {
   const { inputs } = taxYear(db, today)
   const base = computeTax(inputs).totalCents
-  return computeTax({ ...inputs, stGainCents: inputs.stGainCents + stCents, ltGainCents: inputs.ltGainCents + ltCents }).totalCents - base
+  const deltaCents = computeTax({ ...inputs, stGainCents: inputs.stGainCents + stCents, ltGainCents: inputs.ltGainCents + ltCents }).totalCents - base
+  const wagesEntered = listPaySources(db).length > 0 || getTaxSettings(db).wagesAnnualCents > 0
+  return { deltaCents, ordinaryCents: inputs.ordinaryCents, wagesEntered }
 }
 
 /* ========================= harvesting advisor ========================= */
@@ -1233,7 +1251,13 @@ export function previewTrade(db: DbLike, b: Partial<Record<keyof TradeBody, unkn
   const realized = sale ? saleRealized(sale) : { st_cents: 0, lt_cents: 0 }
   const taxYear = Number(v.tradedOn.slice(0, 4))
   let estTaxCents: number | null = 0
-  if (sale && !sheltered) estTaxCents = taxYear === Number(today.slice(0, 4)) ? realizedTaxDelta(db, today, realized.st_cents, realized.lt_cents) : null
+  let taxIncome: TradePreview['taxIncome'] = null
+  if (sale && !sheltered)
+    if (taxYear === Number(today.slice(0, 4))) {
+      const e = realizedTaxEstimate(db, today, realized.st_cents, realized.lt_cents)
+      estTaxCents = e.deltaCents
+      taxIncome = { ordinaryCents: e.ordinaryCents, wagesEntered: e.wagesEntered }
+    } else estTaxCents = null
 
   const washBuys: WashBuy[] = []
   const lossSales: WashLossSale[] = []
@@ -1290,6 +1314,7 @@ export function previewTrade(db: DbLike, b: Partial<Record<keyof TradeBody, unkn
     parts: sale ? sale.parts.map((p) => ({ ...p })) : [],
     zeroBasisCents: sale?.zero_basis_cents ?? 0,
     estTaxCents,
+    taxIncome,
     taxYear,
     warnings,
     washSale: { risk: washBuys.length > 0 || upcomingVest !== null || lossSales.length > 0, buys: washBuys, upcomingVest, lossSales },

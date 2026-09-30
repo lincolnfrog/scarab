@@ -708,7 +708,7 @@ export default function Cash() {
                 )}
               </div>
             </div>
-            <table>
+            <table className="scr-txlist">
               <thead>
                 <tr>
                   <th>Date</th>

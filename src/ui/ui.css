@@ -135,6 +135,8 @@
   color: var(--ink-2);
 }
 .ui-dialog-body p { max-width: 60ch; }
+/* Like a card on a screen's grid, a dialog's body is a size container: what's inside answers the room it has. */
+.ui-dialog-body { container: card / inline-size; }
 .ui-dialog-body p + p { margin-top: 8px; }
 .ui-dialog-foot {
   display: flex;
@@ -162,6 +164,41 @@
 }
 .ui-dialog--drawer .ui-dialog-head { padding-top: 20px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
 .ui-dialog--drawer .ui-dialog-body { padding-top: 16px; }
+
+/* Phones: every dialog and drawer is a sheet from the bottom edge, full width, in thumb's reach. A
+   sliver of the page stays showing above the tallest (a drawer) so it reads as a layer, not a new page,
+   and the footer clears the home indicator. The command palette hangs from the top instead (screens.css),
+   clear of the keyboard its search box brings up. */
+@media (width < 720px) {
+  .ui-dialog,
+  .ui-dialog--drawer {
+    margin: auto 0 0;
+    width: 100%;
+    max-height: calc(100dvh - max(env(safe-area-inset-top, 0px), 12px) - 12px);
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+    transition-duration: var(--dur-3);
+  }
+  .ui-dialog--drawer { height: calc(100dvh - max(env(safe-area-inset-top, 0px), 12px) - 12px); }
+  .ui-dialog:not([open]),
+  .ui-dialog--drawer:not([open]) { transform: translateY(40px); }
+  @starting-style {
+    .ui-dialog[open],
+    .ui-dialog--drawer[open] { opacity: 0; transform: translateY(40px); }
+  }
+  .ui-dialog-head { padding: 16px 10px 10px 18px; }
+  .ui-dialog--drawer .ui-dialog-head { padding-top: 16px; }
+  .ui-dialog-title { font-size: 19px; }
+  .ui-dialog-body { padding: 4px 18px 18px; }
+  .ui-dialog-body:last-child { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .ui-dialog-foot {
+    flex-wrap: wrap;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  /* The footer's buttons share the row, so each is a wide target. */
+  .ui-dialog-foot > .btn { flex: 1 1 0; min-width: fit-content; }
+  .ui-dialog-foot > .ui-foot-start { flex-basis: 100%; margin-right: 0; }
+}
 
 /* confirm() / prompt() bodies */
 .ui-dialog-form { display: grid; gap: 14px; }
@@ -235,6 +272,46 @@
 .ui-date { font-variant-numeric: tabular-nums; }
 .ui-numwrap { display: inline-grid; vertical-align: middle; }
 .ui-inline-err { display: block; font-size: 11.5px; color: var(--down); margin-top: 4px; }
+
+/* ---------- A wide table ----------
+   Wrap a table that can outgrow its card: it scrolls sideways inside the card instead of widening the
+   page, and (where the browser can tie an animation to the scroll) its right edge fades while more of it
+   is off to the right. .ui-pin1 keeps the first column — the row's name — in view on a narrow card
+   while the figures scroll under it. */
+@property --ui-fade-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+.ui-tablewrap {
+  position: relative; /* a visually hidden label (.ui-sr, absolute) stays inside the scroller, not past the page's edge */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+@supports (animation-timeline: scroll()) {
+  .ui-tablewrap {
+    mask-image: linear-gradient(to left, transparent, #000 var(--ui-fade-r));
+    animation: ui-tablewrap-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+@keyframes ui-tablewrap-fade {
+  0%, 88% { --ui-fade-r: 36px; }
+  100% { --ui-fade-r: 0px; }
+}
+@container card (width < 600px) {
+  /* A pinned table scrolls rather than squeezing its columns into tall ones: each row stays one line. */
+  .ui-pin1 > table { width: max-content; min-width: 100%; }
+  .ui-pin1 > table :is(th, td):first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--card);
+    box-shadow: 1px 0 0 var(--line);
+  }
+  /* Row washes are translucent: layered over the card so nothing scrolled beneath shows through. */
+  .ui-pin1 > table .selrow > td:first-child { background: linear-gradient(var(--gold-dim), var(--gold-dim)), var(--card); }
+}
 
 /* ---------- Segmented (mockup .pills: card-hi active, never gold) ---------- */
 .ui-seg {
@@ -402,6 +479,16 @@
   transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 .ui-toast.leaving { opacity: 0; transform: translateY(4px); }
+/* Phones: across the bottom, above the tab bar. */
+@media (width < 720px) {
+  .ui-toasts {
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+  }
+  body:has(.tabbar) .ui-toasts { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+}
 .ui-toast--error { border-color: rgba(229, 96, 92, 0.5); }
 .ui-toast-icon {
   flex: none;
@@ -589,3 +676,55 @@ div.ui-empty--ghost { cursor: default; }
 .ui-cmdk-hint:hover { border-color: var(--line-strong); color: var(--ink-2); }
 .ui-cmdk-hint .ui-kbd { color: var(--ink-3); background: none; border-color: var(--line); }
 .ui-cmdk-hint:hover .ui-kbd { color: var(--ink-2); border-color: var(--line-strong); }
+
+/* ---------- a phone's topbar: search and the session chip fold to icons ----------
+   Their words stay in the accessibility tree (as .ui-sr does), so each keeps its name. */
+@media (width < 720px) {
+  .ui-cmdk-hint,
+  .ui-sync {
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-height: 0;
+    padding: 0;
+    border-radius: 50%;
+  }
+  .ui-cmdk-hint { border-color: transparent; color: var(--ink-2); }
+  .ui-cmdk-hint > svg { width: 19px; height: 19px; }
+  .ui-cmdk-hint .ui-kbd { display: none; }
+  .ui-sync { width: 32px; height: 32px; margin: 0 4px; }
+  .ui-sync-dot { width: 9px; height: 9px; }
+  :is(.ui-cmdk-word, .ui-sync-label) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* ---------- touch ----------
+   A finger is not a cursor: controls grow to a comfortable target, and every text box, select and
+   textarea sets 16px type — below that, iOS zooms the page in on focus and leaves it zoomed. */
+@media (pointer: coarse) {
+  :root {
+    --control-h: 40px;
+    --control-h-mini: 32px;
+  }
+  .btn { min-height: var(--control-h); }
+  .btn.mini { min-height: var(--control-h-mini); }
+  a.btn { display: inline-flex; align-items: center; justify-content: center; }
+  .ui-iconbtn { width: 36px; height: 36px; }
+  .ui-seg button { min-height: 30px; }
+  .ui-seg--md button,
+  .ui-field > .ui-seg button { min-height: 0; }
+  .chipbtn { min-height: 32px; }
+  .ui-menu-item { min-height: 40px; }
+  .ui-tab { padding-top: 10px; padding-bottom: 12px; }
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='color']),
+  select,
+  textarea { font-size: 16px !important; }
+  input:is([type='checkbox'], [type='radio']) { width: 18px !important; height: 18px !important; }
+}

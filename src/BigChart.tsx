@@ -7,6 +7,7 @@ import { Legend } from './chart/Legend'
 import { blendMa, maSpanMs, timeWeightedMa } from './chart/maModel'
 import { MARK_VAR, SLOT_VAR } from './chart/palette'
 import { DAY_MS, decimateM4, fmtDay, logTicks, nearestIndex, niceTicks, parseT, timeTicks } from './chart/scale'
+import { hoverEnd } from './chart/useBarNav'
 import { useChartSize } from './chart/useChartSize'
 import { Segmented } from './ui/Segmented'
 import './chart/chart.css'
@@ -337,8 +338,10 @@ export default function BigChart({ data, trades = [] }: { data: ChartData; trade
             width={W}
             height={H}
             aria-hidden="true"
+            className="ch-scrub"
             onPointerMove={onMove}
-            onPointerLeave={() => setHoverX(null)}
+            onPointerDown={onMove} // a tap puts the crosshair where the finger is; a sideways drag scrubs (chart.css)
+            {...hoverEnd(() => setHoverX(null))}
           >
             <defs>
               <clipPath id={clipId}>

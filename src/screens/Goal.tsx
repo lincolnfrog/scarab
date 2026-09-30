@@ -336,22 +336,20 @@ export default function Goal() {
       {/* ---------- fund ---------- */}
       <div className="card c8">
         <h2>Down payment fund</h2>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
+        <div className="scr-fundhead">
           <div className="heronum" style={{ fontSize: 36 }}>
             <CountUp value={fundTotal} format={formatDollars} />
           </div>
-          <span className="muted">of {formatDollars(target)}</span>
+          <span className="muted nowrap">of {formatDollars(target)}</span>
           {eta && (
-            <span className="sub2" style={{ marginLeft: 'auto' }}>
+            <span className="sub2">
               on pace for <b className="inkstrong">{fmtMonth(eta, true)}</b> at {fmtShort(derived.monthlyPlanCents)}/mo
             </span>
           )}
           {!eta && remaining > 0 && derived.monthlyPlanCents > 0 && (
-            <span className="sub2" style={{ marginLeft: 'auto' }}>
-              more than a century away at {fmtShort(derived.monthlyPlanCents)}/mo
-            </span>
+            <span className="sub2">more than a century away at {fmtShort(derived.monthlyPlanCents)}/mo</span>
           )}
-          {remaining === 0 && <span className="tag" style={{ marginLeft: 'auto' }}>Funded 🎉</span>}
+          {remaining === 0 && <span className="tag">Funded 🎉</span>}
         </div>
         <div
           className="pbar"
@@ -427,7 +425,8 @@ export default function Goal() {
           <div className="right muted">from the loan officer's term sheets · click a row to project payments below</div>
         </div>
         {loans.length > 0 && (
-          <table>
+          <div className="ui-tablewrap">
+          <table className="scr-loans">
             <thead>
               <tr>
                 <th /><th>Option</th><th className="r">Rate</th><th className="r">Term</th>
@@ -479,6 +478,7 @@ export default function Goal() {
               })}
             </tbody>
           </table>
+          </div>
         )}
         <form
           className="scr-fields"
@@ -555,6 +555,7 @@ export default function Goal() {
               P&amp;I + {pct(goal.taxPctMicro, 1)} property tax + {formatCents(goal.insMonthlyCents)}/mo insurance · {pct(goal.downPctMicro, 1)} down
             </div>
           </div>
+          <div className="ui-tablewrap ui-pin1">
           <table>
             <thead>
               <tr>
@@ -586,6 +587,7 @@ export default function Goal() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

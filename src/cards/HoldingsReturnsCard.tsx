@@ -6,7 +6,7 @@ import { get } from '../api'
 import { ChartTip, TipRow } from '../chart/ChartTip'
 import { fmtPctMicro, shortDay } from '../chart/format'
 import { MARK_VAR, signColor } from '../chart/palette'
-import { useBarNav } from '../chart/useBarNav'
+import { hoverEnd, useBarNav } from '../chart/useBarNav'
 import { useChartSize } from '../chart/useChartSize'
 import { growStyle, useGrow } from '../chart/useGrow'
 import { Button } from '../ui/Button'
@@ -163,7 +163,7 @@ function ReturnsChart({ data, positions, scopeLabel }: { data: ScopedReturns; po
         aria-roledescription="bar chart"
         aria-label={`Return by holding${scopeLabel ? `, ${scopeLabel}` : ''}, ${bars.length} holdings, best first`}
         {...nav.focusProps}
-        onPointerLeave={() => nav.setHover(null)}
+        {...hoverEnd(() => nav.setHover(null))}
       >
         {bars.map((b, i) => {
           const m = b.priced ? (b.unrealized_micro ?? 0) : 0
