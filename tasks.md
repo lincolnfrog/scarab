@@ -11,8 +11,10 @@ Ordering rationale: tax layer first (largest concrete dollar value, builds on
 the lot engine — our strongest asset), digest second, decision engine third
 (biggest win, most design-heavy). All three shipped, and so did the
 2026-09-23 improvement pass (zero knowledge for two, brokerage, analytics, UI
-shell, charts — see its section below); what's left is follow-ups, the
-vault-only milestone, and the backlog at the end.
+shell, charts — see its section below). Next is the **copilot layer** (§4,
+planned 2026-09-30): findings that show their work, contribution pace, a
+Future that knows about taxes and account types, and target allocation.
+Around it: follow-ups, the vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
 
@@ -177,6 +179,183 @@ Follow-ups (not blocking):
 - [ ] Bond/cash sleeve in historical mode (the record is 100% US stocks,
       re-centred; a blended record would let σ come from the mix rather than
       the knob).
+
+## 4 — Copilot layer (planned 2026-09-30)
+
+Framing from the 2026-09-30 review: the instrument panel is done and the tax
+layer already beats most consumer tools; what's missing is the layer that
+answers "what should we do" — the copilot the 2026-08-27 review asked for.
+Goal: a household relies less on an advisor and a tax professional, without
+Scarab ever giving advice. Every item below is derived at read time from the
+ledger plus vintage-stamped constant tables, lives in `engine/` (isomorphic,
+parity-tested), and shows its work.
+
+Ordering rationale: findings first (cheapest — most of the facts already
+exist), contribution pace second (one constants table + the paystub cadence),
+Future v3 third (the biggest modeling gap: `engine/simulate.ts` has no tax and
+one liquid bucket, so a 401(k) dollar counts like a Roth dollar), then
+allocation (needs the asset-class item cut from the September plan).
+
+**Constraint before any of it**: the real vault has existed since schema v21
+(2026-09-25). Every migration here must keep v21 readable — freeze the fixture
+and lower `SNAPSHOT_COMPAT.minReadable` (`engine/fixtures/README.md`) with the
+first item that adds a table, and ship a tier-C upgrade for anything that
+changes shape.
+
+Design stance (decided): the layer is deterministic and cited. If a model is
+ever added it explains Scarab's numbers on the client and never produces
+them — a zero-knowledge server can't see the data, and an auditable rule is
+the differentiator.
+
+### 4a — Checkup: findings, not advice
+
+A derived, prioritized list — the digest's shape, sorted by dollar impact —
+on its own screen (`src/screens/Checkup.tsx`, nav + ⌘K entry) with the top
+three echoed on the Dashboard. Nothing stored except a per-person "seen"
+mark like the digest's. `engine/checkup.ts`: `getCheckup(db, today)` returns
+`Finding[]`, each `{ id, kind, impactCents, rule, inputs, math, leavesOut,
+action }`.
+
+- [ ] **The `Finding` primitive** (`src/ui/Finding.tsx`): one component that
+      renders the five parts every finding must carry — the rule with its
+      citation and vintage; your inputs; the arithmetic; what it leaves out;
+      and the fixed line "an estimate, not advice — verify before acting".
+      Absorbs the scattered Note/Warn copy in Taxes over time.
+- [ ] **Assumptions page** (Data & Vault card, or `#/assumptions`): every
+      constant the engine uses with its vintage — brackets, deductions,
+      thresholds, contribution limits, safe-harbor rules, RMD ages. The trust
+      story and the annual-update checklist in one place.
+- [ ] **Concentration.** Employer stock (stock_plan accounts + the same symbol
+      anywhere) as a share of liquid and of total net worth, flagged alongside
+      the paycheck that depends on the same company (pay_sources →
+      invest_account_id). Threshold is a setting; default 10%.
+- [ ] **Cash runway.** Months of spend covered by cash (checking + savings +
+      the brokerage cash anchors) against the trailing-12-month spend from the
+      ledger, recurring bills included. Under 3 months → finding; over 12 →
+      the opposite finding (idle cash).
+- [ ] **Bracket headroom.** Room left in the current federal ordinary bracket
+      and in the 0%/15% LT bands, from `marginalRates` in `engine/tax.ts` —
+      the number every conversion, gain-realization and vest-timing decision
+      needs. Brings back the "tax bracket bar" cut on 2026-09-23.
+- [ ] **Itemize vs standard, from the ledger.** Mortgage interest from the
+      liabilities' amortization, property tax and charitable from their
+      categories, state income tax from the estimate, SALT-capped per the
+      bundled vintage. Today "Itemized total" is a typed field; the derived
+      figure becomes its default, the typed one an override.
+- [ ] **Give appreciated shares, not cash.** When charitable spend exists in
+      the ledger, the long-term lot in a taxable account with the largest
+      unrealized gain per dollar, and the tax the swap saves.
+- [ ] **Gain harvesting.** The mirror of loss harvesting: long-term gain lots
+      that fit inside this year's remaining 0% LT band (`computeHarvest`
+      already has the lots and the marginal rates).
+- [ ] **Existing findings join the list**: loss harvesting, safe-harbor
+      shortfall, the additional-Medicare gap, allocation drift, recurring
+      price creep, the mortgage-rate trigger. Each keeps its home card;
+      Checkup deep-links to it.
+- [ ] **Tax calendar.** Dated items derived from state: quarterly due dates
+      (already in `estimatedSchedule`), contribution deadlines (Dec 31 for
+      payroll, Apr 15 for IRA/HSA), the annual gift exclusion when a
+      gift-category transaction exceeds it.
+- [ ] **Tests**: each finding has a fixture that fires and one that doesn't;
+      impact ordering; sql.js parity; snapshot round-trip of the seen mark.
+
+### 4b — Contribution pace & limits
+
+- [ ] **Limits table** next to the brackets in `engine/tax.ts`: 401(k)/403(b)
+      elective deferral + catch-up (50+, and the 60–63 tier), IRA + catch-up,
+      HSA self/family + 55+ catch-up, the Roth IRA MAGI phase-out, the
+      combined §415(c) limit. One vintage string; the `Finding` prints it.
+- [ ] **Pace from paystubs.** `pay_sources` already carries the per-check
+      401(k) and the cadence: project to Dec 31 and report the shortfall — or
+      the month the cap is hit and the match that stops (an optional
+      employer-match formula per pay source). HSA via the §125 line only if
+      the stub splits it out; otherwise a setting.
+- [ ] **Backdoor Roth flag**: projected MAGI (from `computeTaxYear`) over the
+      phase-out → a finding that names the mechanics and the pro-rata rule
+      (needs the pre-tax IRA balance: the `ira` subtype's balances).
+- [ ] **Birth year per person** — a setting shared with 4c (age axis, RMD
+      age, catch-up eligibility). Household data; rides the snapshot.
+
+### 4c — Future v3: taxes, buckets, age
+
+Today `SimParams.liquidCents` is one bucket and no tax is modeled. Split it,
+tax it, and put age on the axis.
+
+- [ ] **Three buckets** resolved from account subtypes at read time: taxable
+      (with its cost basis from the lots; cash rides here), traditional
+      (401k/403b/ira), Roth (roth_ira; HSA counted as Roth by default since
+      medical spend in retirement usually exceeds it — a setting flips it to
+      traditional). Balance-tracked accounts land by subtype.
+- [ ] **Tax the paths.** Withdrawals from traditional are ordinary income;
+      taxable sales realize gain pro rata to the bucket's basis fraction; Roth
+      is free. Run the household through `computeTax` per sim year. The sim
+      is in real dollars and the brackets are nominal: keep the sim real and
+      hold the tables constant (they're indexed), never deflate the paths.
+      Filing status and state from the tax settings.
+- [ ] **Withdrawal order** as a scenario knob: taxable → traditional → Roth
+      (default), pro rata, or "fill the bracket" (draw traditional up to the
+      top of a chosen bracket, then taxable, then Roth).
+- [ ] **Roth conversions** as a scenario event: convert $X/yr from year A to
+      year B, or "fill to the top of the N% bracket" — the gap-years play.
+      Reported as the delta in lifetime tax and in median end wealth.
+- [ ] **RMDs** from the traditional bucket at the age the law sets by birth
+      year (73; 75 for those born 1960 or later), whether or not spending
+      needs them.
+- [ ] **Social Security** as an income event per person: claiming age and the
+      benefit at full retirement age (typed from the SSA statement), adjusted
+      for early/late claiming; taxable share per the provisional-income rule.
+      Compare 62 / 67 / 70 as scenarios.
+- [ ] **Age axis + birth year** (closes the Future v2 follow-up above);
+      crossing *age* alongside crossing year.
+- [ ] **Advisor-fee counterfactual**: an AUM-drag knob (default 1%) so the
+      cost of the alternative is a number on the side-by-side table.
+- [ ] **Tests**: bucket resolution from subtypes; tax-on-path monotonicity
+      (more traditional → more lifetime tax at equal totals); conversions
+      reduce later RMDs; determinism; parity; the existing 17 pass unchanged
+      when the buckets collapse to one.
+
+### 4d — Target allocation & tax-aware rebalancing
+
+- [ ] **Asset classes** (pulled back from the cut list): a class per asset —
+      US stock, international, bonds, cash, real estate, crypto, other — set
+      on the asset, guessed from the basket's `etf` flag and name where
+      possible, custom groups on top. Migration adds `assets.asset_class`.
+- [ ] **Target** per class (settings blob, household data) and drift against
+      it on Invest; the digest's ≥3pp drift finding reads the target instead
+      of last month.
+- [ ] **Rebalance plan**: to close the drift, spend new contributions first
+      (from the paystub pace), then trade inside sheltered accounts, then
+      taxable with specific-lot picks that minimize realized gain (reuse
+      `previewTrade`), showing the tax of the taxable leg. Plus the
+      asset-location finding — bonds in traditional, high growth in Roth,
+      index equity in taxable — when the household holds those classes.
+
+### 4e — Two-year tax view
+
+- [ ] `computeTaxYear` for *next* year on the same settings, with this year's
+      carryforwards (capital loss, if any) flowing in, so "realize now or in
+      January", "defer the bonus" and "convert this year or next" are priced
+      side by side on Taxes.
+
+### Gap list (after 4a–4e)
+
+- [ ] **Liabilities beyond mortgages**: cards, student and auto loans
+      (`liabilities.property_id` is already nullable; needs a kind, a minimum
+      payment and a home off Real estate), then payoff-vs-invest at the
+      after-tax return.
+- [ ] **Equity comp beyond RSUs**: ESPP lots with the discount and qualifying
+      vs disqualifying dispositions; ISO exercises with an AMT estimate and
+      the disqualifying-sale escape; NSOs. Only if the household holds them.
+- [ ] **Coverage & continuity**: life and disability need from income
+      replacement (pay_sources and the ledger's spend), an umbrella threshold
+      from net worth, a beneficiary checklist per account — pairs with the
+      continuity export in the backlog below.
+- [ ] **Fees**: expense ratio per fund if the basket can carry it (Yahoo's
+      fund profile publishes one; verify from the deployment's IP), the
+      weighted portfolio ratio, the drag as a Future event.
+- [ ] **Gifting & 529**: annual-exclusion tracking from a gift category; a
+      `529` subtype (today a 529 files under `other`) with its tax treatment
+      (state deduction where bundled).
 
 ## Zero-knowledge front door & price basket
 

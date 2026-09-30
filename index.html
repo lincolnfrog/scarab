@@ -7,6 +7,12 @@
     <meta name="robots" content="noindex" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0a0d12" />
+    <!-- Installable (Android: "Add to Home screen" / "Install app" opens in its own window). The manifest and icons
+         are in public/ (icons drawn from src/ui/ScarabMark.tsx). use-credentials: behind IAP an uncredentialed
+         manifest request is bounced to the Google sign-in page, and Chrome would see no manifest at all. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Scarab" />
     <!-- The favicon and the splash below are copies of src/ui/ScarabMark.tsx. The favicon's cuts
          are heavier so the beetle survives 16px, and its gold darkens on a light tab strip. -->
     <link
