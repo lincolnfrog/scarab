@@ -21,7 +21,7 @@ import { withViewTransition } from './ui/motion'
  * a view transition, so the screen crossfades.
  */
 
-export type ScreenId = 'dash' | 'invest' | 're' | 'cash' | 'goal' | 'tax' | 'future' | 'compare' | 'vault'
+export type ScreenId = 'dash' | 'checkup' | 'invest' | 're' | 'cash' | 'goal' | 'tax' | 'future' | 'compare' | 'vault'
 
 /**
  * Every screen, in nav order, with the name the nav, the page heading and the route announcement use —
@@ -29,6 +29,7 @@ export type ScreenId = 'dash' | 'invest' | 're' | 'cash' | 'goal' | 'tax' | 'fut
  */
 export const SCREENS: readonly { id: ScreenId; label: string; short: string }[] = [
   { id: 'dash', label: 'Dashboard', short: 'Dashboard' },
+  { id: 'checkup', label: 'Checkup', short: 'Checkup' },
   { id: 'invest', label: 'Investments', short: 'Investments' },
   { id: 're', label: 'Real estate', short: 'Real estate' },
   { id: 'cash', label: 'Cash & budget', short: 'Cash' },

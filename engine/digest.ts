@@ -70,6 +70,28 @@ function setMeta(db: DbLike, key: string, value: string) {
 
 const ASSET_CLASSES = ['cash', 'brokerage', 'retirement', 'crypto', 'property'] as const
 
+/** A class whose share of assets moved this much (micro: 3 percentage points) counts as drift. */
+export const DRIFT_MICRO = 30_000
+
+/**
+ * The asset classes whose share of everything owned moved by DRIFT_MICRO or
+ * more between two net-worth points (debts left out: a share of assets).
+ * Shared by the digest and the Checkup.
+ */
+export function allocationShift(base: NetWorthPoint, current: NetWorthPoint): DriftRow[] {
+  const tot = (p: NetWorthPoint) => ASSET_CLASSES.reduce((s, k) => s + p[k], 0)
+  const ct = tot(current)
+  const bt = tot(base)
+  const out: DriftRow[] = []
+  if (ct > 0 && bt > 0)
+    for (const k of ASSET_CLASSES) {
+      const nowMicro = Math.round((current[k] * 1_000_000) / ct)
+      const thenMicro = Math.round((base[k] * 1_000_000) / bt)
+      if (Math.abs(nowMicro - thenMicro) >= DRIFT_MICRO) out.push({ name: k, nowMicro, thenMicro, deltaMicro: nowMicro - thenMicro })
+    }
+  return out
+}
+
 export function getDigest(db: DbLike, email: string, today: string): Digest {
   const since = meta(db, seenKey(email)) ?? new Date(Date.parse(today) - 7 * DAY).toISOString().slice(0, 19).replace('T', ' ')
   const sinceDay = since.slice(0, 10)
@@ -123,18 +145,7 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
     const current = comparableSeries[comparableSeries.length - 1]!
     let base: NetWorthPoint | undefined
     for (const p of comparableSeries) if (p.month <= netWorth.baselineMonth) base = p
-    if (base) {
-      const tot = (p: NetWorthPoint) => ASSET_CLASSES.reduce((s, k) => s + p[k], 0)
-      const ct = tot(current)
-      const bt = tot(base)
-      if (ct > 0 && bt > 0)
-        for (const k of ASSET_CLASSES) {
-          const nowMicro = Math.round((current[k] * 1_000_000) / ct)
-          const thenMicro = Math.round((base[k] * 1_000_000) / bt)
-          if (Math.abs(nowMicro - thenMicro) >= 30_000)
-            allocationDrift.push({ name: k, nowMicro, thenMicro, deltaMicro: nowMicro - thenMicro })
-        }
-    }
+    if (base) allocationDrift.push(...allocationShift(base, current))
   }
 
   // --- budget overruns this month ----------------------------------------

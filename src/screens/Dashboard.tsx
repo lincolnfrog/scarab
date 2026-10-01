@@ -3,6 +3,7 @@ import { formatDollars } from '../../shared/money'
 import type { GoalDerived } from '../../shared/types'
 import { get } from '../api'
 import ActivityCard, { type ActivityRow } from '../cards/ActivityCard'
+import CheckupCard from '../cards/CheckupCard'
 import DreamHomeTile from '../cards/DreamHomeTile'
 import { tileGroups, tileSpan, type NetWorthPoint } from '../cards/cardModel'
 import StatTile, { ChangeText } from '../cards/StatTile'
@@ -197,6 +198,7 @@ export default function Dashboard() {
       {header}
       <div className="grid12">
         <DigestCard />
+        <CheckupCard />
         <div className="card c8">
           <h2>Household net worth</h2>
           {series.length >= 2 ? (

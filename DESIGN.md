@@ -9,10 +9,16 @@ privacy architecture and its honest limits), `README.md` (quickstart),
 
 ## 1. Product
 
-Eight screens plus **Data & Vault**, in nav order (`src/router.ts` SCREENS):
+Nine screens plus **Data & Vault**, in nav order (`src/router.ts` SCREENS):
 **Dashboard** (net-worth hero with a Total/Breakdown chart, grouped stat
 tiles with 12-month sparklines, allocation donut, dream-home tile, activity,
-the "since you were last here" digest), **Investments** (account strip and
+the "since you were last here" digest, the Checkup's top three),
+**Checkup** (derived findings — concentration, cash runway, itemizing,
+appreciated-share gifts, gain and loss harvesting, safe harbor, the Medicare
+surtax, drift, price creep, the mortgage-rate trigger — sorted by dollar
+impact, each opening into its rule, inputs, arithmetic and what it leaves
+out; the bracket headroom bar; a tax calendar; and the Assumptions page:
+every constant with its source and vintage), **Investments** (account strip and
 drawer, holdings per account, a record-trade sheet that previews gain, tax
 and wash sales, the activity ledger, starting positions, balance check-in,
 owner filter, portfolio value vs. cost, return by holding, price charts),
@@ -90,7 +96,7 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
   local/      table.ts (matching: method + exact segment count, first match
             wins; DirtyPolicy), routes.ts (NETWORK_ONLY; loads the lists lazily
             so the engine stays out of the household bundle), routes-core.ts
-            (cash, budget, property, goal, tax, digest, scenarios,
+            (cash, budget, property, goal, tax, digest, checkup, scenarios,
             export/import, /me), routes-invest.ts (accounts, trades, portfolio,
             grants, balances), routes-analytics.ts (price refresh from the
             basket, charts, series, returns; the tab's in-memory copy of the
@@ -209,9 +215,10 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             PortfolioValueCard, HoldingsReturnsCard, PriceChartCard,
             RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
             CategorySpendCard; cardModel.ts.
-  tax/        Taxes cards (HarvestCard, RealizedCard) and their copy.
+  tax/        Taxes cards (HarvestCard, RealizedCard), BracketBar, and their copy.
   viz.tsx BigChart.tsx  Donut, GroupedBars, HBars, Bullets; the daily price
             chart (log scale, 50D/200D/200W, buys and sells marked).
+  ui/Finding.tsx  One Checkup finding: the five parts every finding carries.
   FrontDoor.tsx ConflictSheet.tsx RecoveryCode.tsx DigestCard.tsx
   RecurringCard.tsx passkey.ts saveQueue.ts
 engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
@@ -251,6 +258,13 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                harvest list, trade preview, realized report; paychecks.ts
                projects per-person payroll.
   digest.ts recurring.ts  The digest and recurring-transaction detection.
+  checkup.ts   The Checkup: findings (Finding, shared/checkup-api.ts) from
+               the ledger and the tax year, bracket headroom, the tax
+               calendar, a per-reader seen mark. checkup-settings.ts holds
+               its threshold and category roles (giving, property tax, gifts);
+               itemize.ts derives the itemized deduction (Taxes uses it when
+               none is typed); assumptions.ts lists every constant with its
+               vintage, read from the tables themselves.
   simulate.ts  Seeded Monte Carlo (mulberry32 + Box-Muller): lognormal or
                historical block-bootstrap draws, dated events, crossing year,
                price-a-decision.
@@ -285,6 +299,7 @@ server/     Node-only shell.
               updated_by, history and its pruning, purge on re-key, owner-only
               DELETE), members and invitations, body caps, export/import.
   api5–7.ts   Tax, digest/recurring, scenarios.
+  api11.ts    The Checkup (findings, seen mark, settings) and the assumptions.
   api8.ts     /mode (the front door, and a session's poll) and the price
               basket (GET, status, throttled rebuild).
   api9.ts     Brokerage: account detail, owners, assets, check-in, balances,
@@ -357,7 +372,7 @@ number.
 
 1. `app_meta` — also hosts one-off repair flags, per-symbol fetch flags
    (`backfilled:v2:`, `backfill_failed:`, `daily:v2:`), hand-entered price
-   provenance (`price:manual:<SYM>`), digest marks, Compare's saved views
+   provenance (`price:manual:<SYM>`), digest and Checkup seen marks, Compare's saved views
    (`ui:chart-views`) and, on the server only, the `basket:*` keys.
 2. Cash: accounts (opening_cents anchors flows to reality), categories,
    imports, transactions (dedupe_hash unique per account), rules, budgets.
@@ -375,8 +390,8 @@ number.
    names its grant in trades.grant_id.
 7. Household categories (Gardening/Alcohol/Pets/Taxes) + merchant rules;
    card-payment patterns file as Transfer.
-8. goal_settings (JSON blobs) + loan_options; brokerage ACH files as Transfer
-   (moving your own money is not income).
+8. goal_settings (JSON blobs: goal, rental, tax, checkup) + loan_options;
+   brokerage ACH files as Transfer (moving your own money is not income).
 9. prices_daily — daily closes for the price chart (Yahoo on a household
    server; in a tab, each day's basket quote accrues here) — and onchain_daily,
    which nothing ever wrote or read: it stays (append-only) but snapshots no

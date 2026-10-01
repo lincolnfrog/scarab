@@ -6,6 +6,7 @@ import type { DbLike } from './db'
 import { ApiError, bad } from './errors'
 import { ALL_TIME, holdingLedger, loadHoldings } from './holdings'
 import { firstVestAfter, sharesText, validateTrade, vestOn } from './invest'
+import { deriveItemized } from './itemize'
 import { computePosition, isLongTerm, longTermOn, positionValueCents, saleRealized } from './lots'
 import { ADDL_MEDICARE_RATE_MICRO, computePayroll, listPaySources, PAYROLL_VINTAGE, type Payroll } from './paychecks'
 
@@ -848,7 +849,7 @@ export function rsuStateWithholdMicro(settings: TaxSettings): number {
 }
 
 /** The year picture and the inputs it was computed from (a preview adds a sale to those). */
-function taxYear(db: DbLike, today: string) {
+export function taxYear(db: DbLike, today: string) {
   const settings = getTaxSettings(db)
   const year = today.slice(0, 4)
   const realized = realizedYtd(db, today)
@@ -857,10 +858,11 @@ function taxYear(db: DbLike, today: string) {
   const divYtd = dividendsYtd(db, year)
   const divQualified = Math.round((divYtd * settings.qualifiedDividendShareMicro) / 1_000_000)
   const divOrdinary = divYtd - divQualified
-  const deduction =
-    settings.deductionMode === 'itemized'
-      ? settings.itemizedCents
-      : FEDERAL_STD_DEDUCTION_2026[settings.filingStatus]
+  const standardDeduction = FEDERAL_STD_DEDUCTION_2026[settings.filingStatus]
+  // Itemizing with no figure typed uses the one the ledger supports (engine/itemize.ts), filled in below.
+  const deductionSource: 'standard' | 'typed' | 'derived' =
+    settings.deductionMode === 'standard' ? 'standard' : settings.itemizedCents > 0 ? 'typed' : 'derived'
+  const deduction = deductionSource === 'standard' ? standardDeduction : settings.itemizedCents
 
   // Stock comp by account (YTD + the rest of the year), for per-person
   // Medicare wages and for the supplemental withholding the employer takes.
@@ -904,11 +906,16 @@ function taxYear(db: DbLike, today: string) {
     ...(fromPaychecks ? { medicareWagesCents: payroll.ficaWagesCents } : {}),
     state: settings,
   }
-  const tax = computeTax(inputs)
-  const marginal = marginalRates(inputs)
-
+  let tax = computeTax(inputs)
+  // Total income doesn't move with the deduction, and neither does the state estimate (states use their own).
   const totalIncome =
     inputs.ordinaryCents - tax.capLossUsedCents + tax.netStCents + tax.netLtCents + divQualified
+  const itemized = deriveItemized(db, today, settings.filingStatus, tax.stateCents, totalIncome)
+  if (deductionSource === 'derived') {
+    inputs.deductionCents = itemized.totalCents
+    tax = computeTax(inputs)
+  }
+  const marginal = marginalRates(inputs)
 
   // Withholding credited against federal tax: income-tax withholding, the
   // 0.9% Medicare surtax employers took, and Social Security withheld past
@@ -961,8 +968,11 @@ function taxYear(db: DbLike, today: string) {
       /** Realized this year inside tax-advantaged accounts — not income. */
       realizedShelteredCents: realized.shelteredCents,
       totalIncomeCents: totalIncome,
-      deductionCents: deduction,
+      deductionCents: inputs.deductionCents,
+      deductionSource,
+      standardDeductionCents: standardDeduction,
     },
+    itemized,
     tax,
     marginal,
     effRateMicro: totalIncome > 0 ? Math.round((tax.totalCents * 1_000_000) / totalIncome) : 0,

@@ -33,6 +33,7 @@ import { ToastHost } from './ui/Toast'
 /** Each screen's nav icon (24×24 stroke paths). Labels and order live in router.ts SCREENS. */
 const ICONS: Record<ScreenId, string> = {
   dash: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+  checkup: 'M9 4H6a1 1 0 00-1 1v15a1 1 0 001 1h12a1 1 0 001-1V5a1 1 0 00-1-1h-3M9 3h6v3H9zM9 13l2 2 4-4',
   invest: 'M3 17l5-6 4 3 6-8M14 6h4v4',
   re: 'M3 11l9-7 9 7M5 10v10h14V10',
   cash: 'M7 10l-4 4 4 4M3 14h13M17 4l4 4-4 4M21 8H8',
@@ -65,6 +66,7 @@ const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01'
  */
 const SCREEN_CODE: Record<ScreenId, () => Promise<{ default: ComponentType }>> = {
   dash: () => import('./screens/Dashboard'),
+  checkup: () => import('./screens/Checkup'),
   invest: () => import('./screens/Invest'),
   re: () => import('./screens/RealEstate'),
   cash: () => import('./screens/Cash'),

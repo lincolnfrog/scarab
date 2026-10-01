@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { formatCents, formatDollars, formatQtyMicro } from '../../shared/money'
+import { formatCents, formatCentsPlain, formatDollars, formatQtyMicro } from '../../shared/money'
 import { del, get, post, put } from '../api'
 import { Link } from '../router'
 import HarvestCard from '../tax/HarvestCard'
@@ -137,7 +137,11 @@ type Tax = {
     realizedLtCents: number
     totalIncomeCents: number
     deductionCents: number
+    deductionSource: 'standard' | 'typed' | 'derived'
+    standardDeductionCents: number
   }
+  /** The itemized total the ledger supports (engine/itemize.ts): used when itemizing with no figure typed. */
+  itemized: { totalCents: number }
   tax: {
     netStCents: number
     netLtCents: number
@@ -396,9 +400,11 @@ export default function Taxes() {
   const settingsRef = useRef<HTMLDivElement>(null)
   const payRef = useRef<HTMLDivElement>(null)
   const earnersListId = useId()
-  // '#/tax/paychecks' and '#/tax/settings' scroll to these cards (the Dashboard and other screens link here).
+  // '#/tax/paychecks', '#/tax/settings', '#/tax/safe-harbor' and '#/tax/harvest' scroll to these cards (the Dashboard, the Checkup and other screens link here).
   const paychecksAnchor = useAnchor('paychecks')
   const settingsAnchor = useAnchor('settings')
+  const safeHarborAnchor = useAnchor('safe-harbor')
+  const harvestAnchor = useAnchor('harvest')
   const [opened, setOpened] = useState(0) // bumps on every "+ Paycheck", so a second click scrolls back to the editor
 
   /** The stored settings the form was last filled from: an unedited form follows the store, an edited one is kept. */
@@ -627,14 +633,25 @@ export default function Taxes() {
             <tr><td className="muted">Realized long-term</td><td className={`r num ${incomes.realizedLtCents < 0 ? 'neg' : ''}`}>{formatCents(incomes.realizedLtCents, { sign: incomes.realizedLtCents > 0 })}</td></tr>
             {t.capLossUsedCents > 0 && <tr><td className="muted">Capital loss vs ordinary</td><td className="r num">−{formatCents(t.capLossUsedCents)}</td></tr>}
             {t.capLossCarryCents > 0 && <tr><td className="muted">Loss carryforward</td><td className="r num">{formatCents(t.capLossCarryCents)}</td></tr>}
-            <tr><td className="muted">Deduction ({tax.settings.deductionMode})</td><td className="r num">−{formatCents(incomes.deductionCents)}</td></tr>
+            <tr>
+              <td className="muted">
+                {incomes.deductionSource === 'derived' ? (
+                  <Note tip="Mortgage interest, state and property tax (SALT-capped) and giving, from the ledger — the Checkup shows the work">
+                    Deduction (itemized, from the ledger)
+                  </Note>
+                ) : (
+                  <>Deduction ({tax.settings.deductionMode})</>
+                )}
+              </td>
+              <td className="r num">−{formatCents(incomes.deductionCents)}</td>
+            </tr>
             <tr><td className="strong">Taxable</td><td className="r num strong">{formatCents(t.taxableOrdinaryCents + t.taxableLtCents)}</td></tr>
           </tbody>
         </table>
       </div>
 
       {/* ---------- withholding & quarterlies ---------- */}
-      <div className="card c6">
+      <div className="card c6" ref={safeHarborAnchor}>
         <h2>Withholding gap &amp; safe harbor</h2>
         <table>
           <tbody>
@@ -671,7 +688,7 @@ export default function Taxes() {
       </div>
 
       {/* ---------- harvesting ---------- */}
-      <HarvestCard harvest={harvest} marginal={tax.marginal} />
+      <HarvestCard harvest={harvest} marginal={tax.marginal} anchor={harvestAnchor} />
       <RealizedCard year={tax.year} />
 
       {/* ---------- paychecks ---------- */}
@@ -890,8 +907,16 @@ export default function Taxes() {
                 </Select>
               </Field>
               {form.deductionMode === 'itemized' && (
-                <Field label="Itemized total">
-                  <MoneyInput value={form.itemizedCents} placeholder="0.00" onChange={(c) => setF({ itemizedCents: c })} />
+                <Field
+                  label="Itemized total"
+                  hint={
+                    <>
+                      blank = {formatDollars(tax.itemized.totalCents)} from the ledger (
+                      <Link className="scr-link" to={{ screen: 'checkup' }}>how</Link>); type a figure to override it
+                    </>
+                  }
+                >
+                  <MoneyInput value={form.itemizedCents} placeholder={formatCentsPlain(tax.itemized.totalCents)} onChange={(c) => setF({ itemizedCents: c })} />
                 </Field>
               )}
             </FieldGrid>

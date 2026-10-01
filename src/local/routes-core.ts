@@ -1,3 +1,6 @@
+import { getAssumptions } from '../../engine/assumptions'
+import { ackCheckup, getCheckup } from '../../engine/checkup'
+import { putCheckupSettings } from '../../engine/checkup-settings'
 import { ackDigest, getDigest, inheritDigestMark } from '../../engine/digest'
 import { createPaySource, deletePaySource, updatePaySource } from '../../engine/paychecks'
 import { getRecurring } from '../../engine/recurring'
@@ -17,10 +20,10 @@ import { CURRENT_VERSION, readabilityError } from '../../engine/upgrades'
 import { r, type LocalCtx, type LocalRoute } from './table'
 
 /**
- * Cash, budget, property, goal, taxes, digest, scenarios and whole-database
+ * Cash, budget, property, goal, taxes, digest, checkup, scenarios and whole-database
  * export/import — the in-tab mirror of server/api.ts, the property and net
- * worth half of api2.ts, api3.ts, api4.ts's export/import, api5–7 and
- * app.ts's /me. Every handler calls the same engine function its server
+ * worth half of api2.ts, api3.ts, api4.ts's export/import, api5–7, api11
+ * and app.ts's /me. Every handler calls the same engine function its server
  * route does, with the same arguments.
  */
 
@@ -110,6 +113,12 @@ export const CORE: LocalRoute[] = [
   }),
   r('POST', '/digest/ack', (c) => ackDigest(c.db, digestOwner(c))),
   r('GET', '/recurring', (c) => getRecurring(c.db, c.today)),
+
+  /* ---------- checkup and assumptions (api11.ts) ---------- */
+  r('GET', '/checkup', (c) => getCheckup(c.db, c.today, digestOwner(c))),
+  r('POST', '/checkup/ack', (c) => ackCheckup(c.db, c.today, digestOwner(c))),
+  r('PUT', '/checkup/settings', (c) => putCheckupSettings(c.db, c.body)),
+  r('GET', '/assumptions', (c) => getAssumptions(c.db)),
 
   /* ---------- scenarios (api7.ts) ---------- */
   r('GET', '/scenarios', (c) => listScenarios(c.db, c.today)),

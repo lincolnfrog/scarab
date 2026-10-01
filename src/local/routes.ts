@@ -4,7 +4,7 @@ import type { LocalRoute } from './table'
  * The only place the per-area route lists are joined. Each list lives in its
  * own file so parallel work never edits the same lines:
  *
- *   routes-core.ts       accounts, cash, budget, property, goal, tax, digest, scenarios, export/import
+ *   routes-core.ts       accounts, cash, budget, property, goal, tax, digest, checkup, scenarios, export/import
  *   routes-invest.ts     investment accounts, trades, portfolio, unvested grants
  *   routes-analytics.ts  prices, charts, series
  *

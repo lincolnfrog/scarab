@@ -1,0 +1,42 @@
+/* The bracket bar (src/tax/BracketBar.tsx). Bands are neutral; the income in them is a chart series
+   (s1 ordinary, s2 long-term), legended below. */
+.br { display: grid; gap: 8px; }
+.br-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 10px; }
+.br-label { font-size: 11.5px; color: var(--ink-3); }
+.br-track { display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--card-hi); }
+.br-band {
+  position: relative;
+  flex: none;
+  min-width: 0;
+  border-right: 1px solid var(--card);
+  background: var(--grid);
+}
+.br-band:last-child { border-right: 0; }
+.br-band:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.br-fill { position: absolute; top: 0; bottom: 0; left: 0; display: block; }
+.br-fill.s1 { background: var(--s1); }
+.br-fill.s2 { background: var(--s2); }
+.br-fill.under { background: rgba(255, 255, 255, 0.06); }
+.br-rate {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 26px;
+  color: var(--ink);
+  white-space: nowrap;
+  text-shadow: 0 0 3px var(--card);
+}
+.br-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-left: 86px; font-size: 12px; color: var(--ink-2); }
+.br-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.br-legend i { width: 9px; height: 9px; border-radius: 2.5px; display: inline-block; }
+.br-legend i.s1 { background: var(--s1); }
+.br-legend i.s2 { background: var(--s2); }
+.br-facts { list-style: none; display: grid; gap: 4px; margin-top: 6px; font-size: 12.5px; color: var(--ink-2); }
+
+@container card (width < 520px) {
+  .br-row { grid-template-columns: 1fr; gap: 4px; }
+  .br-legend { margin-left: 0; }
+}

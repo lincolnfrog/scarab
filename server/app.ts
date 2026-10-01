@@ -14,6 +14,7 @@ import { api7 } from './api7'
 import { api8, serverHasData } from './api8'
 import { api9 } from './api9'
 import { api10 } from './api10'
+import { api11 } from './api11'
 import { jsonBodies, onError } from './http'
 import { detectTransfers } from './import'
 import { runRepairs } from './repairs'
@@ -97,6 +98,7 @@ export function createApp(opts: ServerOptions): Hono<{ Variables: Variables }> {
   app.route('/api', api8)
   app.route('/api', api9)
   app.route('/api', api10)
+  app.route('/api', api11)
   // An /api path no route answered (unknown, or a known path with a method it
   // doesn't take) is an API miss, not a client route: JSON, never the SPA shell.
   app.all('/api/*', (c) => c.json({ error: `no such endpoint: ${c.req.method} ${c.req.path}` }, 404))

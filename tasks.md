@@ -12,8 +12,9 @@ the lot engine — our strongest asset), digest second, decision engine third
 (biggest win, most design-heavy). All three shipped, and so did the
 2026-09-23 improvement pass (zero knowledge for two, brokerage, analytics, UI
 shell, charts — see its section below). Next is the **copilot layer** (§4,
-planned 2026-09-30): findings that show their work, contribution pace, a
-Future that knows about taxes and account types, and target allocation.
+planned 2026-09-30): findings that show their work (4a, shipped 2026-10-01),
+contribution pace, a Future that knows about taxes and account types, and
+target allocation.
 Around it: follow-ups, the vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
@@ -209,55 +210,88 @@ the differentiator.
 
 ### 4a — Checkup: findings, not advice
 
+**Shipped 2026-10-01** (`engine/checkup.ts`, `engine/itemize.ts`,
+`engine/checkup-settings.ts`, `engine/assumptions.ts`, `server/api11.ts`,
+`src/screens/Checkup.tsx`, `src/ui/Finding.tsx`, `src/cards/CheckupCard.tsx`,
+`src/tax/BracketBar.tsx`). No migration: the seen mark is an app_meta key
+(`checkup:seen:<email>`) and the settings a goal_settings blob (`checkup`),
+both already in the snapshot.
+
 A derived, prioritized list — the digest's shape, sorted by dollar impact —
 on its own screen (`src/screens/Checkup.tsx`, nav + ⌘K entry) with the top
 three echoed on the Dashboard. Nothing stored except a per-person "seen"
-mark like the digest's. `engine/checkup.ts`: `getCheckup(db, today)` returns
-`Finding[]`, each `{ id, kind, impactCents, rule, inputs, math, leavesOut,
-action }`.
+mark like the digest's. `engine/checkup.ts`: `getCheckup(db, today, reader)`
+returns `{ findings: Finding[], headroom, calendar, settings, roles, seenAt }`,
+each finding `{ id, kind, tone, title, impactCents, impactLabel, rule, inputs,
+math, leavesOut, action, isNew }` (contract: `shared/checkup-api.ts`).
 
-- [ ] **The `Finding` primitive** (`src/ui/Finding.tsx`): one component that
+- [x] **The `Finding` primitive** (`src/ui/Finding.tsx`): one component that
       renders the five parts every finding must carry — the rule with its
       citation and vintage; your inputs; the arithmetic; what it leaves out;
-      and the fixed line "an estimate, not advice — verify before acting".
-      Absorbs the scattered Note/Warn copy in Taxes over time.
-- [ ] **Assumptions page** (Data & Vault card, or `#/assumptions`): every
-      constant the engine uses with its vintage — brackets, deductions,
-      thresholds, contribution limits, safe-harbor rules, RMD ages. The trust
-      story and the annual-update checklist in one place.
-- [ ] **Concentration.** Employer stock (stock_plan accounts + the same symbol
+      and the fixed line "an estimate, not advice — verify before acting"
+      (`NOT_ADVICE` in the shared contract). Absorbing the scattered Note/Warn
+      copy in Taxes is still to do (below).
+- [x] **Assumptions page**: a card on the Checkup (`#/checkup/assumptions`,
+      ⌘K) — brackets for the household's status, standard deductions, LT
+      bands, surtaxes, payroll, capital-loss and wash-sale rules, itemized
+      limits, safe-harbor rules, the gift exclusion, the household's state
+      table, and the Checkup's own thresholds — each with source and vintage,
+      read from the very tables the engine uses. Contribution limits and RMD
+      ages join with 4b/4c.
+- [x] **Concentration.** Employer stock (stock_plan accounts' assets, held
       anywhere) as a share of liquid and of total net worth, flagged alongside
-      the paycheck that depends on the same company (pay_sources →
-      invest_account_id). Threshold is a setting; default 10%.
-- [ ] **Cash runway.** Months of spend covered by cash (checking + savings +
-      the brokerage cash anchors) against the trailing-12-month spend from the
-      ledger, recurring bills included. Under 3 months → finding; over 12 →
-      the opposite finding (idle cash).
-- [ ] **Bracket headroom.** Room left in the current federal ordinary bracket
-      and in the 0%/15% LT bands, from `marginalRates` in `engine/tax.ts` —
-      the number every conversion, gain-realization and vest-timing decision
-      needs. Brings back the "tax bracket bar" cut on 2026-09-23.
-- [ ] **Itemize vs standard, from the ledger.** Mortgage interest from the
-      liabilities' amortization, property tax and charitable from their
-      categories, state income tax from the estimate, SALT-capped per the
-      bundled vintage. Today "Itemized total" is a typed field; the derived
-      figure becomes its default, the typed one an override.
-- [ ] **Give appreciated shares, not cash.** When charitable spend exists in
-      the ledger, the long-term lot in a taxable account with the largest
-      unrealized gain per dollar, and the tax the swap saves.
-- [ ] **Gain harvesting.** The mirror of loss harvesting: long-term gain lots
-      that fit inside this year's remaining 0% LT band (`computeHarvest`
-      already has the lots and the marginal rates).
-- [ ] **Existing findings join the list**: loss harvesting, safe-harbor
-      shortfall, the additional-Medicare gap, allocation drift, recurring
-      price creep, the mortgage-rate trigger. Each keeps its home card;
-      Checkup deep-links to it.
-- [ ] **Tax calendar.** Dated items derived from state: quarterly due dates
-      (already in `estimatedSchedule`), contribution deadlines (Dec 31 for
-      payroll, Apr 15 for IRA/HSA), the annual gift exclusion when a
-      gift-category transaction exceeds it.
-- [ ] **Tests**: each finding has a fixture that fires and one that doesn't;
-      impact ordering; sql.js parity; snapshot round-trip of the seen mark.
+      the paychecks linked to the same plan; unvested shares shown, not
+      counted. Threshold is a setting (default 10% of liquid); impact is the
+      value above it.
+- [x] **Cash runway.** Bank balances + brokerage cash anchors against the
+      trailing-12-month average spend (needs 3 months of history). Under 3
+      months → finding (impact: the shortfall); over 12 → idle cash (impact:
+      the excess), not counting accounts earmarked for the Dream Home fund.
+- [x] **Bracket headroom.** The bracket bar is back (Checkup card): ordinary
+      taxable income across the ordinary brackets, LT gains + qualified
+      dividends stacked over the 0/15/20 bands, room to the next edge.
+- [x] **Itemize vs standard, from the ledger.** `engine/itemize.ts`: mortgage
+      interest from each rated loan's recorded balances (month by month,
+      $750k debt limit), property tax and giving from category roles (guessed
+      by name, set on the Checkup), state income tax from the estimate,
+      SALT-capped per 2026 law ($40,400, phased down over $505k to $10k), the
+      0.5%-of-AGI charitable floor. Taxes now uses the derived total when
+      itemizing with nothing typed (`deductionSource: 'derived'`); a typed
+      figure overrides. Finding either way: itemizing beats standard, or a
+      typed total is under it.
+- [x] **Give appreciated shares, not cash.** Trailing-year giving vs the
+      long-term taxable lots with the most gain per dollar; priced as the
+      exact tax on that gain this year (NIIT included).
+- [x] **Gain harvesting.** LT gain lots filling the room left in the 0% band;
+      impact = 15% later − the tax now (state, NIIT). Silent when no wages are
+      entered (everything would look like 0% room).
+- [x] **Existing findings join the list**: loss harvesting (priced exactly,
+      wash-flagged lots left out), federal and state safe-harbor shortfall,
+      the additional-Medicare gap, allocation drift (unpriced until 4d gives
+      it a target), recurring price creep (annualized), the mortgage-rate
+      trigger (priced on the Dream Home loan). Each keeps its home card and
+      deep-links to it (`#/tax/harvest`, `#/tax/safe-harbor` are new anchors).
+- [x] **Tax calendar.** Upcoming estimated-payment installments with amounts
+      (federal + state), Dec 31 (payroll deferrals, trade date for the year),
+      Apr 15 (IRA/HSA contributions, the return), and a Form 709 date for any
+      gift-category transaction over the $19,000 annual exclusion.
+- [x] **Tests**: `engine/checkup.test.ts` (each finding fires and stays
+      quiet, impact ordering, per-reader seen mark, snapshot round-trip of the
+      mark, itemize math, assumptions) and `engine/parity-checkup.test.ts`.
+
+Follow-ups:
+
+- [ ] Fold Taxes' Note/Warn explanations into `Finding`-style "show the work"
+      over time (the safe-harbor and harvest cards first).
+- [ ] Mortgage interest holds balances flat between recorded entries; an
+      amortization from the payment (or the 1098 figure as an override) would
+      be exact. Property tax paid from escrow never reaches a category.
+- [ ] Not modeled in `computeTax`: the 2026 non-itemizer charitable deduction
+      ($1,000 / $2,000 MFJ) and the 2/37 cap on itemized deductions in the 37%
+      bracket — both named in the itemize finding's "leaves out".
+- [ ] Local mode keys the seen mark 'local' until the tab knows its identity
+      and, unlike the digest, doesn't inherit it after.
+- [ ] Checkup lives under More on the phone tab bar; revisit if it earns a tab.
 
 ### 4b — Contribution pace & limits
 

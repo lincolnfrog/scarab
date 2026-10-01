@@ -99,6 +99,7 @@ const LABEL = Object.fromEntries(SCREENS.map((s) => [s.id, s.label])) as Record<
 
 const SCREEN_WORDS: Record<ScreenId, string> = {
   dash: 'home overview net worth summary',
+  checkup: 'findings review advisor what should we do concentration runway itemize harvest deduction',
   invest: 'portfolio brokerage stocks holdings lots trades crypto retirement 401k',
   re: 'house home property mortgage equity valuation',
   cash: 'bank transactions spending budget checking savings categories',
@@ -164,6 +165,9 @@ export const COMMANDS: readonly Command[] = [
   section('goal', ['loans'], 'Loan options', 'mortgage rate points term'),
   section('goal', ['rental'], 'Rental scenario', 'rent out move 121 landlord'),
   section('future', ['compare'], 'Compare scenarios side by side', 'odds table deltas'),
+  section('checkup', ['assumptions'], 'Assumptions — every constant and its vintage', 'brackets limits thresholds rules sources trust'),
+  section('checkup', ['calendar'], 'Tax calendar', 'deadlines due dates quarterly estimated'),
+  section('tax', ['harvest'], 'Harvesting advisor', 'loss lots wash sale'),
 ]
 
 const GROUPS: readonly { kind: Command['kind']; title: string }[] = [
