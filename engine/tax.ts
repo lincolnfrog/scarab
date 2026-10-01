@@ -720,8 +720,10 @@ export type VestEvent = {
 
 /** The rest of this year's vests, from each unvested position's cadence
  *  ("N shares every M months, next on D"), valued at the latest price.
- *  Events on or before today are skipped — those belong to the ledger. */
-export function projectVests(db: DbLike, today: string): { events: VestEvent[]; cents: number; unpriced: number } {
+ *  Events on or before today are skipped — those belong to the ledger.
+ *  `through` reaches further (next year's view walks to its Dec 31, so the
+ *  shares this year's vests take are no longer there to vest again). */
+export function projectVests(db: DbLike, today: string, through = `${today.slice(0, 4)}-12-31`): { events: VestEvent[]; cents: number; unpriced: number } {
   const rows = db
     .prepare(
       `SELECT u.qty_micro, u.next_vest_on, u.vest_every_months, u.vest_qty_micro, a.symbol, ia.name AS account, ia.id AS account_id,
@@ -742,7 +744,7 @@ export function projectVests(db: DbLike, today: string): { events: VestEvent[]; 
     account_id: number
     price_cents: number | null
   }[]
-  const yearEnd = `${today.slice(0, 4)}-12-31`
+  const yearEnd = through
   const events: VestEvent[] = []
   let unpriced = 0
   for (const r of rows) {

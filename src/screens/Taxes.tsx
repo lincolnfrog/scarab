@@ -6,6 +6,7 @@ import ContributionsCard from '../tax/ContributionsCard'
 import HarvestCard from '../tax/HarvestCard'
 import { gapLine, scheduleNote } from '../tax/copy'
 import RealizedCard from '../tax/RealizedCard'
+import TwoYearCard from '../tax/TwoYearCard'
 import type { TaxResponse } from '../tax/types'
 import { Button } from '../ui/Button'
 import { useDeepAction } from '../ui/CommandPalette'
@@ -429,6 +430,7 @@ export default function Taxes() {
   const safeHarborAnchor = useAnchor('safe-harbor')
   const harvestAnchor = useAnchor('harvest')
   const contributionsAnchor = useAnchor('contributions')
+  const twoYearAnchor = useAnchor('two-year')
   const [loads, setLoads] = useState(0) // bumps on every load, so the contribution pace follows a saved paycheck
   const [opened, setOpened] = useState(0) // bumps on every "+ Paycheck", so a second click scrolls back to the editor
 
@@ -717,6 +719,7 @@ export default function Taxes() {
       {/* ---------- harvesting ---------- */}
       <HarvestCard harvest={harvest} marginal={tax.marginal} anchor={harvestAnchor} />
       <RealizedCard year={tax.year} />
+      <TwoYearCard anchor={twoYearAnchor} version={loads} />
 
       {/* ---------- paychecks ---------- */}
       <div className="card c12" ref={paychecksAnchor}>

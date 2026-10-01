@@ -215,7 +215,7 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             PortfolioValueCard, HoldingsReturnsCard, PriceChartCard,
             RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
             CategorySpendCard; cardModel.ts.
-  tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard), BracketBar, and their copy.
+  tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard, TwoYearCard), BracketBar, and their copy.
   viz.tsx BigChart.tsx  Donut, GroupedBars, HBars, Bullets; the daily price
             chart (log scale, 50D/200D/200W, buys and sells marked).
   ui/Finding.tsx  One Checkup finding: the five parts every finding carries.
@@ -278,6 +278,9 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
   simtax.ts    The year-tax function the sim calls, the Uniform Lifetime
                table, RMD ages, Social Security claiming and taxable share.
   buckets.ts   Account subtypes → the three buckets, with taxable basis.
+  twoyear.ts   This year and next: next year on the same settings with the
+               loss carryforward (by character), and a timing question —
+               the same amount now or in January — priced over both years.
   allocation.ts  Asset classes (set, or guessed from symbol and name), the
                allocation against a target, and the rebalance plan:
                contributions, then sheltered trades, then taxable lots by
@@ -313,7 +316,7 @@ server/     Node-only shell.
   api4.ts     The vault courier (blob, version + baseSha256 concurrency,
               updated_by, history and its pruning, purge on re-key, owner-only
               DELETE), members and invitations, body caps, export/import.
-  api5–7.ts   Tax (with contribution pace and people), digest/recurring, scenarios.
+  api5–7.ts   Tax (with contribution pace, people and the two-year view), digest/recurring, scenarios.
   api11.ts    The Checkup (findings, seen mark, settings) and the assumptions.
   api8.ts     /mode (the front door, and a session's poll) and the price
               basket (GET, status, throttled rebuild).

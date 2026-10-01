@@ -14,8 +14,9 @@ the lot engine — our strongest asset), digest second, decision engine third
 shell, charts — see its section below). Next is the **copilot layer** (§4,
 planned 2026-09-30): findings that show their work (4a) and contribution
 pace (4b), a Future that knows about taxes and account types (4c) and
-target allocation (4d), all shipped 2026-10-01; next the two-year tax view
-(4e).
+target allocation (4d) and the two-year tax view (4e) — the whole copilot
+plan — all shipped 2026-10-01. Next: the gap list after it, the follow-ups,
+the vault-only milestone and the backlog.
 Around it: follow-ups, the vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
@@ -423,10 +424,29 @@ Follow-ups:
 
 ### 4e — Two-year tax view
 
-- [ ] `computeTaxYear` for *next* year on the same settings, with this year's
-      carryforwards (capital loss, if any) flowing in, so "realize now or in
-      January", "defer the bonus" and "convert this year or next" are priced
-      side by side on Taxes.
+**Shipped 2026-10-01** (`engine/twoyear.ts`, `src/tax/TwoYearCard.tsx`,
+`#/tax/two-year`).
+
+- [x] Next year on the same settings: each paycheck for a full year (pre-tax
+      deferrals capped at next year's limit for the earner's age), the grants'
+      scheduled vests after this year's (`projectVests` now walks past Dec 31),
+      a year of dividends from the last twelve months, the same deduction, and
+      this year's capital-loss carryforward flowing in by character (§1212(b):
+      the $3,000 comes out of short-term first). This year's tables are held
+      for next year. "Now or in January?" prices the same amount — a long- or
+      short-term gain, a harvested loss, a bonus, a Roth conversion — in each
+      year, over both years' tax, carryforward included (POST /api/tax/timing,
+      read-like).
+
+Follow-ups:
+
+- [ ] This year's projection doesn't cap pre-tax deferrals at the limit (see
+      4b); next year's does, so two otherwise identical years can differ by
+      the tax on the excess.
+- [ ] Next year's indexed tables when the IRS publishes them (bundle 2027 and
+      let each year use its own).
+- [ ] A Checkup finding when a timing choice is worth more than a threshold
+      (e.g. a large loss lot whose harvest is worth far more this year).
 
 ### Gap list (after 4a–4e)
 

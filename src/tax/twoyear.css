@@ -1,0 +1,11 @@
+/* This year and next (src/tax/TwoYearCard.tsx). */
+.ty-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 28px; align-items: start; }
+.ty-table td { padding: 6px 8px; }
+.ty-timing h3 { margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.ty-result { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--plane); font-size: 13px; color: var(--ink-2); }
+.ty-verdict { margin-top: 4px; color: var(--ink); font-weight: 600; }
+.ty-basis { margin: 12px 0 0 16px; display: grid; gap: 3px; font-size: 12px; color: var(--ink-3); }
+
+@container card (width < 760px) {
+  .ty-grid { grid-template-columns: 1fr; }
+}

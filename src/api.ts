@@ -18,7 +18,7 @@ function answeredInTab(url: string): boolean {
  * step). POST /prices/refresh is 'never' there only because a quote can ride
  * along with the next save; on the server it rewrites prices, so it counts.
  */
-export const READ_LIKE_WRITES: ReadonlySet<string> = new Set(['/scenarios/compare', '/scenarios/price', '/simulate', '/trades/preview'])
+export const READ_LIKE_WRITES: ReadonlySet<string> = new Set(['/scenarios/compare', '/scenarios/price', '/simulate', '/trades/preview', '/tax/timing'])
 
 let serverWrites = 0
 
