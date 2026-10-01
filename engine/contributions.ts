@@ -53,6 +53,9 @@ export type SourcePace = {
   match: MatchPace | null
   /** Deferrals + match into this plan, against §415(c). */
   annualAdditionsCents: number
+  /** `projectedCents` split by the stub's pre-tax / Roth lines (Future's buckets read these). */
+  projectedPretaxCents: number
+  projectedRothCents: number
 }
 
 export type PersonPace = {
@@ -181,6 +184,8 @@ function sourcePace(s: PaySource, year: number, limit: number): SourcePace {
     checksAfterLimit: after,
     match,
     annualAdditionsCents: cum + (match?.projectedCents ?? 0),
+    projectedPretaxCents: perCheck > 0 ? Math.round((cum * s.retirementCents) / perCheck) : cum,
+    projectedRothCents: perCheck > 0 ? cum - Math.round((cum * s.retirementCents) / perCheck) : 0,
   }
 }
 

@@ -13,8 +13,8 @@ the lot engine — our strongest asset), digest second, decision engine third
 2026-09-23 improvement pass (zero knowledge for two, brokerage, analytics, UI
 shell, charts — see its section below). Next is the **copilot layer** (§4,
 planned 2026-09-30): findings that show their work (4a) and contribution
-pace (4b), both shipped 2026-10-01; next a Future that knows about taxes and
-account types (4c), then target allocation.
+pace (4b) and a Future that knows about taxes and account types (4c), all
+shipped 2026-10-01; next target allocation (4d).
 Around it: follow-ups, the vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
@@ -174,8 +174,8 @@ Follow-ups (not blocking):
       liquid side (events only touch liquid today).
 - [ ] "Price a decision" entry points on other screens (Dream Home, Real
       estate) posting to `/api/scenarios/price` with the amount pre-filled.
-- [ ] Monthly stepping (crossing *month*), and an age axis — needs a birth year
-      setting.
+- [ ] Monthly stepping (crossing *month*). (The age axis shipped with 4c,
+      on the birth years set on Taxes.)
 - [ ] Sliders for the mockup's "levers" card; the knobs are text inputs today.
 - [ ] Bond/cash sleeve in historical mode (the record is 100% US stocks,
       re-centred; a blended record would let σ come from the mix rather than
@@ -336,41 +336,56 @@ Follow-ups:
 
 ### 4c — Future v3: taxes, buckets, age
 
-Today `SimParams.liquidCents` is one bucket and no tax is modeled. Split it,
-tax it, and put age on the axis.
+**Shipped 2026-10-01** (`engine/simulate.ts` `simulateTaxed`, `engine/simtax.ts`,
+`engine/buckets.ts`, `engine/scenarios.ts`; Future's "Taxes & income" card).
+No migration: the new knobs live in the scenario's params JSON and old
+scenarios read with defaults (tax model on, taxable-first, 1% advisor fee).
 
-- [ ] **Three buckets** resolved from account subtypes at read time: taxable
-      (with its cost basis from the lots; cash rides here), traditional
-      (401k/403b/ira), Roth (roth_ira; HSA counted as Roth by default since
-      medical spend in retirement usually exceeds it — a setting flips it to
-      traditional). Balance-tracked accounts land by subtype.
-- [ ] **Tax the paths.** Withdrawals from traditional are ordinary income;
-      taxable sales realize gain pro rata to the bucket's basis fraction; Roth
-      is free. Run the household through `computeTax` per sim year. The sim
-      is in real dollars and the brackets are nominal: keep the sim real and
-      hold the tables constant (they're indexed), never deflate the paths.
-      Filing status and state from the tax settings.
-- [ ] **Withdrawal order** as a scenario knob: taxable → traditional → Roth
-      (default), pro rata, or "fill the bracket" (draw traditional up to the
-      top of a chosen bracket, then taxable, then Roth).
-- [ ] **Roth conversions** as a scenario event: convert $X/yr from year A to
-      year B, or "fill to the top of the N% bracket" — the gap-years play.
-      Reported as the delta in lifetime tax and in median end wealth.
-- [ ] **RMDs** from the traditional bucket at the age the law sets by birth
-      year (73; 75 for those born 1960 or later), whether or not spending
-      needs them.
-- [ ] **Social Security** as an income event per person: claiming age and the
-      benefit at full retirement age (typed from the SSA statement), adjusted
-      for early/late claiming; taxable share per the provisional-income rule.
-      Compare 62 / 67 / 70 as scenarios.
-- [ ] **Age axis + birth year** (closes the Future v2 follow-up above);
-      crossing *age* alongside crossing year.
-- [ ] **Advisor-fee counterfactual**: an AUM-drag knob (default 1%) so the
-      cost of the alternative is a number on the side-by-side table.
-- [ ] **Tests**: bucket resolution from subtypes; tax-on-path monotonicity
-      (more traditional → more lifetime tax at equal totals); conversions
-      reduce later RMDs; determinism; parity; the existing 17 pass unchanged
-      when the buckets collapse to one.
+- [x] **Three buckets** resolved from account subtypes at read time:
+      taxable (bank, brokerage, crypto, stock plans; basis from the lots,
+      balance-tracked taxable taken at value and listed), traditional
+      (401k/403b/ira, and untyped retirement accounts), Roth; HSA as Roth by
+      default, a scenario knob flips it. This year's pre-tax deferrals + match,
+      Roth deferrals and planned HSA (from 4b) split each year's savings.
+- [x] **Tax the paths.** Each sim year runs through federal (brackets, LT
+      stacking, NIIT) + state at this year's tables, held constant (real
+      dollars, indexed tables). Traditional draws are ordinary income,
+      taxable sales realize gain pro rata to basis, Roth is free; draws are
+      grossed up for their own tax. Working-year flows (a down payment, a
+      conversion) stack on today's ordinary income. Results add the median
+      lifetime tax, end buckets, and an **after-tax end** (traditional taxed as
+      an heir draws it over ten years; taxable steps up) so a conversion is
+      compared fairly.
+- [x] **Withdrawal order**: taxable-first (default), pro rata, or fill a
+      chosen bracket with traditional first.
+- [x] **Roth conversions**: a window of years, a fixed amount or "fill to the
+      top of the N% bracket"; shown as the delta in lifetime tax and in the
+      (after-tax) median end.
+- [x] **RMDs** from the traditional bucket at 72/73/75 by birth year (Uniform
+      Lifetime Table, IRS Pub. 590-B), taken whether or not spending needs
+      them; the excess is reinvested in taxable.
+- [x] **Social Security** per person: the benefit at full retirement age and a
+      claiming age 62–70, adjusted early/late (42 U.S.C. §402); taxable share
+      by provisional income (IRC §86). Scenarios compare claiming ages.
+- [x] **Age axis + birth year**: crossing age beside the crossing year and the
+      retirement age in the side-by-side table (oldest birth year).
+- [x] **Advisor-fee counterfactual**: an AUM-drag knob (default 1%) run
+      alongside each scenario; its cost is a column.
+- [x] **Tests**: `engine/future-tax.test.ts` (rules tables, buckets from
+      subtypes, tax-on-path monotonicity, RMDs whether or not needed,
+      conversions shrinking them, determinism, sql.js parity); the existing
+      simulator and scenario tests pass unchanged.
+
+Follow-ups:
+
+- [ ] Each spouse's own RMD schedule and traditional balance (one bucket,
+      the oldest birth year's RMDs, today); spousal Social Security.
+- [ ] Not modeled: the 10% early-withdrawal penalty, IRMAA, the senior
+      deduction, state rules for retirement income, dividend drag in taxable.
+- [ ] The fan's x-axis could carry ages too (today only the crossing and the
+      table do).
+- [ ] Compare with taxes runs ~1.8 s for five dev scenarios (crossing search
+      is linear); a bisection would cut it if it grows.
 
 ### 4d — Target allocation & tax-aware rebalancing
 

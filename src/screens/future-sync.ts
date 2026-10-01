@@ -175,7 +175,8 @@ const knobPercent = (micro: number) => `${formatPercentField(micro)}%`
  * Home has no loan options, and the engine then buys nothing.
  */
 export function assumptionPills(
-  p: Pick<ScenarioParams, 'meanReturnMicro' | 'volMicro' | 'saveBeforeBuyCents' | 'buyEnabled' | 'buyYear' | 'retireYear'>,
+  p: Pick<ScenarioParams, 'meanReturnMicro' | 'volMicro' | 'saveBeforeBuyCents' | 'buyEnabled' | 'buyYear' | 'retireYear'> &
+    Partial<Pick<ScenarioParams, 'taxModel' | 'conversion'>>,
   homeModelled: boolean,
 ): string[] {
   return [
@@ -184,5 +185,7 @@ export function assumptionPills(
     `Save ${fmtShort(p.saveBeforeBuyCents)}/yr`,
     p.buyEnabled && homeModelled ? `Buy house ${p.buyYear}` : null,
     `Retire ${p.retireYear}`,
+    p.taxModel ? 'Taxed' : null,
+    p.taxModel && p.conversion ? `Convert ${p.conversion.fromYear}–${p.conversion.toYear}` : null,
   ].filter((x): x is string => x !== null)
 }

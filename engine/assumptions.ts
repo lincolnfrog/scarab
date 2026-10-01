@@ -5,6 +5,7 @@ import { getCheckupSettings } from './checkup-settings'
 import { GIFT_EXCLUSION_2026, RUNWAY_IDLE_MONTHS, RUNWAY_LOW_MONTHS } from './checkup'
 import type { DbLike } from './db'
 import { DRIFT_MICRO } from './digest'
+import { SIMTAX_VINTAGE, uniformLifetimePeriod } from './simtax'
 import { CHARITY_AGI_FLOOR_MICRO, ITEMIZE_VINTAGE, MORTGAGE_DEBT_LIMIT_CENTS, SALT_2026 } from './itemize'
 import { ADDL_MEDICARE_RATE_MICRO, ADDL_MEDICARE_WITHHOLD_THRESHOLD, MEDICARE_RATE_MICRO, PAYROLL_VINTAGE, SS_RATE_MICRO, SS_WAGE_BASE_2026 } from './paychecks'
 import {
@@ -167,6 +168,22 @@ export function getAssumptions(db: DbLike): AssumptionGroup[] {
         { label: 'HSA, self-only / family', value: `${$(LIMITS_2026.hsaSelfCents)} / ${$(LIMITS_2026.hsaFamilyCents)} (+${$(LIMITS_2026.hsaCatchUp55Cents)} from 55)` },
       ],
       note: 'Catch-up ages go by the age reached by Dec 31 — birth years are set on Taxes.',
+    },
+    {
+      id: 'retirement',
+      title: 'Retirement income (Future)',
+      vintage: SIMTAX_VINTAGE,
+      source: 'IRC §401(a)(9) as amended by SECURE 2.0 §107; 42 U.S.C. §402(q), §402(w); IRC §86',
+      rows: [
+        { label: 'RMDs start at', value: '72 if born before 1951 · 73 for 1951–1959 · 75 from 1960' },
+        { label: 'Uniform Lifetime divisor at 73 / 75 / 80 / 90', value: [73, 75, 80, 90].map((a) => uniformLifetimePeriod(a)).join(' / ') },
+        { label: 'Full retirement age', value: '67 if born 1960 or later (66 + 2 months a year for 1955–1959)' },
+        { label: 'Claiming early', value: '−5/9% a month for 36 months, −5/12% a month beyond (62 at FRA 67: 70%)' },
+        { label: 'Claiming late', value: '+2/3% a month to 70 (70 at FRA 67: 124%)' },
+        { label: 'Social Security taxable, MFJ provisional income', value: 'none under $32,000 · up to 50% to $44,000 · up to 85% above (not indexed)' },
+        { label: 'An heir draws inherited traditional money', value: 'over 10 years (the after-tax end)' },
+      ],
+      note: 'Future holds this year’s brackets constant: the simulation is in today’s dollars and the brackets are indexed.',
     },
     {
       id: 'gifts',

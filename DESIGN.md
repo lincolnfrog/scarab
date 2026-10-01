@@ -272,11 +272,17 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                vintage, read from the tables themselves.
   simulate.ts  Seeded Monte Carlo (mulberry32 + Box-Muller): lognormal or
                historical block-bootstrap draws, dated events, crossing year,
-               price-a-decision.
+               price-a-decision; with a `tax` block, Future v3's three
+               buckets (taxable with basis, traditional, Roth), withdrawal
+               order, conversions, RMDs and Social Security, every year taxed.
+  simtax.ts    The year-tax function the sim calls, the Uniform Lifetime
+               table, RMD ages, Social Security claiming and taxable share.
+  buckets.ts   Account subtypes → the three buckets, with taxable basis.
   history.ts   Annual US stock real total returns 1928→ (Damodaran nominal ÷
                CPI-U). Append-only; refresh yearly.
   scenarios.ts The decision engine: named knob-sets compared side by side
-               against the ledger; deltas vs the baseline.
+               against the ledger; deltas vs the baseline, lifetime tax, the
+               after-tax end and an advisor-fee counterfactual.
   services.ts  Cash, budget, property, goal (with its derivation), activity
                and the rest as (db, args) functions; re-exports errors,
                invest and prices.

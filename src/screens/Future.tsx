@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
-import { formatCents } from '../../shared/money'
-import type { ScenarioParams, ScenarioRun } from '../../engine/scenarios'
-import type { SimEvent } from '../../engine/simulate'
+import { formatCents, formatPercentMicro } from '../../shared/money'
+import type { ScenarioParams, ScenarioRun, TaxContext } from '../../engine/scenarios'
+import type { SimEvent, WithdrawalOrder } from '../../engine/simulate'
 import { del, post, put, serverWriteCount } from '../api'
 import FutureFan from '../cards/FutureFan'
 import { scenarioSlots, slotColor } from '../chart/palette'
@@ -10,7 +10,7 @@ import { Link } from '../router'
 import { Button } from '../ui/Button'
 import { useDeepAction } from '../ui/CommandPalette'
 import { confirm, prompt } from '../ui/dialogs'
-import { Field, MoneyInput, PercentInput, TextInput } from '../ui/Field'
+import { Field, MoneyInput, PercentInput, Select, TextInput } from '../ui/Field'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { Segmented } from '../ui/Segmented'
 import { useAnchor } from '../ui/screen'
@@ -36,6 +36,10 @@ type Compare = {
   home: { priceCents: number; cashOutCents: number; rateMicro: number; termMonths: number; loanName: string | null } | null
   draw: Draw
   thresholdPct: number
+  /** Future v3: the buckets, savings split, filing and people the tax model ran with. */
+  tax: TaxContext
+  /** The oldest birth year in the household: the age axis. */
+  birthYear: number | null
   runs: Run[]
 }
 type Price = {
@@ -64,9 +68,35 @@ type Knobs = {
   retireYear: string
   retireSpendCents: number | null
   endYear: string
+  // Future v3 (copilot §4c)
+  taxModel: boolean
+  withdrawalOrder: WithdrawalOrder
+  fillBracketMicro: number
+  hsaAsRoth: boolean
+  advisorFeeMicro: number | null
+  convOn: boolean
+  convFrom: string
+  convTo: string
+  convMode: 'amount' | 'fill'
+  convAmountCents: number | null
+  convFillMicro: number
+  /** One row per person in the household (and any saved under another name). */
+  ss: { name: string; fraBenefitCents: number | null; claimAge: number }[]
 }
 
-function toKnobs(p: Params): Knobs {
+/** The federal bracket rates a "fill the bracket" knob can name (the top one has no top). */
+const BRACKETS: { micro: number; label: string }[] = [100_000, 120_000, 220_000, 240_000, 320_000, 350_000].map((m) => ({ micro: m, label: `${m / 10_000}%` }))
+const ORDER_LABEL: Record<WithdrawalOrder, string> = {
+  'taxable-first': 'taxable, then traditional, then Roth',
+  'pro-rata': 'from every bucket in proportion',
+  'fill-bracket': 'traditional up to a bracket, then taxable, then Roth',
+}
+
+function toKnobs(p: Params, people: readonly { name: string }[] = []): Knobs {
+  const c = p.conversion
+  const names = [...people.map((x) => x.name)]
+  for (const x of p.socialSecurity) if (!names.some((n) => n.toLowerCase() === x.name.toLowerCase())) names.push(x.name)
+  const yr = Number(new Date().getFullYear())
   return {
     meanReturnMicro: p.meanReturnMicro,
     volMicro: p.volMicro,
@@ -78,6 +108,21 @@ function toKnobs(p: Params): Knobs {
     retireYear: String(p.retireYear),
     retireSpendCents: p.retireSpendCents,
     endYear: String(p.endYear),
+    taxModel: p.taxModel,
+    withdrawalOrder: p.withdrawalOrder,
+    fillBracketMicro: p.fillBracketMicro,
+    hsaAsRoth: p.hsaAsRoth,
+    advisorFeeMicro: p.advisorFeeMicro,
+    convOn: c !== null,
+    convFrom: String(c?.fromYear ?? p.retireYear + 1),
+    convTo: String(c?.toYear ?? Math.max(p.retireYear + 1, yr) + 9),
+    convMode: c?.fillBracketMicro != null ? 'fill' : 'amount',
+    convAmountCents: c?.amountCents ?? 5_000_000,
+    convFillMicro: c?.fillBracketMicro ?? 220_000,
+    ss: names.map((name) => {
+      const x = p.socialSecurity.find((e) => e.name.toLowerCase() === name.toLowerCase())
+      return { name, fraBenefitCents: x?.fraBenefitCents ?? null, claimAge: x?.claimAge ?? 67 }
+    }),
   }
 }
 function fromKnobs(k: Knobs, prev: Params): Omit<Params, 'events'> {
@@ -85,7 +130,9 @@ function fromKnobs(k: Knobs, prev: Params): Omit<Params, 'events'> {
     const n = Number(s)
     return Number.isInteger(n) && n > 1900 && n < 2300 ? n : fallback
   }
+  const { events: _events, ...rest } = prev
   return {
+    ...rest,
     meanReturnMicro: k.meanReturnMicro ?? prev.meanReturnMicro,
     volMicro: Math.max(0, k.volMicro ?? prev.volMicro),
     propertyGrowthMicro: k.propertyGrowthMicro ?? prev.propertyGrowthMicro,
@@ -96,6 +143,21 @@ function fromKnobs(k: Knobs, prev: Params): Omit<Params, 'events'> {
     retireYear: yr(k.retireYear, prev.retireYear),
     retireSpendCents: Math.max(0, k.retireSpendCents ?? prev.retireSpendCents),
     endYear: yr(k.endYear, prev.endYear),
+    taxModel: k.taxModel,
+    withdrawalOrder: k.withdrawalOrder,
+    fillBracketMicro: k.fillBracketMicro,
+    hsaAsRoth: k.hsaAsRoth,
+    advisorFeeMicro: Math.min(50_000, Math.max(0, k.advisorFeeMicro ?? prev.advisorFeeMicro)),
+    conversion: (() => {
+      if (!k.convOn) return null
+      const from = yr(k.convFrom, NaN)
+      const to = yr(k.convTo, NaN)
+      // Years still being typed, or an amount left empty: keep what was saved rather than send half a conversion.
+      if (!Number.isInteger(from) || !Number.isInteger(to) || to < from) return prev.conversion
+      if (k.convMode === 'amount') return k.convAmountCents ? { fromYear: from, toYear: to, amountCents: k.convAmountCents, fillBracketMicro: null } : prev.conversion
+      return { fromYear: from, toYear: to, amountCents: null, fillBracketMicro: k.convFillMicro }
+    })(),
+    socialSecurity: k.ss.filter((x) => (x.fraBenefitCents ?? 0) > 0).map((x) => ({ name: x.name, fraBenefitCents: x.fraBenefitCents!, claimAge: x.claimAge })),
   }
 }
 
@@ -230,8 +292,8 @@ export default function Future() {
     if (!run) return
     if (knobsFor.current === run.id && edits.dirty) return
     knobsFor.current = run.id
-    setKnobs(toKnobs(run.params))
-  }, [run, edits])
+    setKnobs(toKnobs(run.params, cmp?.tax.people))
+  }, [run, edits, cmp])
 
   // Every write goes through useAction: failures toast, and the scenarios re-run after a save lands.
   const saveParams = useAction(
@@ -630,6 +692,140 @@ export default function Future() {
         </div>
       </div>
 
+      {/* ---------- taxes & income (Future v3) ---------- */}
+      <div className="card c12">
+        <div className="h4row">
+          <h2>
+            Taxes &amp; income · <span style={{ color }}>{run.name}</span>
+          </h2>
+          <div className="right">
+            <label className="scr-check" style={{ marginTop: 0 }}>
+              <input type="checkbox" checked={knobs.taxModel} onChange={(e) => editKnob({ taxModel: e.target.checked })} />
+              Model taxes and account types
+            </label>
+          </div>
+        </div>
+        {knobs.taxModel ? (
+          <>
+            <div className="scr-fields">
+              <div className="scr-f lg">
+                <Field label="Withdrawals" hint={ORDER_LABEL[knobs.withdrawalOrder]}>
+                  <Select value={knobs.withdrawalOrder} onChange={(e) => editKnob({ withdrawalOrder: e.target.value as WithdrawalOrder })}>
+                    <option value="taxable-first">Taxable first</option>
+                    <option value="pro-rata">Pro rata</option>
+                    <option value="fill-bracket">Fill a bracket</option>
+                  </Select>
+                </Field>
+              </div>
+              {knobs.withdrawalOrder === 'fill-bracket' && (
+                <div className="scr-f xs">
+                  <Field label="Up to">
+                    <Select value={knobs.fillBracketMicro} onChange={(e) => editKnob({ fillBracketMicro: Number(e.target.value) })}>
+                      {BRACKETS.map((b) => <option key={b.micro} value={b.micro}>{b.label}</option>)}
+                    </Select>
+                  </Field>
+                </div>
+              )}
+              <div className="scr-f">
+                <Field label="HSA counts as" hint={knobs.hsaAsRoth ? 'spent tax-free on care' : 'taxed when drawn'}>
+                  <Select value={knobs.hsaAsRoth ? 'roth' : 'traditional'} onChange={(e) => editKnob({ hsaAsRoth: e.target.value === 'roth' })}>
+                    <option value="roth">Roth</option>
+                    <option value="traditional">Traditional</option>
+                  </Select>
+                </Field>
+              </div>
+              <div className="scr-f rate">
+                <Field label="Advisor fee" hint="the alternative, priced">
+                  <PercentInput valueMicro={knobs.advisorFeeMicro} onChange={(m) => editKnob({ advisorFeeMicro: m })} />
+                </Field>
+              </div>
+            </div>
+            <div className="scr-fields" style={{ marginTop: 12 }}>
+              <label className="scr-check">
+                <input type="checkbox" checked={knobs.convOn} onChange={(e) => editKnob({ convOn: e.target.checked })} />
+                Roth conversions
+              </label>
+              {knobs.convOn && (
+                <>
+                  <div className="scr-f xs">
+                    <Field label="From">
+                      <TextInput inputMode="numeric" maxLength={4} value={knobs.convFrom} onChange={(e) => editKnob({ convFrom: e.target.value })} />
+                    </Field>
+                  </div>
+                  <div className="scr-f xs">
+                    <Field label="Through">
+                      <TextInput inputMode="numeric" maxLength={4} value={knobs.convTo} onChange={(e) => editKnob({ convTo: e.target.value })} />
+                    </Field>
+                  </div>
+                  <div className="scr-f">
+                    <Field label="Each year">
+                      <Select value={knobs.convMode} onChange={(e) => editKnob({ convMode: e.target.value as 'amount' | 'fill' })}>
+                        <option value="amount">a fixed amount</option>
+                        <option value="fill">fill a bracket</option>
+                      </Select>
+                    </Field>
+                  </div>
+                  {knobs.convMode === 'amount' ? (
+                    <div className="scr-f">
+                      <Field label="Convert / yr">
+                        <MoneyInput value={knobs.convAmountCents} onChange={(c) => editKnob({ convAmountCents: c })} />
+                      </Field>
+                    </div>
+                  ) : (
+                    <div className="scr-f xs">
+                      <Field label="Up to">
+                        <Select value={knobs.convFillMicro} onChange={(e) => editKnob({ convFillMicro: Number(e.target.value) })}>
+                          {BRACKETS.map((b) => <option key={b.micro} value={b.micro}>{b.label}</option>)}
+                        </Select>
+                      </Field>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            {knobs.ss.length > 0 && (
+              <div className="scr-fields" style={{ marginTop: 12 }}>
+                {knobs.ss.map((x, i) => {
+                  const born = cmp.tax.people.find((p) => p.name.toLowerCase() === x.name.toLowerCase())?.birthYear ?? null
+                  const setSs = (patch: Partial<Knobs['ss'][number]>) => editKnob({ ss: knobs.ss.map((y, j) => (j === i ? { ...y, ...patch } : y)) })
+                  return (
+                    <div key={x.name} className="scr-fields" style={{ gap: '12px 16px' }}>
+                      <div className="scr-f">
+                        <Field label={`${x.name}: Social Security`} hint={born === null ? 'needs a birth year (Taxes)' : 'a year at full retirement age, from the SSA statement'}>
+                          <MoneyInput value={x.fraBenefitCents} placeholder="0.00" onChange={(c) => setSs({ fraBenefitCents: c })} />
+                        </Field>
+                      </div>
+                      <div className="scr-f xs">
+                        <Field label="Claims at" hint={born !== null ? `in ${born + x.claimAge}` : undefined}>
+                          <Select value={x.claimAge} onChange={(e) => setSs({ claimAge: Number(e.target.value) })}>
+                            {[62, 63, 64, 65, 66, 67, 68, 69, 70].map((a) => <option key={a} value={a}>{a}</option>)}
+                          </Select>
+                        </Field>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <div className="sub2 topline">
+              Today: taxable <b className="inkstrong">{fmtShort(cmp.tax.buckets.taxableCents)}</b>
+              {cmp.tax.buckets.taxableCents > 0 && <> (basis {fmtShort(cmp.tax.buckets.taxableBasisCents)})</>} · traditional{' '}
+              <b className="inkstrong">{fmtShort(cmp.tax.buckets.traditionalCents)}</b> · Roth <b className="inkstrong">{fmtShort(cmp.tax.buckets.rothCents)}</b>
+              {cmp.tax.buckets.hsaCents > 0 && <> · HSA {fmtShort(cmp.tax.buckets.hsaCents)}</>}
+              {' '}· saving a year {fmtShort(cmp.tax.saves.traditionalCents)} pre-tax and {fmtShort(cmp.tax.saves.rothCents)} Roth from the{' '}
+              <Link className="scr-link" to={{ screen: 'tax', rest: ['contributions'] }}>paychecks</Link>, the rest to taxable
+              {cmp.birthYear === null && <> · <span className="neg">no birth year set, so no RMDs, Social Security or ages</span></>}
+              {cmp.tax.buckets.unknownBasis.length > 0 && <> · basis unknown for {cmp.tax.buckets.unknownBasis.join(', ')} (taken at value)</>}
+            </div>
+          </>
+        ) : (
+          <p className="sub2">
+            Off: one liquid bucket, no tax on anything drawn — the Future v2 model. On: taxable, traditional and Roth buckets
+            from your account types, every year's withdrawals taxed, with RMDs, Social Security and conversions.
+          </p>
+        )}
+      </div>
+
       {/* ---------- overlay chart + odds ---------- */}
       <FutureFan runs={cmp.runs} selectedId={run.id} baselineId={base.id} params={run.params} buys={buys} thresholdPct={cmp.thresholdPct} />
       <div className="card c3">
@@ -637,7 +833,10 @@ export default function Future() {
         <div className="scr-odds">
           <div>
             <div className="muted">Crossing date · ≥{cmp.thresholdPct}% odds</div>
-            <div className="heronum" style={{ fontSize: 36, color }}>{run.crossingYear ?? '—'}</div>
+            <div className="heronum" style={{ fontSize: 36, color }}>
+              {run.crossingYear ?? '—'}
+              {run.crossingYear && cmp.birthYear !== null && <span className="sub2" style={{ marginLeft: 8 }}>age {run.crossingYear - cmp.birthYear}</span>}
+            </div>
             <div className="sub2">
               {run.crossingYear
                 ? `earliest retirement year the plan still clears ${cmp.thresholdPct}%`
@@ -671,6 +870,37 @@ export default function Future() {
               {run.delta && <span className={`sub2 ${cls(run.delta.p10EndCents)}`} style={{ marginLeft: 8 }}>{signedMoney(run.delta.p10EndCents)}</span>}
             </div>
           </div>
+          {run.result.medianLifetimeTaxCents != null && (
+            <div>
+              <div className="muted">
+                <Tooltip content="Median over paths of the tax paid on withdrawals, conversions, RMDs and Social Security, on top of working-year wages">
+                  <span className="scr-tipped">Lifetime tax</span>
+                </Tooltip>
+              </div>
+              <div className="v" style={{ fontSize: 20, fontWeight: 650 }}>
+                {fmtShort(run.result.medianLifetimeTaxCents)}
+                {run.delta?.lifetimeTaxCents != null && <span className={`sub2 ${cls(-run.delta.lifetimeTaxCents)}`} style={{ marginLeft: 8 }}>{signedMoney(run.delta.lifetimeTaxCents)}</span>}
+              </div>
+            </div>
+          )}
+          {run.result.medianEndAfterTaxCents != null && (
+            <div>
+              <div className="muted">
+                <Tooltip content="The median end less the tax an heir would pay drawing the traditional bucket over ten years; taxable steps up, Roth is free">
+                  <span className="scr-tipped">After tax at {endYear}</span>
+                </Tooltip>
+              </div>
+              <div className="v" style={{ fontSize: 20, fontWeight: 650 }}>
+                {fmtShort(run.result.medianEndAfterTaxCents)}
+                {run.delta?.medianEndAfterTaxCents != null && <span className={`sub2 ${cls(run.delta.medianEndAfterTaxCents)}`} style={{ marginLeft: 8 }}>{signedMoney(run.delta.medianEndAfterTaxCents)}</span>}
+              </div>
+            </div>
+          )}
+          {run.advisor && (
+            <div className="sub2">
+              With a {formatPercentMicro(run.advisor.feeMicro, 1)} advisor fee: median {fmtShort(run.advisor.medianEndCents)} — <b className="inkstrong">{fmtShort(run.advisor.costCents)}</b> less by {endYear}
+            </div>
+          )}
           <div className="sub2 topline">
             ¹ {buys ? `buy the house in ${run.params.buyYear} and ` : ''}spend{' '}
             {formatCents(run.params.retireSpendCents)}/yr from {run.params.retireYear} without the liquid portfolio running out
@@ -694,6 +924,9 @@ export default function Future() {
               <th className="r">Plan succeeds</th>
               <th className="r">Median at end</th>
               <th className="r">10th pct</th>
+              <th className="r">Lifetime tax</th>
+              <th className="r">After tax</th>
+              <th className="r">Advisor costs</th>
               <th>Retire</th>
               <th>Home</th>
               <th>Save/yr</th>
@@ -726,7 +959,16 @@ export default function Future() {
                   {fmtShort(r.result.p10EndCents)}
                   {r.delta && <span className={`sub2 ${cls(r.delta.p10EndCents)}`} style={{ marginLeft: 6 }}>{signedMoney(r.delta.p10EndCents)}</span>}
                 </td>
-                <td className="num">{r.params.retireYear}</td>
+                <td className="r num">
+                  {r.result.medianLifetimeTaxCents != null ? fmtShort(r.result.medianLifetimeTaxCents) : '—'}
+                  {r.delta?.lifetimeTaxCents != null && <span className={`sub2 ${cls(-r.delta.lifetimeTaxCents)}`} style={{ marginLeft: 6 }}>{signedMoney(r.delta.lifetimeTaxCents)}</span>}
+                </td>
+                <td className="r num">
+                  {r.result.medianEndAfterTaxCents != null ? fmtShort(r.result.medianEndAfterTaxCents) : '—'}
+                  {r.delta?.medianEndAfterTaxCents != null && <span className={`sub2 ${cls(r.delta.medianEndAfterTaxCents)}`} style={{ marginLeft: 6 }}>{signedMoney(r.delta.medianEndAfterTaxCents)}</span>}
+                </td>
+                <td className="r num">{r.advisor ? `${fmtShort(r.advisor.costCents)} @ ${formatPercentMicro(r.advisor.feeMicro, 1)}` : '—'}</td>
+                <td className="num">{r.params.retireYear}{cmp.birthYear !== null && <span className="sub2"> · age {r.params.retireYear - cmp.birthYear}</span>}</td>
                 <td className="num">{r.params.buyEnabled && cmp.home ? `buy ${r.params.buyYear}` : 'no purchase'}</td>
                 <td className="num">
                   {fmtShort(r.params.saveBeforeBuyCents)}
@@ -836,6 +1078,18 @@ export default function Future() {
           land in their years, and saving switches to spending at retirement. The crossing date is the earliest retirement
           year at which the plan still clears the odds threshold with everything else held fixed. A flashlight, not a promise
           — revisit the assumptions yearly.
+        </p>
+        <p style={{ marginTop: 8 }}>
+          With <b className="inkstrong">taxes modeled</b>, the liquid portfolio is three buckets read from your account types:
+          taxable (bank accounts and brokerage, with their cost basis), traditional (401(k), 403(b), IRA) and Roth. Savings
+          go in as your paychecks split them. In retirement each year's spending — and the tax it causes — is drawn in the
+          order you pick: traditional money is ordinary income, a taxable sale realizes gain in proportion to the bucket's
+          basis, Roth is free. Required minimum distributions start at 73 or 75 by birth year, whether or not the spending
+          needs them; Social Security arrives from the claiming age, adjusted for claiming early or late, with up to 85% of
+          it taxable. Brackets are this year's, held constant: the simulation is in today's dollars and the brackets are
+          indexed. Lifetime tax and the after-tax end make a conversion's trade visible: tax now against tax later. Left
+          out: the 10% early-withdrawal penalty, state rules for retirement income, IRMAA, the senior deduction, and each
+          spouse's own RMD schedule (the oldest birth year sets it for the whole traditional bucket).
         </p>
       </div>
     </div>
