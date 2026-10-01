@@ -7,6 +7,7 @@ import HoldingsReturnsCard from '../cards/HoldingsReturnsCard'
 import PortfolioValueCard from '../cards/PortfolioValueCard'
 import PriceChartCard from '../cards/PriceChartCard'
 import AccountDrawer, { type DrawerTab } from '../invest/AccountDrawer'
+import AllocationCard from '../invest/AllocationCard'
 import AccountStrip from '../invest/AccountStrip'
 import ActivityTable from '../invest/ActivityTable'
 import AddAccountFlow, { type AddAccountNext } from '../invest/AddAccountFlow'
@@ -28,7 +29,7 @@ import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { BASKET_EVENT } from '../ui/syncStatus'
 import { HeaderSlot } from '../ui/HeaderSlot'
-import { useScreen, useScreenRoute } from '../ui/screen'
+import { useAnchor, useScreen, useScreenRoute } from '../ui/screen'
 import { toast } from '../ui/Toast'
 import { useAction } from '../ui/useAction'
 
@@ -78,6 +79,8 @@ export default function Invest() {
   const [loaded, setLoaded] = useState(false)
   // Bumped on every load so the activity ledger and the open drawer refetch alongside the portfolio.
   const [rev, setRev] = useState(0)
+  // '#/invest/allocation' (the Checkup's drift findings, the digest, ⌘K) scrolls to the allocation card.
+  const allocationAnchor = useAnchor('allocation')
   // The starting-positions sheet, and the account it opens on.
   const [opening, setOpening] = useState<{ accountId: number | null } | null>(null)
   const [taxMarginal, setTaxMarginal] = useState<Marginal | null>(null)
@@ -387,6 +390,9 @@ export default function Invest() {
       )}
 
       <HoldingsReturnsCard rev={rev} positions={portfolio?.positions} accountIds={scopeLotIds} scopeLabel={scopeLabel} />
+
+      {/* ---------- target allocation (household-wide: the owner filter doesn't narrow it) ---------- */}
+      {loaded && accounts.length > 0 && <AllocationCard rev={rev} anchor={allocationAnchor} />}
 
       {/* ---------- detailed charts ---------- */}
       <PriceChartCard positions={view?.positions ?? NO_POSITIONS} />

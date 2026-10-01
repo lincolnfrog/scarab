@@ -28,6 +28,7 @@ type Digest = {
   priceCreep: Rec[]
   lapsed: Rec[]
   allocationDrift: { name: string; nowMicro: number; thenMicro: number; deltaMicro: number }[]
+  allocationVsTarget?: boolean
   budgetOverruns: { name: string; budgetCents: number; actualCents: number }[]
   mortgage: null | { marketRateMicro: number; marketOn: string; bestLoanName: string; bestLoanRateMicro: number; triggered: boolean }
   notable: boolean
@@ -39,6 +40,8 @@ const pp = (micro: number) => `${micro > 0 ? '+' : ''}${(micro / 10_000).toFixed
 const CLASS_LABEL: Record<string, string> = {
   cash: 'Cash', brokerage: 'Brokerage', retirement: 'Retirement', crypto: 'Crypto',
   property: 'Property', liabilities: 'Liabilities',
+  // asset classes, when drift is against the target (engine/allocation.ts)
+  us_stock: 'US stocks', intl_stock: 'International', bonds: 'Bonds', real_estate: 'REITs', other: 'Other',
 }
 /** Where each net-worth class lives, for the driver links. */
 const CLASS_SCREEN: Record<string, RouteTarget> = {
@@ -167,13 +170,22 @@ export default function DigestCard() {
           )}
           {d.allocationDrift.length > 0 && (
             <div className="sub2">
-              Allocation drift:{' '}
+              {d.allocationVsTarget ? 'Off target:' : 'Allocation drift:'}{' '}
               {d.allocationDrift.map((x, i) => (
                 <span key={x.name}>
                   {i > 0 && ' · '}
-                  <b className="inkstrong">{CLASS_LABEL[x.name] ?? x.name}</b> {pct(x.thenMicro)} → {pct(x.nowMicro)} ({pp(x.deltaMicro)})
+                  <b className="inkstrong">{CLASS_LABEL[x.name] ?? x.name}</b>{' '}
+                  {d.allocationVsTarget ? `${pct(x.nowMicro)} vs ${pct(x.thenMicro)} target` : `${pct(x.thenMicro)} → ${pct(x.nowMicro)}`} ({pp(x.deltaMicro)})
                 </span>
               ))}
+              {d.allocationVsTarget && (
+                <>
+                  {' '}—{' '}
+                  <Link to={{ screen: 'invest', rest: ['allocation'] }} className="ch-a">
+                    see the rebalance plan →
+                  </Link>
+                </>
+              )}
             </div>
           )}
           {d.budgetOverruns.length > 0 && (

@@ -278,6 +278,10 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
   simtax.ts    The year-tax function the sim calls, the Uniform Lifetime
                table, RMD ages, Social Security claiming and taxable share.
   buckets.ts   Account subtypes → the three buckets, with taxable basis.
+  allocation.ts  Asset classes (set, or guessed from symbol and name), the
+               allocation against a target, and the rebalance plan:
+               contributions, then sheltered trades, then taxable lots by
+               least gain, with the exact tax.
   history.ts   Annual US stock real total returns 1928→ (Damodaran nominal ÷
                CPI-U). Append-only; refresh yearly.
   scenarios.ts The decision engine: named knob-sets compared side by side
@@ -315,7 +319,7 @@ server/     Node-only shell.
               basket (GET, status, throttled rebuild).
   api9.ts     Brokerage: account detail, owners, assets, check-in, balances,
               trade edit/delete/preview, opening positions, manual prices,
-              the realized report.
+              the realized report, target allocation and asset classes.
   api10.ts    Market data and analytics: price refresh, daily charts, series,
               catalog and views, returns, the market history file.
   basket.ts   The daily price basket: the whole US-listed universe + top crypto,
@@ -374,7 +378,7 @@ specific lots, per-account pools), tax, money parsing, series and returns
 math, chart scales (including a non-vacuous America/Los_Angeles test), and
 simulation determinism.
 
-## 3. Data model (migrations 1–23)
+## 3. Data model (migrations 1–24)
 
 Ledger philosophy: **store dated facts, derive everything**. Transactions,
 trades, prices, valuations, balances are facts; balance sheets, charts, cost
@@ -401,7 +405,7 @@ number.
    names its grant in trades.grant_id.
 7. Household categories (Gardening/Alcohol/Pets/Taxes) + merchant rules;
    card-payment patterns file as Transfer.
-8. goal_settings (JSON blobs: goal, rental, tax, checkup, people) + loan_options;
+8. goal_settings (JSON blobs: goal, rental, tax, checkup, people, allocation) + loan_options;
    brokerage ACH files as Transfer (moving your own money is not income).
 9. prices_daily — daily closes for the price chart (Yahoo on a household
    server; in a tab, each day's basket quote accrues here) — and onchain_daily,
@@ -436,6 +440,8 @@ number.
 23. pay_sources gains a Roth 401(k) line (roth_cents, ytd_roth_cents) and the
     employer match (match_rate_micro of deferrals up to match_cap_micro of
     pay, match_true_up) — the facts contribution pace derives from.
+24. assets.asset_class and invest_accounts.asset_class (balance-tracked
+    accounts): the allocation class, NULL = guessed at read time.
 
 **Server-only, never in a snapshot**: vault_blobs, vault_history,
 household_members, vault_invites, basket_quotes and the `basket:*` app_meta

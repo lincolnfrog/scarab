@@ -1,3 +1,4 @@
+import { getAllocation, putAccountClass, putAssetClass, putTarget } from '../../engine/allocation'
 import {
   createInvestAccount,
   createOpeningPositions,
@@ -30,6 +31,12 @@ import { r, type LocalRoute } from './table'
  * calls the same engine function its server route does.
  */
 export const INVEST: LocalRoute[] = [
+  /* ---------- target allocation (api9.ts) ---------- */
+  r('GET', '/allocation', (c) => getAllocation(c.db, c.today)),
+  r('PUT', '/allocation/target', (c) => putTarget(c.db, c.body)),
+  r('PUT', '/allocation/assets/:id', (c) => putAssetClass(c.db, Number(c.params.id), c.body)),
+  r('PUT', '/allocation/accounts/:id', (c) => putAccountClass(c.db, Number(c.params.id), c.body)),
+
   r('GET', '/invest/accounts', (c) => listInvestAccounts(c.db)),
   r('GET', '/invest/accounts/:id', (c) => getInvestAccount(c.db, Number(c.params.id), c.today)),
   r('GET', '/invest/owners', (c) => listInvestOwners(c.db)),

@@ -492,6 +492,14 @@ export const migrations: string[] = [
    ALTER TABLE pay_sources ADD COLUMN match_rate_micro INTEGER;
    ALTER TABLE pay_sources ADD COLUMN match_cap_micro INTEGER;
    ALTER TABLE pay_sources ADD COLUMN match_true_up INTEGER NOT NULL DEFAULT 0`,
+
+  // 24 — asset classes (copilot §4d): what each asset is for allocation —
+  // us_stock, intl_stock, bonds, cash, real_estate, crypto, other. NULL means
+  // "not set": the engine guesses from the symbol and name at read time. A
+  // balance-tracked account (a 401(k) known only by its total) has no assets,
+  // so it carries a class of its own. Additive for a snapshot (tier B).
+  `ALTER TABLE assets ADD COLUMN asset_class TEXT;
+   ALTER TABLE invest_accounts ADD COLUMN asset_class TEXT`,
 ]
 
 export function migrate(db: DbLike): void {

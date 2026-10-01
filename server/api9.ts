@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { getAllocation, putAccountClass, putAssetClass, putTarget } from '../engine/allocation'
 import type { DbLike } from '../engine/db'
 import {
   createOpeningPositions,
@@ -73,4 +74,19 @@ api9.get('/invest/realized', (c) => handle(c, () => getRealizedReport(db, c.req.
 api9.post('/prices/manual', async (c) => {
   const b = await c.req.json()
   return handle(c, () => setManualPrice(db, b, today()))
+})
+
+// Target allocation and tax-aware rebalancing (copilot §4d).
+api9.get('/allocation', (c) => handle(c, () => getAllocation(db, today())))
+api9.put('/allocation/target', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => putTarget(db, b))
+})
+api9.put('/allocation/assets/:id', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => putAssetClass(db, Number(c.req.param('id')), b))
+})
+api9.put('/allocation/accounts/:id', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => putAccountClass(db, Number(c.req.param('id')), b))
 })

@@ -33,6 +33,7 @@ export type FindingKind =
   | 'deferral-excess'
   | 'hsa-room'
   | 'backdoor-roth'
+  | 'asset-location'
 
 /**
  * One derived observation. Every finding carries the five parts the Finding

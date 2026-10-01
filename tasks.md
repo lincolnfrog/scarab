@@ -13,8 +13,9 @@ the lot engine — our strongest asset), digest second, decision engine third
 2026-09-23 improvement pass (zero knowledge for two, brokerage, analytics, UI
 shell, charts — see its section below). Next is the **copilot layer** (§4,
 planned 2026-09-30): findings that show their work (4a) and contribution
-pace (4b) and a Future that knows about taxes and account types (4c), all
-shipped 2026-10-01; next target allocation (4d).
+pace (4b), a Future that knows about taxes and account types (4c) and
+target allocation (4d), all shipped 2026-10-01; next the two-year tax view
+(4e).
 Around it: follow-ups, the vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
@@ -389,19 +390,36 @@ Follow-ups:
 
 ### 4d — Target allocation & tax-aware rebalancing
 
-- [ ] **Asset classes** (pulled back from the cut list): a class per asset —
-      US stock, international, bonds, cash, real estate, crypto, other — set
-      on the asset, guessed from the basket's `etf` flag and name where
-      possible, custom groups on top. Migration adds `assets.asset_class`.
-- [ ] **Target** per class (settings blob, household data) and drift against
-      it on Invest; the digest's ≥3pp drift finding reads the target instead
-      of last month.
-- [ ] **Rebalance plan**: to close the drift, spend new contributions first
-      (from the paystub pace), then trade inside sheltered accounts, then
-      taxable with specific-lot picks that minimize realized gain (reuse
-      `previewTrade`), showing the tax of the taxable leg. Plus the
-      asset-location finding — bonds in traditional, high growth in Roth,
-      index equity in taxable — when the household holds those classes.
+**Shipped 2026-10-01** (`engine/allocation.ts`, `src/invest/AllocationCard.tsx`;
+migration 24, tier B).
+
+- [x] **Asset classes**: us_stock, intl_stock, bonds, cash, real_estate,
+      crypto, other — set per asset (`assets.asset_class`) or guessed at read
+      time from a list of widely held funds, then the name (the basket's
+      where the household server has it), then the kind. Bank and brokerage
+      cash are cash; a balance-tracked account takes one class of its own
+      (`invest_accounts.asset_class`, "other" until set). Property stays out.
+      Custom groups on top: not done (follow-up).
+- [x] **Target** per class (goal_settings 'allocation', must make 100%) and
+      drift against it on Investments (`#/invest/allocation`); the digest's
+      ≥3pp drift and the Checkup's drift finding read the target when there
+      is one (and the Checkup prices how far off it is).
+- [x] **Rebalance plan**: a year of new contributions (from the paystub pace)
+      into the underweight first, then trades inside sheltered accounts, then
+      taxable sales of the overweight lots from the least gain per dollar
+      (losses first), the tax priced with `realizedTaxEstimate` on the year
+      (the same exact delta `previewTrade` uses); wash-sale risk flagged per
+      lot. Plus the **asset-location** finding: bonds in taxable while a
+      traditional account holds stock, or bonds in Roth while stock sits
+      elsewhere (municipal funds excepted).
+
+Follow-ups:
+
+- [ ] Custom groups (e.g. "small value", "employer stock") over the classes.
+- [ ] Look through target-date and balanced funds (today one class, "other",
+      unless set) — a stock/bond split per fund would be better.
+- [ ] The plan sells within a class without choosing *which* fund to buy, and
+      doesn't net buys and sells per account.
 
 ### 4e — Two-year tax view
 

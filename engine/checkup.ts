@@ -1,4 +1,5 @@
 import type { BracketHeadroom, CalendarItem, Checkup, Finding } from '../shared/checkup-api'
+import { getAllocation, getTarget } from './allocation'
 import { addMonthsToMonth } from '../shared/dates'
 import { formatDollars, formatQtyMicro } from '../shared/money'
 import { contributionFindings } from './checkup-contributions'
@@ -613,7 +614,95 @@ function addlMedicare(c: Ctx): Draft[] {
 
 const CLASS_LABEL: Record<string, string> = { cash: 'Cash', brokerage: 'Brokerage', retirement: 'Retirement', crypto: 'Crypto', property: 'Property' }
 
+/** Off the household's target allocation (engine/allocation.ts), with the plan that closes it. */
+function offTarget(c: Ctx): Draft[] {
+  const a = getAllocation(c.db, c.today)
+  const off = a.rows.filter((r) => r.targetMicro !== null && Math.abs(r.driftMicro!) >= DRIFT_MICRO)
+  if (off.length === 0 || !a.plan) return []
+  const worst = off.reduce((m, r) => (Math.abs(r.driftMicro!) > Math.abs(m.driftMicro!) ? r : m))
+  const toMove = a.rows.reduce((s, r) => s + Math.max(0, -(r.toTargetCents ?? 0)), 0)
+  const p = a.plan
+  const by = (step: string) => p.steps.filter((x) => x.step === step && x.action === (step === 'contribute' ? 'buy' : 'sell')).reduce((s, x) => s + x.cents, 0)
+  return [
+    {
+      id: `allocation-target:${off.map((r) => `${r.cls}${r.driftMicro! > 0 ? '+' : '-'}`).join(',')}`,
+      kind: 'allocation-drift',
+      tone: 'heads-up',
+      title: `${worst.label} is ${pct(worst.shareMicro)} of what's invested — target ${pct(worst.targetMicro!)}`,
+      impactCents: toMove,
+      impactLabel: 'above target, to move',
+      rule: {
+        text: `A class ${DRIFT_MICRO / 10_000} or more percentage points off its target is flagged; the plan closes it with new contributions first, then trades inside sheltered accounts, then taxable sales with the least gain.`,
+        cite: 'Your target allocation (Investments)',
+        vintage: TAX_DATA_VINTAGE,
+      },
+      inputs: off.map((r) => ({ label: r.label, value: `${pct(r.shareMicro)} vs ${pct(r.targetMicro!)} target` })),
+      math: [
+        `Above target in total: ${$(toMove)} of ${$(a.totalCents)}`,
+        `A year of contributions into the underweight: ${$(by('contribute'))} · trades inside sheltered accounts: ${$(by('sheltered'))} · taxable sales: ${$(by('taxable'))}`,
+        `Taxable gain realized ${$(p.taxable.stGainCents + p.taxable.ltGainCents)} → tax ${$(p.taxable.taxCents)}`,
+      ],
+      leavesOut: [
+        'Funds inside a balance-tracked account (a 401(k) known by its total) are one class each — set it on Investments.',
+        'Trading costs, and whether each account offers the funds the plan buys.',
+        'Waiting: next year’s contributions can close more of it without a sale.',
+      ],
+      action: { label: 'See the rebalance plan', to: { screen: 'invest', rest: ['allocation'] } },
+    },
+  ]
+}
+
+/** Asset location: bonds where their income is taxed every year, or in Roth where growth is worth most. */
+function assetLocation(c: Ctx): Draft[] {
+  const a = getAllocation(c.db, c.today, { plan: false })
+  const sum = (pred: (s: (typeof a.slices)[number]) => boolean) => a.slices.filter(pred).reduce((s, x) => s + x.cents, 0)
+  const stocks = (s: (typeof a.slices)[number]) => s.cls === 'us_stock' || s.cls === 'intl_stock'
+  const bondsTaxable = sum((s) => s.cls === 'bonds' && s.bucket === 'taxable' && !s.muni)
+  const bondsRoth = sum((s) => s.cls === 'bonds' && s.bucket === 'roth')
+  const stockTrad = sum((s) => stocks(s) && s.bucket === 'traditional')
+  const stockTaxable = sum((s) => stocks(s) && s.bucket === 'taxable')
+  const swapTaxable = Math.min(bondsTaxable, stockTrad)
+  const swapRoth = Math.min(bondsRoth, stockTrad + stockTaxable)
+  if (swapTaxable <= 0 && swapRoth <= 0) return []
+  const parts = [
+    swapTaxable > 0 ? `${$(bondsTaxable)} of bonds sit in taxable while traditional accounts hold ${$(stockTrad)} of stock` : null,
+    swapRoth > 0 ? `${$(bondsRoth)} of bonds sit in Roth while ${$(stockTrad + stockTaxable)} of stock sits elsewhere` : null,
+  ].filter(Boolean) as string[]
+  return [
+    {
+      id: `asset-location:${swapTaxable > 0 ? 't' : ''}${swapRoth > 0 ? 'r' : ''}`,
+      kind: 'asset-location',
+      tone: 'heads-up',
+      title: parts.join('; '),
+      impactCents: 0,
+      impactLabel: 'unpriced — depends on yields',
+      rule: {
+        text: 'The same mix can be held in different accounts: bonds’ interest is taxed as ordinary income each year, so they usually sit best in traditional accounts; the highest expected growth in Roth, where it is never taxed; broad index stock in taxable, where gains wait and qualify for the lower rates.',
+        cite: 'Asset location — a rule of thumb, not a law',
+        vintage: 'Classes as set or guessed on Investments',
+      },
+      inputs: [
+        { label: 'Bonds in taxable', value: $(bondsTaxable) },
+        { label: 'Bonds in Roth', value: $(bondsRoth) },
+        { label: 'Stock in traditional', value: $(stockTrad) },
+        { label: 'Stock in taxable', value: $(stockTaxable) },
+      ],
+      math: [
+        ...(swapTaxable > 0 ? [`Swappable without changing the mix: min(${$(bondsTaxable)}, ${$(stockTrad)}) = ${$(swapTaxable)}`] : []),
+        ...(swapRoth > 0 ? [`Swappable into Roth growth: min(${$(bondsRoth)}, ${$(stockTrad + stockTaxable)}) = ${$(swapRoth)}`] : []),
+      ],
+      leavesOut: [
+        'Selling stock in taxable to make room realizes its gain — the swap is cheapest done with new money or inside sheltered accounts.',
+        'Municipal bonds, whose interest is already federally tax-free, belong in taxable.',
+        'What each account’s plan offers.',
+      ],
+      action: { label: 'See the allocation', to: { screen: 'invest', rest: ['allocation'] } },
+    },
+  ]
+}
+
 function allocationDrift(c: Ctx): Draft[] {
+  if (getTarget(c.db)) return offTarget(c)
   if (!c.nw) return []
   const month = c.today.slice(0, 7)
   const baseMonth = addMonthsToMonth(month, -DRIFT_MONTHS)
@@ -807,6 +896,7 @@ export function getCheckup(db: DbLike, today: string, reader: string): Checkup {
     ...safeHarbor(c),
     ...addlMedicare(c),
     ...allocationDrift(c),
+    ...assetLocation(c),
     ...priceCreep(c),
     ...mortgageRate(c),
     ...contributionFindings(

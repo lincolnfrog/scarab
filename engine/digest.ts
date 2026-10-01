@@ -1,3 +1,4 @@
+import { getAllocation, getTarget } from './allocation'
 import type { DbLike } from './db'
 import { netWorthSeries, type NetWorthPoint } from './networth'
 import { detectRecurring, type Recurrence } from './recurring'
@@ -48,7 +49,9 @@ export type Digest = {
   newRecurring: Recurrence[]
   priceCreep: Recurrence[]
   lapsed: Recurrence[]
-  allocationDrift: DriftRow[] // classes that moved ≥ 3 percentage points
+  allocationDrift: DriftRow[] // classes that moved ≥ 3 percentage points — or, with a target, that are ≥ 3 points off it
+  /** The drift rows compare against the household's target allocation (`thenMicro` is the target), not last month. */
+  allocationVsTarget: boolean
   budgetOverruns: { name: string; budgetCents: number; actualCents: number }[]
   mortgage: null | {
     marketRateMicro: number
@@ -140,8 +143,16 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
   const lapsed = recurring.filter((r) => r.lapsed && r.kind === 'expense' && r.lastOn >= new Date(Date.parse(today) - 120 * DAY).toISOString().slice(0, 10))
 
   // --- allocation drift ---------------------------------------------------
+  // With a target allocation the drift is against it, by asset class (engine/allocation.ts); without one, how
+  // the net-worth classes' shares moved since the baseline month.
   const allocationDrift: DriftRow[] = []
-  if (comparableSeries.length >= 2 && netWorth) {
+  const vsTarget = getTarget(db) !== null
+  if (vsTarget) {
+    if (!sameDay)
+      for (const r of getAllocation(db, today, { plan: false }).rows)
+        if (r.targetMicro !== null && Math.abs(r.driftMicro!) >= DRIFT_MICRO)
+          allocationDrift.push({ name: r.cls, nowMicro: r.shareMicro, thenMicro: r.targetMicro, deltaMicro: r.driftMicro! })
+  } else if (comparableSeries.length >= 2 && netWorth) {
     const current = comparableSeries[comparableSeries.length - 1]!
     let base: NetWorthPoint | undefined
     for (const p of comparableSeries) if (p.month <= netWorth.baselineMonth) base = p
@@ -203,6 +214,7 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
     priceCreep,
     lapsed,
     allocationDrift,
+    allocationVsTarget: vsTarget,
     budgetOverruns,
     mortgage,
     notable,
