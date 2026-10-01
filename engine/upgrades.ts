@@ -62,7 +62,7 @@ import type { Dump } from './snapshot'
  *
  * ---
  *
- * VAULTS HOLD REAL DATA SINCE v21 (2026-09-25). The oldest fixture under
+ * VAULTS HOLD REAL DATA SINCE v21 (2026-09-25); THE FLOOR IS v25 SINCE 2026-10-01. The oldest fixture under
  * engine/fixtures/ is the promise: a vault written at that version or later
  * must keep loading. A tier-B migration needs nothing here; a tier-C one needs
  * an entry below, and the fixture test is what notices a missing one. While a
@@ -86,8 +86,8 @@ export type Compat = { minReadable: number; upgrades: Record<number, Upgrade> }
 /** The engine's own version — what `dumpDb` stamps on everything it writes. */
 export const CURRENT_VERSION = migrations.length
 
-/** The shipped contract: v21 onward (see the note above). */
-export const SNAPSHOT_COMPAT: Compat = { minReadable: 21, upgrades: {} }
+/** The shipped contract: v25 onward (see the note above; raised from 21 once the vault was resealed at v25, 2026-10-01). */
+export const SNAPSHOT_COMPAT: Compat = { minReadable: 25, upgrades: {} }
 
 export const MIN_READABLE_VERSION = SNAPSHOT_COMPAT.minReadable
 

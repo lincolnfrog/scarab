@@ -22,8 +22,9 @@ doesn't have to stay put — it can follow the vault up:
    floor is already at the version before it.
 2. **The vault catches up.** Unlocking with the new engine leaves the tab
    unsaved (`loadDump` reports the snapshot `older`), so the next save —
-   automatic — reseals it at the new version. Check the Vault screen shows it
-   saved after the deploy; every other member's tabs need the same unlock.
+   automatic — reseals it at the new version. Check the Vault screen after the
+   deploy: its Session card reads "Saved at schema vN" with N the new version
+   once the reseal has landed. Every other member's tabs need the same unlock.
 3. **Then the floor may rise** to that version: freeze its fixture (below),
    delete the older one, and set `minReadable` to it. Kept versions in the
    vault's history older than the floor stop being restorable — that is the
@@ -32,7 +33,10 @@ doesn't have to stay put — it can follow the vault up:
 Once anyone else keeps a vault, stop: their unlock can't be confirmed, so the
 floor only ever drops from then on (as the section below describes).
 
-Current floor: `snapshot-v21.json`, frozen 2026-09-25 from `c459152`.
+Current floor: `snapshot-v25.json`, frozen 2026-10-01 from `c4671ad` (with
+the fixture script extended to cover grants, the paycheck's Roth line and
+match, asset classes and the settings blobs). It replaced `snapshot-v21.json`
+(2026-09-25, `c459152`) once the household vault was confirmed resealed at v25.
 
 ## Adding one
 

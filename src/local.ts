@@ -51,6 +51,14 @@ type LocalState = {
   identity: string | null
   /** Bumped whenever the tab's data is replaced in place, so screens keyed on it remount. */
   dataEpoch: number
+  /** The schema this tab's engine writes (migrations.length), once the engine is up. */
+  engineSchema: number | null
+  /**
+   * The schema of the snapshot the vault holds, as far as this tab knows: the
+   * one it unlocked, until a save lands — every save seals at engineSchema.
+   * What tells the owner the floor can rise (engine/fixtures/README.md).
+   */
+  savedSchema: number | null
   /**
    * Bumped whenever the database changed at all: every dispatch that moved its
    * change counter, whatever the route's dirty policy, and every new or
@@ -59,7 +67,7 @@ type LocalState = {
    */
   dataRevision: number
 }
-const state: LocalState = { db: null, vault: null, dirty: false, writes: 0, identity: null, dataEpoch: 0, dataRevision: 0 }
+const state: LocalState = { db: null, vault: null, dirty: false, writes: 0, identity: null, dataEpoch: 0, dataRevision: 0, engineSchema: null, savedSchema: null }
 
 const announce = (event: 'scarab-mode' | 'scarab-write' | 'scarab-data' | 'scarab-revision') => window.dispatchEvent(new Event(event))
 
@@ -109,6 +117,12 @@ export const localMode = {
   get dataRevision() {
     return state.dataRevision
   },
+  get engineSchema() {
+    return state.engineSchema
+  },
+  get savedSchema() {
+    return state.savedSchema
+  },
   setVault(v: VaultSession | null) {
     state.vault = v
     announce('scarab-mode')
@@ -127,7 +141,10 @@ export const localMode = {
    */
   markSaved(version: number, writesAtDump: number = state.writes) {
     state.dirty = writesAtDump !== state.writes
-    if (state.vault) state.vault.version = version
+    if (state.vault) {
+      state.vault.version = version
+      state.savedSchema = state.engineSchema // what was just sealed is this engine's dump
+    }
     announce('scarab-mode')
   },
 }
@@ -141,7 +158,7 @@ export async function enterLocalMode(
   dump: Dump | null,
   vault: VaultSession | null = null,
 ): Promise<SnapshotLoad | null> {
-  const [{ openBrowserDb }, { migrate }, { loadDump }, wasmUrl] = await Promise.all([
+  const [{ openBrowserDb }, { migrate, migrations }, { loadDump }, wasmUrl] = await Promise.all([
     import('../engine/sqljs-db'),
     import('../engine/migrations'),
     import('../engine/snapshot'),
@@ -155,6 +172,8 @@ export async function enterLocalMode(
   const prev = state.db
   state.db = db
   state.vault = vault
+  state.engineSchema = migrations.length
+  state.savedSchema = dump ? dump.schemaVersion : null
   // An empty start has nothing saved yet; so does a snapshot an earlier version
   // wrote — the stored copy is still the older one until a save reseals it at
   // the current version (which is what lets the floor rise: engine/fixtures/README.md).
@@ -178,6 +197,7 @@ export async function loadLocalDump(dump: Dump): Promise<SnapshotLoad> {
   if (!state.db) throw new Error('local mode is not active')
   const { loadDump } = await import('../engine/snapshot')
   const loaded = loadDump(state.db, dump)
+  state.savedSchema = dump.schemaVersion
   state.dataRevision++
   markDataReplaced()
   state.dirty = false // caller decides: an unlock marks it saved, a file load leaves it dirty

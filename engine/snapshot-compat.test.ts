@@ -1,9 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
+import { getAllocation } from './allocation'
+import { getCheckupSettings } from './checkup-settings'
 import type { DbLike } from './db'
 import { migrate } from './migrations'
 import { getUnvested } from './invest'
+import { listPaySources } from './paychecks'
+import { listPeople } from './people'
 import { listInvestAccounts } from './services'
 import { type Dump, dumpDb, loadDump } from './snapshot'
 import { openBrowserDb } from './sqljs-db'
@@ -246,15 +250,28 @@ describe('the shipped contract stays honest', () => {
     expect(upgradesFor(CURRENT_VERSION)).toEqual([])
   })
 
-  it('v21, the first production vault: its stock-plan grant loads with an id and keeps its schedule', async () => {
-    const dump = JSON.parse(readFileSync(new URL('snapshot-v21.json', fixtureDir), 'utf8')) as Dump
+  it('v25, the floor since 2026-10-01: grants, the paycheck’s Roth line and match, classes and settings all load', async () => {
+    const dump = JSON.parse(readFileSync(new URL('snapshot-v25.json', fixtureDir), 'utf8')) as Dump
     for (const [engine, db] of await both()) {
-      // Nothing to replay (migration 22 only adds), but it is older: an unlock must reseal it at this version.
-      expect(loadDump(db, dump), engine).toEqual({ from: 21, upgraded: [], older: true })
-      expect(getUnvested(db).rows.map((g) => [g.symbol, g.qty_micro, g.next_vest_on]), engine).toEqual([['ACME', 350_000_000, '2026-11-15']])
-      expect(getUnvested(db).rows[0]!.id, engine).toBeGreaterThan(0)
-      // Its vest predates grant ids: recorded against no grant, it still counts for the only one.
-      expect(db.prepare("SELECT grant_id FROM trades WHERE note = 'RSU vest'").all(), engine).toEqual([{ grant_id: null }])
+      expect(loadDump(db, dump).from, engine).toBe(25)
+      // Two grants of one stock, each on its own schedule (migration 22).
+      expect(getUnvested(db).rows.map((g) => [g.symbol, g.qty_micro, g.next_vest_on]), engine).toEqual([
+        ['ACME', 350_000_000, '2026-11-15'],
+        ['ACME', 120_000_000, '2027-02-15'],
+      ])
+      // The paycheck's Roth line and match (migration 23).
+      expect(listPaySources(db)[0], engine).toMatchObject({ rothCents: 20_000, matchRateMicro: 500_000, matchCapMicro: 60_000, matchTrueUp: true })
+      // Asset classes (migration 24) and the allocation target.
+      const a = getAllocation(db, '2026-09-25', { plan: false })
+      expect(a.assets.find((x) => x.symbol === 'VXUS'), engine).toMatchObject({ cls: 'intl_stock', guessed: false })
+      expect(a.accounts.find((x) => x.name === 'Fidelity 401(k)'), engine).toMatchObject({ cls: 'us_stock', guessed: false })
+      expect(a.target, engine).toEqual({ us_stock: 600_000, intl_stock: 200_000, bonds: 150_000, cash: 50_000 })
+      // The settings blobs ride along.
+      expect(listPeople(db).map((p) => [p.name, p.birthYear]), engine).toEqual([
+        ['Max', 1975],
+        ['Nicole', 1977],
+      ])
+      expect(getCheckupSettings(db), engine).toMatchObject({ concentrationMicro: 150_000, charityCategoryId: 0 })
     }
   })
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CURRENT_VERSION } from '../../../engine/upgrades'
+import { CURRENT_VERSION, MIN_READABLE_VERSION } from '../../../engine/upgrades'
 import { openReview } from '../../ConflictSheet'
 import { exitLocalMode, localMode } from '../../local'
 import {
@@ -28,6 +28,25 @@ import { showRecoveryCode } from './codeSheet'
 import { confirmOpenOlder } from './confirmOlder'
 import { confirmReplaceVault } from './confirmReplace'
 import './vault.css'
+
+/**
+ * Which snapshot schema the vault holds, against what this Scarab writes and
+ * still opens: the number the owner needs before raising the compatibility
+ * floor (engine/fixtures/README.md). Read from the unlocked snapshot — the
+ * server only ever sees ciphertext. Until a save lands after unlocking an
+ * older snapshot, the vault still holds the older one.
+ */
+function SchemaLine() {
+  const saved = localMode.savedSchema
+  const writes = localMode.engineSchema ?? CURRENT_VERSION
+  if (saved === null) return null
+  return (
+    <p className="sub2 zk-schema">
+      Saved at schema <b>v{saved}</b>
+      {saved < writes ? <> — the next save reseals it at v{writes}</> : null} · this Scarab writes v{writes} and opens v{MIN_READABLE_VERSION} and newer.
+    </p>
+  )
+}
 
 /**
  * The Session card: what this tab is running on, whether it is saved, and the
@@ -158,6 +177,7 @@ export function SessionCard(p: {
             )}
           </p>
           <SaveState />
+          {session && <SchemaLine />}
           {session && via && (
             <p className="sub2 zk-via">Unlocked with {via.kind === 'recovery' ? 'the recovery code' : `“${via.label || 'a passkey'}”`}.</p>
           )}

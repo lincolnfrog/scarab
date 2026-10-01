@@ -131,6 +131,7 @@ describe('Data & Vault cards', () => {
     const s = text(renderToStaticMarkup(<ui.SessionCard info={null} household={null} reload={() => {}} openAdvanced={() => {}} />))
     expect(s).toMatch(/Vault v7 is open in this tab/)
     expect(s).toMatch(/Everything is saved\./)
+    expect(s).toMatch(/Saved at schema v\d+ · this Scarab writes v\d+ and opens v\d+ and newer\./)
     expect(s).toMatch(/Save now Lock End session…/)
     const r = text(renderToStaticMarkup(<ui.RecoveryCard />))
     expect(r).toMatch(/Show recovery code…/)

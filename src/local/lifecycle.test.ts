@@ -83,3 +83,25 @@ describe('the household hatch with a session running behind the front door', () 
     expect(local.takeHouseholdChoice()).toBe(false)
   })
 })
+
+describe('the schema the vault holds', () => {
+  it('is the unlocked snapshot’s until a save lands, then this engine’s', async () => {
+    const local = await load()
+    const { CURRENT_VERSION, MIN_READABLE_VERSION } = await import('../../engine/upgrades')
+    await local.enterLocalMode(null)
+    const dump = await local.localDispatch('GET', '/api/export')
+    const vault = { version: 7 } as unknown as Parameters<typeof local.enterLocalMode>[1]
+    // The oldest snapshot this engine opens. Right after the floor rises it is the current schema itself; once a
+    // newer schema ships it is older, and the tab must say so until the next save reseals it.
+    const older = MIN_READABLE_VERSION < CURRENT_VERSION
+    await local.enterLocalMode({ ...(dump as object), schemaVersion: MIN_READABLE_VERSION } as Parameters<typeof local.enterLocalMode>[0], vault)
+    expect(local.localMode.engineSchema).toBe(CURRENT_VERSION)
+    expect(local.localMode.savedSchema).toBe(MIN_READABLE_VERSION)
+    expect(local.localMode.dirty).toBe(older)
+    local.localMode.markSaved(8)
+    expect(local.localMode.savedSchema).toBe(CURRENT_VERSION)
+    // An empty start holds nothing saved yet.
+    await local.enterLocalMode(null)
+    expect(local.localMode.savedSchema).toBeNull()
+  })
+})

@@ -17,7 +17,8 @@ pace (4b), a Future that knows about taxes and account types (4c) and
 target allocation (4d) and the two-year tax view (4e) — the whole copilot
 plan — all shipped 2026-10-01. Next: the gap list after it, the follow-ups,
 the vault-only milestone and the backlog.
-Around it: follow-ups, the vault-only milestone, and the backlog at the end.
+Around it: follow-ups and the backlog at the end (the vault-only milestone
+is done).
 
 ## Active: 1 — Tax intelligence layer
 
@@ -510,11 +511,13 @@ Follow-ups (not blocking):
 - [ ] Live basket build couldn't run from the build sandbox (egress 403s to
       nasdaqtrader.com / coingecko); verify a real build on the deployment.
 
-## Milestone: re-import from scratch through the vault (2026-09-09)
+## Milestone: re-import from scratch through the vault (2026-09-09) — done
 
-The site becomes vault-only and the household's data is re-entered through the
-front door (start empty → accounts → statements → trades/properties/liabilities
-→ save). Done so far:
+**Done by 2026-10-01**: the site is vault-only on scarab.one (`SCARAB_ZK_ONLY=1`
+in `.env.gcp`), the household's data was re-entered through the front door
+into a passkey vault (real data since schema v21, 2026-09-25), Nicole was
+invited and joined, and the vault has been resealed at later schema versions
+as they shipped. What the milestone needed:
 
 - [x] Snapshots hold household data only: `vault_blobs` and the basket
       (`basket_quotes`, `basket:*` app_meta keys) are out of `TABLES`. Before
@@ -531,17 +534,16 @@ front door (start empty → accounts → statements → trades/properties/liabil
 
 Still needed for the milestone:
 
-- [ ] **Deploy vault-only**: download a plain export of the current site as a
-      keepsake, then `SCARAB_ZK_ONLY=1 SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh`
-      (put `SCARAB_ZK_ONLY=1` in `.env.gcp` so later deploys keep it).
+- [x] **Deploy vault-only**: `SCARAB_ZK_ONLY=1` (kept in `.env.gcp`), the
+      plaintext purged once.
 - [x] **Autosave in a session** (2026-09-15, `src/session.ts`): once a session
       key exists, every write reseals + PUTs after a 1.5s debounce, or at once
       when the tab is hidden. Saves are serialized; writes that land mid-upload
       keep the tab dirty for the next one. A version conflict (another device
       saved first) is sticky and shown, not retried — a manual save or a fresh
       unlock clears it.
-- [ ] Verify the basket builds on the real deployment (see above) — and the
-      market history build, which needs a CPU decision (DESIGN.md §6).
+- [x] The basket serves the live vault's prices. The market history's
+      monthly rebuild under request-based CPU is still a follow-up (below).
 - [x] Gzip before encrypt (2026-09-23): vault format v3 frames the plaintext
       as [length][gzip][zero padding to a size bucket] inside the encryption —
       a snapshot-shaped 2.5 MB dump stores at under a quarter of its size, and
@@ -550,13 +552,13 @@ Still needed for the milestone:
       each device remembers the last version it saw and asks before opening an
       older copy (2026-09-23).
 - [x] RP ID pinned in code: passkeys use `scarab.one` on scarab.one and its
-      subdomains (2026-09-23). **Decision still open**: map scarab.one before
-      the real vault exists — a `run.app` host binds passkeys to itself.
-- [ ] Snapshot fixture: deliberately none until production (the v17 fixture
-      step was cut). At the production cut: freeze that version's fixture and
-      lower `SNAPSHOT_COMPAT.minReadable` to it (`engine/fixtures/README.md`).
-      Until then every migration (#18–#21 this pass) leaves earlier dev vaults
-      unreadable.
+      subdomains (2026-09-23); the real vault was created on scarab.one.
+- [x] Snapshot fixture: `snapshot-v21.json` frozen at the production cut
+      (2026-09-25), replaced by `snapshot-v25.json` when the floor rose to 25
+      (2026-10-01) — a rolling floor while there is one household vault
+      (`engine/fixtures/README.md`).
+- [x] Two people on one vault: Nicole invited, consented, enrolled through the
+      QR (hybrid) prompt and unlocks with her own passkey (2026-10).
 
 ## Improvement pass — shipped 2026-09-23
 
@@ -617,9 +619,8 @@ Migrations #18–#21. DESIGN.md §7 has the roadmap view; this is the checklist.
 
 Decisions for the user:
 
-- [ ] **Production origin** before the real vault: scarab.one (user setting
-      it up 2026-09-24). Passkeys bind to the hostname for life, and the RP ID
-      pin to scarab.one is already in src/passkey.ts.
+- [x] **Production origin**: scarab.one — the real vault and its passkeys
+      live there.
 - [x] **`--ink-3` contrast**: now #828893, 4.84:1 on `--card` (2026-09-24).
 - [x] **First market-history build** (2026-09-24): built locally with
       `npm run seed:history` into `seed/history-pack.json.gz` (gitignored:
@@ -643,9 +644,9 @@ Engineering:
       `GET /api/portfolio/returns` (server/api10.ts and the tab's
       routes-analytics.ts). Then HoldingsReturnsCard can drop its "held
       outside this scope → no rate" fallback.
-- [ ] **Declare production**: freeze the first snapshot fixture and lower
-      `SNAPSHOT_COMPAT.minReadable` (see the milestone above). The
-      'pre-upgrade' history pin can't fire until then.
+- [x] **Declare production**: v21 fixture frozen (2026-09-25); the floor
+      followed the vault up to v25 on 2026-10-01 once the Session card's
+      new schema readout showed it resealed there.
 - [ ] Household mode's Future cache sees only this tab's own server writes;
       the other member's changes show after a reload.
 - [ ] `useAnchor` should follow a section until the page settles on every
@@ -681,8 +682,9 @@ Engineering:
 - [x] Price upserts rewrite identical closes, so every refresh moves the tab's
       `dataRevision` and re-runs Future's compare even when nothing changed.
       Fixed with `WHERE close_cents IS NOT excluded.close_cents` (parity-tested).
-- [ ] The member-passkey "Add it now" (QR/hybrid) path is untested — the pass
-      used one CDP virtual authenticator per tab.
+- [x] The member-passkey "Add it now" (QR/hybrid) path: verified on real
+      devices 2026-10 — Nicole accepted the invitation and enrolled by scanning
+      the owner's QR code.
 
 ## Cut from the 2026-09-23 plan (revisit later)
 
