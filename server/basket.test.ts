@@ -39,13 +39,13 @@ SPY|SPDR S&P 500 ETF Trust|P|SPY|Y|100|N|SPY
 AAPL|Apple Inc. (dup listing on another venue)|Z|AAPL|N|100|N|AAPL
 File Creation Time: 0908202521:30|||||||`
 
-const spark = (rows: [string, number, number][]) => ({
+const spark = (rows: [string, number, number, number?][]) => ({
   spark: {
-    result: rows.map(([symbol, px, t]) => ({ symbol, response: [{ meta: { regularMarketPrice: px, regularMarketTime: t } }] })),
+    result: rows.map(([symbol, px, t, prev]) => ({ symbol, response: [{ meta: { regularMarketPrice: px, regularMarketTime: t, chartPreviousClose: prev } }] })),
   },
 })
-const v7 = (rows: [string, number, number][]) => ({
-  quoteResponse: { result: rows.map(([symbol, px, t]) => ({ symbol, regularMarketPrice: px, regularMarketTime: t })), error: null },
+const v7 = (rows: [string, number, number, number?][]) => ({
+  quoteResponse: { result: rows.map(([symbol, px, t, prev]) => ({ symbol, regularMarketPrice: px, regularMarketTime: t, regularMarketPreviousClose: prev })), error: null },
 })
 const T = 1757458800 // 2025-09-09 23:00 UTC
 
@@ -112,9 +112,11 @@ describe('symbol directory', () => {
 
 describe('quote parsers', () => {
   it('spark and v7 both yield integer cents and the quote day', () => {
-    const s = parseSpark(spark([['AAPL', 234.567, T]]))
-    expect(s).toEqual([{ symbol: 'AAPL', kind: 'stock', cents: 23457, pricedOn: '2025-09-09' }])
-    expect(parseV7Quotes(v7([['SPY', 650.001, T]]))).toEqual([{ symbol: 'SPY', kind: 'stock', cents: 65000, pricedOn: '2025-09-09' }])
+    const s = parseSpark(spark([['AAPL', 234.567, T, 232.104]]))
+    expect(s).toEqual([{ symbol: 'AAPL', kind: 'stock', cents: 23457, pricedOn: '2025-09-09', prevCents: 23210 }])
+    expect(parseV7Quotes(v7([['SPY', 650.001, T, 648.5]]))).toEqual([{ symbol: 'SPY', kind: 'stock', cents: 65000, pricedOn: '2025-09-09', prevCents: 64850 }])
+    // A source that gives no previous close: the quote stands, without one.
+    expect(parseV7Quotes(v7([['SPY', 650.001, T]]))).toEqual([{ symbol: 'SPY', kind: 'stock', cents: 65000, pricedOn: '2025-09-09', prevCents: null }])
     expect(parseSpark({ spark: { result: [{ symbol: 'DEAD', response: [{ meta: {} }] }] } })).toEqual([])
     expect(parseSpark(null)).toEqual([])
     expect(parseV7Quotes({ quoteResponse: { result: [{ symbol: 'NEG', regularMarketPrice: -1 }] } })).toEqual([])
@@ -124,12 +126,14 @@ describe('quote parsers', () => {
     const seen = new Set<string>()
     const q = parseCoinGeckoMarkets(
       [
-        { symbol: 'btc', current_price: 111234.56, last_updated: '2025-09-09T22:58:01.000Z' },
+        { symbol: 'btc', current_price: 111234.56, price_change_24h: 1234.56, last_updated: '2025-09-09T22:58:01.000Z' },
         { symbol: 'btc', current_price: 1.0, last_updated: '2025-09-09T22:58:01.000Z' },
       ],
       seen,
     )
-    expect(q).toEqual([{ symbol: 'BTC', kind: 'crypto', cents: 11123456, pricedOn: '2025-09-09' }])
+    // The previous price is the current one less its 24-hour change.
+    expect(q).toEqual([{ symbol: 'BTC', kind: 'crypto', cents: 11123456, pricedOn: '2025-09-09', prevCents: 11000000 }])
+    expect(parseCoinGeckoMarkets([{ symbol: 'y', current_price: 2 }])[0]!.prevCents).toBeNull()
     expect(parseCoinGeckoMarkets([{ symbol: 'x', current_price: 2 }], seen)[0]!.pricedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(parseCoinGeckoMarkets({ not: 'an array' })).toEqual([])
   })
@@ -185,6 +189,7 @@ describe('buildBasket', () => {
       kind: 'crypto',
       cents: 11123456,
       pricedOn: '2025-09-09',
+      prevCents: null,
       name: 'Bitcoin',
       etf: false,
     })

@@ -70,7 +70,8 @@ export function inScope(a: Pick<InvestAccountRow, 'owner'>, key: OwnerKey): bool
  * The portfolio as one owner's accounts hold it: each symbol's per-account
  * split kept for those accounts only (its quantity, cost and value re-summed
  * from them — the engine's own figures, so nothing is re-priced), its lots
- * likewise, symbols they don't hold dropped. Holdings totals re-summed; the
+ * likewise, symbols they don't hold dropped. Holdings totals (the day's change
+ * among them) re-summed; the
  * realized-gains totals stay the household's (one return).
  */
 export function scopePortfolio(
@@ -81,18 +82,26 @@ export function scopePortfolio(
   const out: PortfolioPosition[] = []
   let value = 0
   let cost = 0
+  let dayChange = 0
+  let dayBase = 0
   for (const p of positions) {
     const accounts = p.accounts.filter((a) => accountIds.has(a.invest_account_id))
     if (accounts.length === 0) continue
     const q = accounts.reduce((s, a) => s + a.qty_micro, 0)
     const c = accounts.reduce((s, a) => s + a.cost_cents, 0)
     const v = accounts.reduce((s, a) => s + a.value_cents, 0)
+    const day = p.day_change_cents == null ? null : accounts.reduce((s, a) => s + (a.day_change_cents ?? 0), 0)
+    if (day !== null) {
+      dayChange += day
+      dayBase += v - day
+    }
     out.push({
       ...p,
       qty_micro: q,
       cost_cents: c,
       value_cents: v,
       unrealized_cents: v - c,
+      day_change_cents: day,
       accounts,
       lots: p.lots.filter((l) => accountIds.has(l.invest_account_id)),
     })
@@ -100,7 +109,7 @@ export function scopePortfolio(
     cost += c
   }
   out.sort((a, b) => b.value_cents - a.value_cents || a.symbol.localeCompare(b.symbol))
-  return { positions: out, totals: { ...totals, value, cost, unrealized: value - cost } }
+  return { positions: out, totals: { ...totals, value, cost, unrealized: value - cost, day_change: dayChange, day_base: dayBase } }
 }
 
 /** "Max’s accounts" / "joint accounts" — what a narrowed view shows, in words. */

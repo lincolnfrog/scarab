@@ -500,6 +500,18 @@ export const migrations: string[] = [
   // so it carries a class of its own. Additive for a snapshot (tier B).
   `ALTER TABLE assets ADD COLUMN asset_class TEXT;
    ALTER TABLE invest_accounts ADD COLUMN asset_class TEXT`,
+
+  // 25 — the day's gain or loss. A quote source reports the previous
+  // session's close alongside the price (Yahoo's previous close; for crypto,
+  // CoinGecko's price 24 hours earlier): `prices.prev_close_cents` keeps it
+  // with the quote it came with, and the shared basket carries it per symbol
+  // (`basket_quotes.prev_cents`, still not part of a snapshot). A fact off the
+  // quote — the day's change is derived from it, never stored, and never
+  // guessed from the row before (quotes exist only for days someone
+  // refreshed). NULL for history, hand-entered prices and older rows.
+  // Additive for a snapshot (tier B).
+  `ALTER TABLE prices ADD COLUMN prev_close_cents INTEGER;
+   ALTER TABLE basket_quotes ADD COLUMN prev_cents INTEGER`,
 ]
 
 export function migrate(db: DbLike): void {

@@ -91,10 +91,11 @@
 .inv-tag.inv-quiet { background: transparent; color: var(--ink-3); }
 
 /* ---------- tax picture ---------- */
-.inv-taxpic { display: grid; gap: 12px; }
-.inv-taxpic .inv-big { font-size: 20px; font-weight: 650; font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.inv-taxpic .inv-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--ink-2); }
-.inv-taxpic .inv-row b { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; }
+/* A strip of figures across the card, each under its label; they wrap to rows as the card narrows. */
+.inv-taxpic { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 24px; align-items: start; }
+.inv-taxpic .inv-row { display: grid; gap: 3px; align-content: start; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
+.inv-taxpic .inv-row b { order: -1; font-family: var(--mono); font-size: 16px; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 650; }
+.inv-taxcard .inv-scopenote { margin: 0 0 10px; }
 
 /* ---------- forms ---------- */
 .inv-form { display: grid; gap: 12px; }
@@ -285,18 +286,23 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(208px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
 }
 .inv-strip > li { display: flex; min-width: 0; }
 .inv-tile {
   flex: 1;
   min-width: 0;
+  /* Two lines: who and what it's worth, then its type, what it holds and its day. The name and the
+     second line's middle share the flexible column, so only the figures size the right one. */
   display: grid;
-  grid-template-rows: auto auto auto auto;
-  align-content: start;
-  gap: 4px;
-  padding: 11px 13px 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'head head v'
+    'sub foot day';
+  align-items: center;
+  gap: 4px 10px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--plane);
@@ -308,19 +314,30 @@
 }
 .inv-tile:hover { border-color: var(--line-strong); background: var(--card-hi); }
 .inv-tile:active { transform: translateY(1px); }
-.inv-tile-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.inv-tile-head { grid-area: head; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .inv-tile-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.inv-tile-v { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.inv-tile-v { grid-area: v; text-align: right; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .inv-tile-v-none { color: var(--ink-3); }
-.inv-tile-sub { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.inv-tile-sub { grid-area: sub; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
 .inv-tile-where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.inv-tile-foot { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11.5px; color: var(--ink-3); }
+.inv-tile-foot { grid-area: foot; display: flex; gap: 2px 10px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 11.5px; color: var(--ink-3); }
+.inv-tile-foot > span { overflow: hidden; text-overflow: ellipsis; }
+.inv-tile-foot > span:first-child { flex: none; }
+/* The institution gives way first: the type tag and what the account holds say more in a narrow tile. */
+.inv-tile-where { display: none; }
+.inv-tile-day { grid-area: day; display: inline-flex; gap: 5px; align-items: baseline; justify-self: end; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink-2); }
+.inv-tile-day.pos { color: var(--up); }
+.inv-tile-day.neg { color: var(--down); }
+.inv-tile-daypct { opacity: 0.85; }
 .inv-tile-stale { color: var(--ink-2); }
 /* The mockup's dashed add-card, tile-sized. */
 .inv-tile-add {
+  grid-template-columns: none;
+  grid-template-areas: none;
+  grid-auto-flow: column;
   place-content: center;
-  justify-items: center;
-  min-height: 96px;
+  gap: 8px;
+  min-height: 56px;
   border-style: dashed;
   border-color: var(--line-strong);
   background: none;
@@ -329,40 +346,14 @@
 }
 .inv-tile-add:hover { color: var(--gold); border-color: var(--gold); background: none; }
 .inv-tile-plus { font-size: 18px; line-height: 1; }
-.inv-tile-skel { cursor: default; gap: 9px; min-height: 96px; }
+.inv-tile-skel { cursor: default; grid-template-columns: minmax(0, 1fr); grid-template-areas: none; gap: 9px; min-height: 56px; }
 .inv-tile-skel:hover { background: var(--plane); border-color: var(--line); }
 /* Old number, not an error: a hollow neutral ring — never --down. */
 .inv-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-2); }
 
-/* A phone: one account per row, in two lines — who and what it's worth, then its type and what it holds —
-   so ten accounts are a glance rather than a long scroll. */
+/* A phone: one account per row. */
 @container card (width < 520px) {
-  .inv-strip { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  /* The name and the second line both span the flexible middle column, so only the value sizes the right one. */
-  .inv-tile {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-rows: none;
-    grid-template-areas:
-      'head head v'
-      'sub foot foot';
-    align-items: center;
-    gap: 4px 10px;
-    padding: 10px 12px;
-  }
-  .inv-tile-head { grid-area: head; }
-  .inv-tile-v { grid-area: v; font-size: 16px; text-align: right; }
-  .inv-tile-sub { grid-area: sub; }
-  .inv-tile-foot { grid-area: foot; }
-  .inv-tile-skel { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; min-height: 52px; }
-  .inv-tile-add {
-    grid-template-columns: none;
-    grid-template-areas: none;
-    grid-auto-flow: column;
-    justify-content: center;
-    align-content: center;
-    gap: 8px;
-    min-height: 52px;
-  }
+  .inv-strip { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Owner avatars (the mockup's .av pair). */
@@ -597,3 +588,99 @@
 .inv-rz-sub { display: block; font-size: 11px; color: var(--ink-3); line-height: 1.4; margin-top: 1px; }
 .inv-rz-sub .inv-tag { margin-left: 0; height: 16px; font-size: 10px; }
 .inv-rz-foot { margin: 10px 0 0; }
+
+/* ---------- the headline: worth, today, overall ---------- */
+.inv-sum-body { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 32px; }
+.inv-sum-main { display: grid; gap: 4px; min-width: 0; }
+.inv-sum-v { font-family: var(--disp); font-size: 38px; line-height: 1.1; letter-spacing: 0.005em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.inv-sum-day { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; color: var(--ink-2); }
+.inv-sum-day b { font-family: var(--mono); font-weight: 650; font-variant-numeric: tabular-nums; }
+.inv-sum-day > span { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.inv-sum-day.pos { color: var(--up); }
+.inv-sum-day.neg { color: var(--down); }
+.inv-sum-day.muted { font-size: 12px; }
+/* When the change is for: neutral, and dotted because it explains itself on hover or focus. */
+.inv-sum-day .inv-sum-when,
+.inv-hint { font-family: var(--sans); color: var(--ink-3); text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px; cursor: help; }
+.inv-sum-day .inv-sum-when { font-size: 12px; }
+.inv-sum-sub { font-size: 12px; color: var(--ink-3); }
+.inv-sum-stats { gap: 10px 36px; }
+.inv-sum-stats dd { font-size: 16px; }
+.inv-dsum-stats .inv-subtone { color: inherit; opacity: 0.85; }
+@container card (width < 520px) {
+  .inv-sum-v { font-size: 30px; }
+  .inv-sum-stats { gap: 10px 24px; }
+}
+
+/* ---------- holdings: one sortable row per symbol ---------- */
+.inv-hold td { vertical-align: middle; }
+.inv-hold .inv-subline { font-weight: 400; }
+.inv-hold .inv-subtone { color: inherit; opacity: 0.85; }
+.inv-hold th { vertical-align: bottom; white-space: nowrap; }
+.inv-hold th.h-spark { font-weight: 600; }
+.inv-holdrow { cursor: pointer; }
+.inv-holdrow:hover td { background: rgba(255, 255, 255, 0.035); }
+.inv-hold .h-spark { width: 104px; padding-right: 0; }
+.inv-spark { display: block; }
+.inv-symbtn { display: inline-flex; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; border-radius: 6px; }
+.inv-symbtn:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.inv-holdrow:hover .inv-symbtn .lg { border-color: var(--line-strong); color: var(--ink); }
+/* A column header sorts: it keeps the header's own type, and the mark says which way. */
+.inv-sortbtn { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; border-radius: 4px; }
+.inv-sortbtn:hover,
+.inv-sortbtn.on { color: var(--ink); }
+.inv-sortbtn:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.inv-sortmark { display: inline-block; width: 8px; font-size: 9px; }
+.inv-totalrow td { border-bottom: 0; }
+/* The least-needed columns give way as the card narrows: the share, then the sparkline. */
+@container card (width < 900px) {
+  .inv-hold .h-share { display: none; }
+}
+@container card (width < 760px) {
+  .inv-hold .h-spark { display: none; }
+}
+/* A phone: each holding in two lines, the way a brokerage app lists them — the symbol and its value on top,
+   today's change and the unrealized gain below. Price, cost and return are a tap away, in the drawer. */
+@container card (width < 520px) {
+  .inv-hold,
+  .inv-hold tbody { display: block; }
+  .inv-hold thead { display: none; }
+  .inv-hold tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'a v'
+      'd u';
+    align-items: center;
+    gap: 2px 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .inv-hold tbody tr:last-child { border-bottom: 0; }
+  .inv-hold td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
+  .inv-hold tbody tr:hover td { background: none; }
+  .inv-hold :is(.h-price, .h-ret, .h-share, .h-spark) { display: none; }
+  .inv-hold .h-asset { grid-area: a; display: flex; align-items: baseline; gap: 8px; }
+  .inv-hold .h-value { grid-area: v; }
+  .inv-hold .h-day { grid-area: d; text-align: left; font-size: 12px; }
+  .inv-hold .h-unr { grid-area: u; font-size: 12px; }
+  /* No header here to say which figure is which: the day's change names itself (the gain sits under the value). */
+  .inv-hold .h-day:not(:empty)::before { content: 'day '; font-family: var(--sans); color: var(--ink-3); }
+  .inv-hold .h-value .inv-subline { display: none; }
+  .inv-hold :is(.h-day, .h-unr) .inv-subline { display: inline; margin-left: 6px; }
+  .inv-hold .inv-cashrow { border-top: 1px dashed var(--line-strong); }
+  .inv-hold .inv-cashrow td { border-top: 0; }
+}
+
+/* ---------- the holding drawer ---------- */
+.inv-hd-price { display: inline-flex; }
+.inv-hd-price .inv-price { font-size: inherit; }
+.inv-hd-price .inv-tag,
+.inv-hd-price .btn { font-size: 10.5px; letter-spacing: 0.01em; }
+.inv-hd-day { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.inv-hd-day.pos { color: var(--up); }
+.inv-hd-day.neg { color: var(--down); }
+.inv-hd-section { padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--line); }
+.inv-hd-h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.inv-paneltools .inv-hd-h3 { margin: 0; }
+.inv-hd-section .inv-paneltools { margin-bottom: 8px; }

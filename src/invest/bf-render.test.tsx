@@ -85,7 +85,7 @@ describe('the owner pills (B13)', () => {
   })
 
   it('the tax picture says it is still the household’s when narrowed', () => {
-    const totals: PortfolioResponse['totals'] = { value: 1, cost: 1, unrealized: 0, cash: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+    const totals: PortfolioResponse['totals'] = { value: 1, cost: 1, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
     expect(text(renderToStaticMarkup(<TaxPictureCard totals={totals} marginal={null} year="2026" scope="Max’s accounts" />))).toContain(
       'The whole household’s, not only Max’s accounts',
     )

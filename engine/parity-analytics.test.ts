@@ -8,6 +8,7 @@ import { getPortfolio } from './invest'
 import { netWorthSeries } from './networth'
 import {
   applyBasket,
+  getRecentCloses,
   applyMonthlyHistory,
   encodeMonthly,
   getChartData,
@@ -175,6 +176,36 @@ const rows = (db: DbLike, table: 'prices' | 'prices_daily') =>
   db.prepare(`SELECT asset_id, priced_on, close_cents FROM ${table} ORDER BY asset_id, priced_on`).all()
 
 describe('price history parity: better-sqlite3 vs sql.js', () => {
+  it('the basket’s previous closes give the same day change on both engines, and re-applying them writes nothing', async () => {
+    const changes = (db: DbLike) => (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
+    const withPrev = (vtiPrev: number | null) => {
+      const b = basketOn('2026-09-22', 25_000, 50_200)
+      return { ...b, quotes: b.quotes.map((q) => (q.symbol === 'VTI' ? { ...q, prevCents: vtiPrev } : q)) }
+    }
+    const { server, browser } = await onBothEngines(seedHousehold, (db) => {
+      applyBasket(db, withPrev(24_800))
+      const before = changes(db)
+      applyBasket(db, withPrev(24_800))
+      const same = changes(db) - before
+      applyBasket(db, withPrev(null)) // a later basket without one keeps the day's
+      const p = getPortfolio(db, '2026-09-22')
+      return {
+        same,
+        kept: changes(db) - before - same,
+        day: p.positions.map((x) => [x.symbol, x.prev_close_cents, x.day_change_cents]),
+        totals: [p.totals.day_change, p.totals.day_base],
+      }
+    })
+    expect(browser).toEqual(server)
+    expect(server.same).toBe(0)
+    expect(server.kept).toBe(0)
+    const vti = server.day.find((d) => d[0] === 'VTI')!
+    expect(vti[1]).toBe(24_800)
+    expect(vti[2]).not.toBeNull()
+    expect(server.day.find((d) => d[0] === 'QQQ')).toEqual(['QQQ', null, null]) // quoted without one
+    expect(server.totals[0]).toBe(vti[2])
+  })
+
   it('re-applying an identical basket changes no rows on either engine (the tab data revision stays put)', async () => {
     const changes = (db: DbLike) => (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n
     const { server, browser } = await onBothEngines(seedHousehold, (db) => {
@@ -189,6 +220,27 @@ describe('price history parity: better-sqlite3 vs sql.js', () => {
     expect(server.same).toBe(0)
     expect(server.moved).toBe(2) // VTI in prices and in prices_daily
     expect(server.updated).toBe(2) // still reports what it matched
+  })
+
+  it('recent closes for the sparklines: one per day from both tables, the quote table winning a shared day', async () => {
+    const { server, browser } = await onBothEngines(seedHousehold, (db) => {
+      db.prepare("DELETE FROM prices WHERE priced_on > '2026-06-01'").run()
+      db.prepare("DELETE FROM prices_daily").run()
+      const daily = db.prepare('INSERT INTO prices_daily (asset_id, priced_on, close_cents) VALUES (1, ?, ?)')
+      daily.run('2026-06-20', 100) // before the window
+      daily.run('2026-09-18', 24_000)
+      daily.run('2026-09-21', 24_500)
+      applyBasket(db, basketOn('2026-09-21', 24_900, 50_100)) // the same day, in both tables
+      applyBasket(db, basketOn('2026-09-22', 25_000, 50_200))
+      return getRecentCloses(db, '2026-09-22')
+    })
+    expect(browser).toEqual(server)
+    expect(server.from).toBe('2026-06-24')
+    expect(server.series.find((s) => s.asset_id === 1)!.closes).toEqual([
+      { d: '2026-09-18', c: 24_000 },
+      { d: '2026-09-21', c: 24_900 },
+      { d: '2026-09-22', c: 25_000 },
+    ])
   })
 
   it('applyBasket writes prices and prices_daily identically, and the chart reads them identically', async () => {

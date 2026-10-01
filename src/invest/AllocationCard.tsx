@@ -86,11 +86,17 @@ function Plan({ a }: { a: Allocation }) {
  * household's target, the plan that closes the gap at the least tax, and the
  * classes themselves — guessed from each fund's symbol and name until set.
  * `rev` is Investments' load counter: a trade or a price refresh re-reads it.
+ * The plan stays folded until asked for — or until a link lands on the card
+ * (`planOpen`: the Checkup's drift findings point at it).
  */
-export default function AllocationCard({ rev, anchor }: { rev: number; anchor?: RefCallback<HTMLElement> }) {
+export default function AllocationCard({ rev, anchor, planOpen = false }: { rev: number; anchor?: RefCallback<HTMLElement>; planOpen?: boolean }) {
   const [a, setA] = useState<Allocation | null>(null)
   const [targets, setTargets] = useState<Targets | null>(null)
   const [showClasses, setShowClasses] = useState(false)
+  const [showPlan, setShowPlan] = useState(planOpen)
+  useEffect(() => {
+    if (planOpen) setShowPlan(true)
+  }, [planOpen])
   const [err, setErr] = useState<string | null>(null)
   const load = useCallback(async () => {
     const r = await get<Allocation>('/api/allocation')
@@ -182,8 +188,10 @@ export default function AllocationCard({ rev, anchor }: { rev: number; anchor?: 
 
       {a.plan && (
         <div className="topline">
-          <h3 className="al-h3">Rebalance plan</h3>
-          <Plan a={a} />
+          <button type="button" className="al-toggle" aria-expanded={showPlan} onClick={() => setShowPlan((v) => !v)}>
+            Rebalance plan {showPlan ? '▴' : '▾'}
+          </button>
+          {showPlan && <Plan a={a} />}
         </div>
       )}
 

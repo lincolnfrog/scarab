@@ -400,7 +400,10 @@ the operator can observe:
   the same for everyone, so it reveals nothing about the portfolio behind it;
   the residual is identity and timing (who fetched the basket, and when), not
   content. Symbol search runs over that same basket in the tab, so typing a
-  ticker sends nothing; a session's "prices as of" line asks when the basket
+  ticker sends nothing. Each basket row carries the security's previous close
+  beside its price — public market data, the same for everyone — so the tab
+  works out the day's gain or loss on its own holdings locally; nothing new
+  is asked of the server for it. A session's "prices as of" line asks when the basket
   was built (`/api/basket/status`, on entry and when the tab returns to view,
   at most every 30 minutes). Monthly history comes from the shared market
   history file (below), and a tab's daily price chart is those month-ends

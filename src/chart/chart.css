@@ -71,7 +71,6 @@
 .ch-empty { padding: 18px 0 8px; }
 .ch-empty .ch-hint { max-width: 62ch; }
 .ch-empty .btn { margin-top: 10px; }
-.ch-symbols .ui-seg { flex-wrap: wrap; }
 .ch-legend-below { margin-top: 8px; }
 
 /* ---------- TimeChart ---------- */
@@ -301,18 +300,9 @@
 /* ---------- net-worth composition (C10) ---------- */
 .ch-stack { transition: fill-opacity var(--dur-1) var(--ease-out); }
 
-/* ---------- investments: portfolio value, trade rug, return by holding (C6) ---------- */
+/* ---------- investments: portfolio value, trade rug (C6) ---------- */
 .ch-rug { pointer-events: none; }
 .ch-rug-key { margin-top: 6px; }
-.ch-ret-sub { color: var(--ink-3); margin-left: 4px; }
-.ch-rets { display: grid; }
-.ch-ret-sym { font-family: var(--mono); font-size: 12px; color: var(--ink); }
-.ch-ret-vl { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; white-space: nowrap; }
-.ch-ret-vl b { font-weight: 600; }
-.ch-ret-rate { color: var(--ink-3); font-size: 11px; }
-.ch-ret-none { color: var(--ink-3); font-family: var(--sans); font-size: 11.5px; }
-.ch-ret-hollow { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 2; }
-.ch-ret-total { margin-top: 10px; }
 
 /* ---------- Compare (C7) ---------- */
 .ch-cmp-bar {

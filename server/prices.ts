@@ -3,7 +3,8 @@ import { priceFlags } from '../engine/prices'
 import { addDaysIso, monthEndIso } from '../shared/dates'
 import { upstreamSignal } from './upstream'
 
-export type Quote = { symbol: string; cents: number; pricedOn: string }
+/** `prevCents`: the previous session's close as the source reported it (crypto: the price 24 hours earlier). */
+export type Quote = { symbol: string; cents: number; pricedOn: string; prevCents?: number | null }
 export type QuoteResult = { quotes: Quote[]; errors: string[] }
 
 /**
@@ -11,18 +12,23 @@ export type QuoteResult = { quotes: Quote[]; errors: string[] }
  * symbol. (Stooq's CSV quote API died behind bot protection in 2026.)
  * External API boundary: quotes arrive as floats; they are converted to
  * integer cents here, once, and stay integers everywhere after.
+ *
+ * With `range=1d` the meta's `chartPreviousClose` is the previous session's
+ * close — what the day's gain or loss is measured from.
  */
 export function parseYahooMeta(
   symbol: string,
   body: unknown,
-): { cents: number; pricedOn: string } | { error: string } {
-  const meta = (body as { chart?: { result?: { meta?: { regularMarketPrice?: number; regularMarketTime?: number } }[] } })
-    ?.chart?.result?.[0]?.meta
+): { cents: number; pricedOn: string; prevCents: number | null } | { error: string } {
+  const meta = (
+    body as { chart?: { result?: { meta?: { regularMarketPrice?: number; regularMarketTime?: number; chartPreviousClose?: number } }[] } }
+  )?.chart?.result?.[0]?.meta
   const px = meta?.regularMarketPrice
   if (typeof px !== 'number' || !Number.isFinite(px) || px <= 0) return { error: `${symbol}: no quote from Yahoo` }
   const t = meta?.regularMarketTime
   const pricedOn = (typeof t === 'number' ? new Date(t * 1000) : new Date()).toISOString().slice(0, 10)
-  return { cents: Math.round(px * 100), pricedOn }
+  const prev = meta?.chartPreviousClose
+  return { cents: Math.round(px * 100), pricedOn, prevCents: typeof prev === 'number' && Number.isFinite(prev) && prev > 0 ? Math.round(prev * 100) : null }
 }
 
 export async function fetchStockQuotes(symbols: string[], f: typeof fetch = fetch): Promise<QuoteResult> {
@@ -76,12 +82,12 @@ export async function fetchCryptoQuotes(symbols: string[], f: typeof fetch = fet
     bySymbol.set(id, sym.toUpperCase())
   }
   if (ids.length === 0) return { quotes: [], errors }
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`
-  let body: Record<string, { usd?: number }>
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true`
+  let body: Record<string, { usd?: number; usd_24h_change?: number }>
   try {
     const r = await f(url, { signal: upstreamSignal() })
     if (!r.ok) return { quotes: [], errors: [...errors, `coingecko: HTTP ${r.status}`] }
-    body = (await r.json()) as Record<string, { usd?: number }>
+    body = (await r.json()) as Record<string, { usd?: number; usd_24h_change?: number }>
   } catch (e) {
     // A timeout or a dead network is this source's error, as for the stock quotes — not the whole refresh's.
     return { quotes: [], errors: [...errors, `coingecko: ${e instanceof Error ? e.message : 'fetch failed'}`] }
@@ -91,7 +97,10 @@ export async function fetchCryptoQuotes(symbols: string[], f: typeof fetch = fet
   for (const [id, sym] of bySymbol) {
     const usd = body[id]?.usd
     if (typeof usd === 'number' && Number.isFinite(usd)) {
-      quotes.push({ symbol: sym, cents: Math.round(usd * 100), pricedOn: today })
+      // Crypto never closes: its "previous close" is the price 24 hours ago, from the 24-hour change in percent.
+      const pct = body[id]?.usd_24h_change
+      const prev = typeof pct === 'number' && Number.isFinite(pct) && pct > -100 ? Math.round((usd * 100) / (1 + pct / 100)) : null
+      quotes.push({ symbol: sym, cents: Math.round(usd * 100), pricedOn: today, prevCents: prev !== null && prev > 0 ? prev : null })
     } else errors.push(`${sym}: no USD quote from CoinGecko`)
   }
   return { quotes, errors }

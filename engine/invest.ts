@@ -1,4 +1,4 @@
-import { addMonthsIso, isRealIsoDay } from '../shared/dates'
+import { addDaysIso, addMonthsIso, isRealIsoDay } from '../shared/dates'
 import {
   INVEST_SUBTYPES,
   isInvestSubtype,
@@ -1150,6 +1150,13 @@ export function deleteTrade(db: DbLike, id: number): TradeDeleteResult {
  * recorded (see PortfolioAccount), and value + cash equals the current
  * month's lots-account value in `netWorthSeries` to the cent.
  *
+ * The day's change (`day_change_cents`, `totals.day_change`) is measured from
+ * the previous close the latest quote came with (prices.prev_close_cents) —
+ * never from the row before it, which may be days older. Shares bought on the
+ * quote's own day are measured from what they cost instead; a hand-entered
+ * price, a quote older than DAY_CHANGE_FRESH_DAYS or one that came without a
+ * previous close has no day change (null), and is left out of the total.
+ *
  * Realized year-to-date gains split by shelter: `ytd_st` / `ytd_lt` count
  * taxable accounts only (what reaches the tax bill); `ytd_sheltered` is what
  * was realized inside tax-advantaged ones.
@@ -1158,15 +1165,23 @@ export function getPortfolio(db: DbLike, today: string): PortfolioResponse {
   return portfolioOf(db, today)
 }
 
+/**
+ * How old a quote may be and still say something about "the day": a stock's
+ * last session before a long weekend is four days back by Tuesday morning.
+ */
+export const DAY_CHANGE_FRESH_DAYS = 4
+
 /** getPortfolio's arithmetic over every lots account, or over one (`accountId`: the account drawer). */
 function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioResponse {
+  type Price = { close_cents: number; priced_on: string; prev_close_cents: number | null }
   const latestPrice = db.prepare(
-    'SELECT close_cents, priced_on FROM prices WHERE asset_id = ? ORDER BY priced_on DESC LIMIT 1',
+    'SELECT close_cents, priced_on, prev_close_cents FROM prices WHERE asset_id = ? ORDER BY priced_on DESC LIMIT 1',
   )
   const manual = manualPriceMarks(db)
-  const priceOf = new Map<number, { close_cents: number; priced_on: string } | undefined>()
+  const priceOf = new Map<number, Price | undefined>()
   const positions = new Map<number, PortfolioPosition>()
-  const totals = { value: 0, cost: 0, unrealized: 0, cash: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+  const totals = { value: 0, cost: 0, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+  const freshFrom = addDaysIso(today, -DAY_CHANGE_FRESH_DAYS)
   const warnings: string[] = []
   const valueOf = new Map<number, number>() // holdings value per account
 
@@ -1180,9 +1195,20 @@ function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioRe
     }
     if (pos.qty_micro === 0) continue
 
-    if (!priceOf.has(h.assetId)) priceOf.set(h.assetId, latestPrice.get(h.assetId) as { close_cents: number; priced_on: string } | undefined)
+    if (!priceOf.has(h.assetId)) priceOf.set(h.assetId, latestPrice.get(h.assetId) as Price | undefined)
     const price = priceOf.get(h.assetId)
     const value = price ? positionValueCents(pos.qty_micro, price.close_cents) : pos.cost_cents
+    const isManual = isManualPrice(manual.get(h.symbol), price)
+    // The close the day's change is measured from, when this quote is one a day change can be read off.
+    const prev = price && !isManual && price.priced_on >= freshFrom ? price.prev_close_cents : null
+    const day =
+      !price || prev === null
+        ? null
+        : pos.lots.reduce((sum, l) => {
+            if (l.opened_on > price.priced_on) return sum // bought since the quote: no change yet
+            const now = positionValueCents(l.qty_micro, price.close_cents)
+            return sum + now - (l.opened_on === price.priced_on ? l.cost_cents : positionValueCents(l.qty_micro, prev))
+          }, 0)
 
     let p = positions.get(h.assetId)
     if (!p) {
@@ -1198,7 +1224,9 @@ function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioRe
         unrealized_cents: 0,
         lots: [],
         accounts: [],
-        price_manual: isManualPrice(manual.get(h.symbol), price),
+        price_manual: isManual,
+        prev_close_cents: prev,
+        day_change_cents: day === null ? null : 0,
       }
       positions.set(h.assetId, p)
     }
@@ -1206,6 +1234,7 @@ function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioRe
     p.cost_cents += pos.cost_cents
     p.value_cents += value
     p.unrealized_cents += value - pos.cost_cents
+    if (day !== null && p.day_change_cents != null) p.day_change_cents += day
     p.accounts.push({
       invest_account_id: h.investAccountId,
       name: h.accountName,
@@ -1213,6 +1242,7 @@ function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioRe
       qty_micro: pos.qty_micro,
       cost_cents: pos.cost_cents,
       value_cents: value,
+      day_change_cents: day,
     })
     for (const l of pos.lots)
       p.lots.push({
@@ -1229,6 +1259,10 @@ function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioRe
     totals.value += value
     totals.cost += pos.cost_cents
     totals.unrealized += value - pos.cost_cents
+    if (day !== null) {
+      totals.day_change += day
+      totals.day_base += value - day
+    }
   }
 
   const accounts = accountCash(db, today, accountId).map((a): PortfolioAccount => ({ ...a, value_cents: valueOf.get(a.invest_account_id) ?? 0 }))

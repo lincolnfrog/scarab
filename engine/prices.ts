@@ -1,5 +1,6 @@
 import { addMonthsToMonth, monthEndIso } from '../shared/dates'
-import type { ChartResponse, HistoryApplyResult, HistoryPack, HistorySeries } from '../shared/series-api'
+import { addDaysIso } from '../shared/dates'
+import type { ChartResponse, HistoryApplyResult, HistoryPack, HistorySeries, SparksResponse } from '../shared/series-api'
 import type { MarketHistory } from './analytics'
 import type { DbLike } from './db'
 import { bad, isoDay, notFound } from './errors'
@@ -12,21 +13,29 @@ import { bad, isoDay, notFound } from './errors'
  * Two tables, both facts about the market rather than derived numbers:
  *   prices        one close per asset per day it was quoted — refreshes, plus
  *                 monthly history (month-end closes). Valuation reads this.
+ *                 A refresh's row also keeps the previous session's close the
+ *                 source reported with it (`prev_close_cents`): what the day's
+ *                 gain or loss is measured from (engine/invest.ts).
  *   prices_daily  a daily close series for the price chart — Yahoo's daily
  *                 history on a household server; in a tab, which can't reach
  *                 Yahoo, each day's basket quote accrues here instead.
  */
 
-type Quote = { symbol: string; cents: number; pricedOn: string }
+/** `prevCents`: the previous session's close as the source reported it with this quote, when it did. */
+type Quote = { symbol: string; cents: number; pricedOn: string; prevCents?: number | null }
 type PriceTable = 'prices' | 'prices_daily'
 
 // An identical close is left alone rather than rewritten: a refresh that
 // brings nothing new then changes no rows, so the tab's data revision (and
 // everything keyed on it, like Future's cached compare) stays put.
+// A quote that brings no previous close (history, a hand-entered price) keeps
+// the one the day's row already has.
 const UPSERT: Record<PriceTable, string> = {
-  prices: `INSERT INTO prices (asset_id, priced_on, close_cents) VALUES (?, ?, ?)
-     ON CONFLICT (asset_id, priced_on) DO UPDATE SET close_cents = excluded.close_cents
-     WHERE close_cents IS NOT excluded.close_cents`,
+  prices: `INSERT INTO prices (asset_id, priced_on, close_cents, prev_close_cents) VALUES (?, ?, ?, ?)
+     ON CONFLICT (asset_id, priced_on) DO UPDATE SET close_cents = excluded.close_cents,
+       prev_close_cents = COALESCE(excluded.prev_close_cents, prev_close_cents)
+     WHERE close_cents IS NOT excluded.close_cents
+        OR (excluded.prev_close_cents IS NOT NULL AND prev_close_cents IS NOT excluded.prev_close_cents)`,
   prices_daily: `INSERT INTO prices_daily (asset_id, priced_on, close_cents) VALUES (?, ?, ?)
      ON CONFLICT (asset_id, priced_on) DO UPDATE SET close_cents = excluded.close_cents
      WHERE close_cents IS NOT excluded.close_cents`,
@@ -69,7 +78,7 @@ export function upsertPrices(db: DbLike, quotes: Quote[]) {
   for (const q of quotes) {
     const id = byId.get(q.symbol)
     if (!id) continue
-    upsert.run(id, q.pricedOn, q.cents)
+    upsert.run(id, q.pricedOn, q.cents, usablePrev(q.prevCents))
     updated++
   }
   return updated
@@ -78,7 +87,7 @@ export function upsertPrices(db: DbLike, quotes: Quote[]) {
 /** The shared daily basket as served by GET /api/basket (server/basket.ts); extra fields are ignored. */
 export type BasketInput = {
   builtAt: string | null
-  quotes: { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string }[]
+  quotes: { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string; prevCents?: number | null }[]
 }
 
 /**
@@ -88,7 +97,8 @@ export type BasketInput = {
  * leave the tab. Stocks match on Yahoo spelling (BRK.B → BRK-B), crypto on
  * the bare ticker.
  *
- * Each matched quote is written to both tables: to `prices` for valuation, and
+ * Each matched quote is written to both tables: to `prices` for valuation
+ * (with the previous close the basket carries for it, for the day's change), and
  * to `prices_daily`, where a tab's chart history builds up one day per visit
  * (it has no other daily source). Re-applying the same basket is a no-op in
  * effect: both are upserts keyed on (asset, day).
@@ -99,12 +109,12 @@ export function applyBasket(db: DbLike, basket: BasketInput) {
   if (basket.quotes.length === 0)
     return { updated: 0, backfilled: 0, errors: ['the price basket is empty — rebuild it from Data & Vault, or wait for today’s build'], basketBuiltAt: basket.builtAt }
   const byKey = new Map(basket.quotes.map((q) => [`${q.kind}:${q.symbol}`, q]))
-  const matched: { assetId: number; cents: number; pricedOn: string }[] = []
+  const matched: { assetId: number; cents: number; pricedOn: string; prev: number | null }[] = []
   const errors: string[] = []
   for (const a of assets) {
     const key = `${a.kind}:${a.kind === 'stock' ? a.symbol.toUpperCase().replace(/\./g, '-') : a.symbol.toUpperCase()}`
     const q = byKey.get(key)
-    if (q && isUsableQuote(q)) matched.push({ assetId: a.id, cents: q.cents, pricedOn: q.pricedOn })
+    if (q && isUsableQuote(q)) matched.push({ assetId: a.id, cents: q.cents, pricedOn: q.pricedOn, prev: usablePrev(q.prevCents) })
     else errors.push(q ? `${a.symbol}: malformed quote in today’s basket` : `${a.symbol}: not in today’s basket`)
   }
   if (matched.length > 0) {
@@ -112,7 +122,7 @@ export function applyBasket(db: DbLike, basket: BasketInput) {
     const toDaily = db.prepare(UPSERT.prices_daily)
     db.transaction(() => {
       for (const m of matched) {
-        toPrices.run(m.assetId, m.pricedOn, m.cents)
+        toPrices.run(m.assetId, m.pricedOn, m.cents, m.prev)
         toDaily.run(m.assetId, m.pricedOn, m.cents)
       }
     })()
@@ -123,6 +133,9 @@ export function applyBasket(db: DbLike, basket: BasketInput) {
 /** The basket crosses a network boundary into the tab: take only well-formed rows. */
 const isUsableQuote = (q: { cents: unknown; pricedOn: unknown }) =>
   Number.isSafeInteger(q.cents) && (q.cents as number) > 0 && typeof q.pricedOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q.pricedOn)
+
+/** A previous close worth keeping: positive integer cents, else none. */
+const usablePrev = (v: unknown): number | null => (Number.isSafeInteger(v) && (v as number) > 0 ? (v as number) : null)
 
 /* ---------- charts (reads only — fetching stays with the caller) ---------- */
 
@@ -173,6 +186,36 @@ export function getChartData(db: DbLike, symbolRaw: string, errors: string[] = [
       dailyFrom: daily[0]?.d ?? null,
     },
   }
+}
+
+/** How far back a holdings sparkline looks. */
+export const SPARK_DAYS = 90
+
+/**
+ * Each traded asset's closes over the last SPARK_DAYS, oldest first — the
+ * Holdings table's sparklines (GET /api/portfolio/sparks). Both price tables
+ * together, one close per day: where they share a day the quote table's wins
+ * (it is what the holding is valued at, so the line ends on the price shown).
+ * Reads only what is stored — however sparse; nothing is fetched for it.
+ */
+export function getRecentCloses(db: DbLike, today: string): SparksResponse {
+  const from = addDaysIso(today, -SPARK_DAYS)
+  const rows = db
+    .prepare(
+      `SELECT asset_id, priced_on AS d, close_cents AS c FROM prices WHERE priced_on >= ? AND priced_on <= ?
+       UNION ALL
+       SELECT asset_id, priced_on, close_cents FROM prices_daily pd WHERE priced_on >= ? AND priced_on <= ?
+         AND NOT EXISTS (SELECT 1 FROM prices p WHERE p.asset_id = pd.asset_id AND p.priced_on = pd.priced_on)
+       ORDER BY asset_id, d`,
+    )
+    .all(from, today, from, today) as { asset_id: number; d: string; c: number }[]
+  const series: SparksResponse['series'] = []
+  for (const r of rows) {
+    const last = series[series.length - 1]
+    if (last && last.asset_id === r.asset_id) last.closes.push({ d: r.d, c: r.c })
+    else series.push({ asset_id: r.asset_id, closes: [{ d: r.d, c: r.c }] })
+  }
+  return { from, to: today, series }
 }
 
 /* ---------- the shared monthly market history (GET /api/basket/history) ---------- */

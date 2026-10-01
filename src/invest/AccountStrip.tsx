@@ -6,6 +6,7 @@ import { Skeleton } from '../ui/Skeleton'
 import { OwnerAvatar } from './AccountFields'
 import { accountValueCents, heldLine, institutionLine, staleReason, typeLabel, unvestedLine } from './accountTypes'
 import { shortDay } from './balanceMath'
+import { accountDay, dayAmount, dayPercent, toneOf } from './dayMath'
 import './invest.css'
 
 export type AccountStripProps = {
@@ -29,9 +30,10 @@ export type AccountStripProps = {
 }
 
 /**
- * Every investment account as a compact tile — name, owner, value, type and
- * a quiet dot when its number is old — plus the dashed add tile. A tile
- * opens that account's drawer; nothing is edited here.
+ * Every investment account as a compact two-line tile — name, owner and
+ * value, then its type, what it holds and what it did today, with a quiet
+ * dot when its number is old — plus the dashed add tile. A tile opens that
+ * account's drawer; nothing is edited here.
  */
 export default function AccountStrip(p: AccountStripProps) {
   let body: ReactNode
@@ -97,13 +99,15 @@ export function AccountTile({ a, positions, cash, unvested, owners, today, onOpe
         : 'no balance yet'
       : heldLine(a, positions)
   const owner = a.owner ?? 'joint'
+  const day = a.tracking === 'lots' ? accountDay(a.id, positions) : null
+  const dayWords = day ? `, ${day.cents > 0 ? 'up' : day.cents < 0 ? 'down' : 'flat'} ${formatCents(Math.abs(day.cents))} on the day` : ''
   return (
     <button
       type="button"
       className="inv-tile"
       data-acct={a.id}
       onClick={() => onOpen(a.id)}
-      aria-label={`${a.name}: ${typeLabel(a)}, ${owner}, ${value !== null ? formatCents(value) : sub}${stale ? ` — ${stale}` : ''}. Open account`}
+      aria-label={`${a.name}: ${typeLabel(a)}, ${owner}, ${value !== null ? formatCents(value) : sub}${dayWords}${stale ? ` — ${stale}` : ''}. Open account`}
     >
       <span className="inv-tile-head">
         <OwnerAvatar owner={a.owner} owners={owners} />
@@ -120,6 +124,12 @@ export function AccountTile({ a, positions, cash, unvested, owners, today, onOpe
         {own?.cash_cents != null && <span>{formatCents(own.cash_cents)} cash</span>}
         {unvestedMicro !== undefined && <span>+ {unvestedLine(unvestedMicro)}</span>}
       </span>
+      {day && (
+        <span className={`inv-tile-day ${toneOf(day.cents)}`}>
+          {dayAmount(day.cents)}
+          {day.micro !== null && <span className="inv-tile-daypct">{dayPercent(day.micro)}</span>}
+        </span>
+      )}
     </button>
   )
 }

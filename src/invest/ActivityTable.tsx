@@ -34,6 +34,8 @@ export type ActivityTableProps = {
   variant?: 'card' | 'plain'
   /** Only these accounts' trades (the owner pills); omit for every account. */
   scope?: ReadonlySet<number>
+  /** Show one symbol only (the holding drawer): its trades in every account in scope, with no symbol filter. */
+  symbol?: string
 }
 
 /**
@@ -43,7 +45,8 @@ export type ActivityTableProps = {
 const NOTE_TAG: Record<string, string> = { [RSU_VEST_NOTE]: 'vest', [OPENING_NOTE]: 'starting position', [RSU_WITHHOLDING_NOTE]: 'withheld for tax' }
 /** A vest's withholding sale: sold from that vest, that day, at its cost — only the share count is its own. */
 const isWithholding = (r: Pick<TradeRow, 'side' | 'note'>) => r.side === 'sell' && r.note === RSU_WITHHOLDING_NOTE
-const PAGE = 25
+const CARD_PAGE = 10
+const DRAWER_PAGE = 25
 
 type Edit = {
   id: number
@@ -92,12 +95,15 @@ function patchFor(r: TradeRow, e: Edit): TradePatch | null {
  * re-checks the whole holding before it accepts an edit. Delete asks first,
  * saying how many sales took shares from a buy (they keep their gains).
  */
-export default function ActivityTable({ accounts, accountId, rev, today, onChanged, onRecord, variant = 'card', scope }: ActivityTableProps) {
+export default function ActivityTable({ accounts, accountId, rev, today, onChanged, onRecord, variant = 'card', scope, symbol: onlySymbol }: ActivityTableProps) {
   // Route-state keys have one owner per screen: the drawer's ledger keeps its filters apart from the card's.
   const keys0 = variant === 'plain' ? 'drawerActivity' : 'activity'
   const [acctFilter, setAcctFilter] = useRouteState<number>(`${keys0}Acct`, 0)
   const [year, setYear] = useRouteState<string>(`${keys0}Year`, '')
-  const [symbol, setSymbol] = useRouteState<string>(`${keys0}Sym`, '')
+  const [pickedSymbol, setSymbol] = useRouteState<string>(`${keys0}Sym`, '')
+  const symbol = onlySymbol ?? pickedSymbol
+  // The Investments card opens on the latest few; a drawer's ledger on a fuller page.
+  const PAGE = variant === 'card' ? CARD_PAGE : DRAWER_PAGE
   const inScope = (id: number) => !scope || scope.has(id)
   const acct = accountId ?? (accounts.some((a) => a.id === acctFilter && inScope(a.id)) ? acctFilter : 0)
   const [rows, setRows] = useState<TradeRow[] | null>(null)
@@ -249,7 +255,7 @@ export default function ActivityTable({ accounts, accountId, rev, today, onChang
           ))}
         </Select>
       )}
-      {symbols.length > 1 && (
+      {onlySymbol === undefined && symbols.length > 1 && (
         <Select aria-label="Symbol" value={symbol} onChange={(e) => { setSymbol(e.target.value); setLimit(PAGE) }}>
           <option value="">All symbols</option>
           {symbols.map((s) => (

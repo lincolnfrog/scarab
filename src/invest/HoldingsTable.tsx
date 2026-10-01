@@ -21,8 +21,9 @@ export type HoldingsTableProps = {
   /**
    * 'card' (default): the Holdings card, symbols expanding to accounts, then lots.
    * 'plain': the table alone for one account (its drawer) — a symbol expands straight to its lots.
+   * 'lots': one holding's accounts and lots laid open (its drawer) — no symbol row, no total.
    */
-  variant?: 'card' | 'plain'
+  variant?: 'card' | 'plain' | 'lots'
   /**
    * A Cash row under the holdings — an account's derived cash, or every
    * anchored account's — which the Total then includes (cost basis and
@@ -52,7 +53,7 @@ export default function HoldingsTable({ positions, totals, marginal, today, onSe
     <table className="inv-holdings">
       <thead>
         <tr>
-          <th>Asset</th><th className="r">Qty</th><th className="r">Price</th>
+          <th>{variant === 'lots' ? 'Account · lot' : 'Asset'}</th><th className="r">Qty</th><th className="r">{variant === 'lots' ? 'Cost' : 'Price'}</th>
           {/* Cost basis rides under the value and the percent under the gain, so the table fits a two-thirds card at 1100. */}
           <th className="r">Value<span className="inv-thsub">cost basis</span></th>
           <th className="r">Unrealized<span className="inv-thsub">% of cost</span></th>
@@ -60,8 +61,8 @@ export default function HoldingsTable({ positions, totals, marginal, today, onSe
       </thead>
       <tbody>
         {positions.flatMap((p) => {
-          const isOpen = open.has(p.asset_id)
-          const rows: ReactNode[] = [
+          const isOpen = variant === 'lots' || open.has(p.asset_id)
+          const rows: ReactNode[] = variant === 'lots' ? [] : [
             <tr key={p.asset_id}>
               <td>
                 <span className="tk">
@@ -129,7 +130,7 @@ export default function HoldingsTable({ positions, totals, marginal, today, onSe
             <td />
           </tr>
         )}
-        <tr>
+        {variant !== 'lots' && <tr>
           <td className="strong">Total</td>
           <td />
           <td />
@@ -138,11 +139,11 @@ export default function HoldingsTable({ positions, totals, marginal, today, onSe
             {formatCents(totals.unrealized, { sign: totals.unrealized > 0 })}
             {totals.cost > 0 && <span className="inv-subline inv-subtone">{pctOfCost(totals.unrealized, totals.cost)}</span>}
           </td>
-        </tr>
+        </tr>}
       </tbody>
     </table>
   )
-  if (variant === 'plain') return <div className="inv-tablewrap">{table}</div>
+  if (variant !== 'card') return <div className={`inv-tablewrap${variant === 'lots' ? ' inv-lotsonly' : ''}`}>{table}</div>
   return (
     <div className="card c8">
       <h2>Holdings</h2>
@@ -245,9 +246,11 @@ function LotRow({ lot, p, marginal, today, onSell }: {
       </td>
       <td className="r">
         {lot.trade_id !== null && (
-          <Button size="mini" title={`Sell this ${p.symbol} lot from ${lot.account_name}`} onClick={() => onSell(lot, p)}>
-            Sell…
-          </Button>
+          <Tooltip content={`Sell this ${p.symbol} lot from ${lot.account_name}`}>
+            <Button size="mini" onClick={() => onSell(lot, p)}>
+              Sell…
+            </Button>
+          </Tooltip>
         )}
       </td>
     </tr>

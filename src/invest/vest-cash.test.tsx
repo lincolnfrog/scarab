@@ -65,7 +65,7 @@ describe('cash, as the screens say it (B12)', () => {
   })
 
   it('holdings get a Cash row, and the Total includes it (cost and unrealized stay the holdings’)', () => {
-    const totals: PortfolioResponse['totals'] = { value: 900_00, cost: 600_00, unrealized: 300_00, cash: 1_100_00, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+    const totals: PortfolioResponse['totals'] = { value: 900_00, cost: 600_00, unrealized: 300_00, cash: 1_100_00, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
     const html = renderToStaticMarkup(
       <HoldingsTable positions={[]} totals={totals} marginal={null} today={TODAY} onSell={() => {}} cash={{ cents: 1_100_00, note: 'in 1 account' }} />,
     )

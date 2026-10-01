@@ -241,7 +241,7 @@ describe('the portfolio pools lots per account', () => {
     const vti = p.positions[0]!
     expect(vti).toMatchObject({ symbol: 'VTI', kind: 'stock', qty_micro: 10_000_000, cost_cents: 1_500_00 })
     expect(vti.accounts).toEqual([
-      { invest_account_id: a, name: 'Max Schwab', kind: 'brokerage', qty_micro: 10_000_000, cost_cents: 1_500_00, value_cents: 1_500_00 },
+      { invest_account_id: a, name: 'Max Schwab', kind: 'brokerage', qty_micro: 10_000_000, cost_cents: 1_500_00, value_cents: 1_500_00, day_change_cents: null },
     ])
     expect(vti.lots).toEqual([
       {
@@ -1537,5 +1537,69 @@ describe('the balance check-in: every number from a statement, with its latest v
     expect(getCheckin(db, TODAY).items.find((i) => i.kind === 'cash' && i.id === 1)).toMatchObject({ last: null, derived_cents: null, uncounted_cents: 960_00 })
     putBalanceSnapshot(db, { investAccountId: 1, balancedOn: '2026-09-21', balanceCents: 960_00 }, TODAY)
     expect(getCheckin(db, TODAY).items.find((i) => i.kind === 'cash' && i.id === 1)).toMatchObject({ derived_cents: 960_00, uncounted_cents: 0 })
+  })
+})
+
+describe("the day's change", () => {
+  const held = (db: DbLike) => {
+    const { a, roth, t } = fourAccounts(db)
+    t({ investAccountId: a, symbol: 'VTI', side: 'buy', tradedOn: '2020-03-02', qty: '10', totalCents: 1_500_00 })
+    t({ investAccountId: roth, symbol: 'VTI', side: 'buy', tradedOn: '2024-01-05', qty: '5', totalCents: 1_000_00 })
+    return { a, roth, t }
+  }
+  const vti = (db: DbLike, today = TODAY) => getPortfolio(db, today).positions.find((p) => p.symbol === 'VTI')!
+
+  it('is measured from the previous close the quote came with, per account, and summed', () => {
+    const db = mem()
+    const { a, roth } = held(db)
+    upsertPrices(db, [{ symbol: 'VTI', cents: 300_00, pricedOn: TODAY, prevCents: 298_00 }])
+    const p = vti(db)
+    expect(p).toMatchObject({ prev_close_cents: 298_00, day_change_cents: 30_00 }) // 15 sh × $2
+    expect(p.accounts.map((x) => [x.invest_account_id, x.day_change_cents])).toEqual([[a, 20_00], [roth, 10_00]])
+    const { totals } = getPortfolio(db, TODAY)
+    expect(totals).toMatchObject({ day_change: 30_00, day_base: 4_470_00 }) // 15 × $298 the day before
+    // One account's detail carries its own part.
+    expect(getInvestAccount(db, roth, TODAY).totals).toMatchObject({ day_change: 10_00, day_base: 1_490_00 })
+  })
+
+  it('is never guessed from the quote before: no previous close, no day change', () => {
+    const db = mem()
+    held(db)
+    upsertPrices(db, [{ symbol: 'VTI', cents: 290_00, pricedOn: '2026-09-17' }, { symbol: 'VTI', cents: 300_00, pricedOn: TODAY }])
+    expect(vti(db)).toMatchObject({ prev_close_cents: null, day_change_cents: null })
+    expect(getPortfolio(db, TODAY).totals).toMatchObject({ day_change: 0, day_base: 0 })
+  })
+
+  it('measures shares bought on the quote’s day from what they cost, and ignores ones bought since', () => {
+    const db = mem()
+    const { a, t } = held(db)
+    upsertPrices(db, [{ symbol: 'VTI', cents: 300_00, pricedOn: '2026-09-21', prevCents: 298_00 }])
+    t({ investAccountId: a, symbol: 'VTI', side: 'buy', tradedOn: '2026-09-21', qty: '2', totalCents: 598_00 }) // at $299
+    t({ investAccountId: a, symbol: 'VTI', side: 'buy', tradedOn: TODAY, qty: '1', totalCents: 301_00 })
+    // 15 overnight × $2, plus 2 × ($300 − $299); today's share has no quote of its day yet.
+    expect(vti(db).day_change_cents).toBe(30_00 + 2_00)
+  })
+
+  it('a hand-entered price, or a quote gone stale, has none', () => {
+    const db = mem()
+    held(db)
+    upsertPrices(db, [{ symbol: 'VTI', cents: 300_00, pricedOn: '2026-09-18', prevCents: 298_00 }])
+    expect(vti(db).day_change_cents).toBe(30_00) // Friday's close, read on Tuesday
+    expect(vti(db, '2026-09-23')).toMatchObject({ prev_close_cents: null, day_change_cents: null }) // five days on
+    // Same day, set by hand: the row keeps the market's previous close, but a hand-entered price says nothing about the day.
+    setManualPrice(db, { symbol: 'VTI', pricedOn: '2026-09-18', cents: 305_00 }, TODAY)
+    expect(vti(db)).toMatchObject({ price_manual: true, prev_close_cents: null, day_change_cents: null })
+  })
+
+  it('a refresh without a previous close keeps the one the day already has; an unchanged quote writes nothing', () => {
+    const db = mem()
+    held(db)
+    upsertPrices(db, [{ symbol: 'VTI', cents: 300_00, pricedOn: TODAY, prevCents: 298_00 }])
+    upsertPrices(db, [{ symbol: 'VTI', cents: 301_00, pricedOn: TODAY }])
+    expect(vti(db)).toMatchObject({ price_cents: 301_00, prev_close_cents: 298_00 })
+    const before = totalChanges(db)
+    upsertPrices(db, [{ symbol: 'VTI', cents: 301_00, pricedOn: TODAY, prevCents: 298_00 }])
+    upsertPrices(db, [{ symbol: 'VTI', cents: 301_00, pricedOn: TODAY, prevCents: 0 }]) // not a usable close
+    expect(totalChanges(db)).toBe(before)
   })
 })

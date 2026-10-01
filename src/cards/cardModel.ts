@@ -124,39 +124,6 @@ export function tradeRug(trades: readonly TradeRow[]): { id: string; t: string; 
     })
 }
 
-export type ReturnBar = HoldingReturn & {
-  /** Where the bar starts and how wide it is, in percent of the track; w = 0 draws no bar. */
-  x: number
-  w: number
-}
-
-/**
- * The return-by-holding bars: sorted best to worst by unrealized return on
- * cost, unpriced holdings last (carried at cost, they have no return yet —
- * drawn hollow). One shared scale spans the largest loss to the largest
- * gain, so the zero line sits where the data puts it: at the left edge when
- * nothing is down, mid-track when gains and losses match. 2% margins keep
- * the ends off the labels, and a real return is never thinner than a
- * hairline.
- */
-export function returnBars(rows: readonly HoldingReturn[]): { bars: ReturnBar[]; zeroPct: number } {
-  const ret = (r: HoldingReturn) => (r.priced && r.unrealized_micro !== null ? r.unrealized_micro : null)
-  const vals = rows.map(ret).filter((m): m is number => m !== null)
-  const up = Math.max(0, ...vals)
-  const down = Math.max(0, ...vals.map((m) => -m))
-  const span = up + down || 1
-  const zeroPct = 2 + (down / span) * 96
-  const rank = (r: HoldingReturn) => (ret(r) === null ? 1 : 0)
-  const bars = [...rows]
-    .sort((a, b) => rank(a) - rank(b) || (ret(b) ?? 0) - (ret(a) ?? 0) || b.value_cents - a.value_cents)
-    .map((r) => {
-      const m = ret(r) ?? 0
-      const w = m === 0 ? 0 : Math.max(0.8, (Math.abs(m) / span) * 96)
-      return { ...r, x: m < 0 ? zeroPct - w : zeroPct, w }
-    })
-  return { bars, zeroPct }
-}
-
 /** A return-by-holding row, possibly narrowed to some accounts. */
 export type ScopedReturn = HoldingReturn & {
   /** Also held in accounts outside the scope: its figures are the scope's share, and it has no rate here. */

@@ -32,7 +32,7 @@ const portfolio: PortfolioResponse = {
     },
   ],
   warnings: [],
-  totals: { value: 4_500_00, cost: 3_000_00, unrealized: 1_500_00, cash: 0, ytd_st: -500_00, ytd_lt: 2_000_00, ytd_sheltered: 200_00 },
+  totals: { value: 4_500_00, cost: 3_000_00, unrealized: 1_500_00, cash: 0, day_change: 0, day_base: 0, ytd_st: -500_00, ytd_lt: 2_000_00, ytd_sheltered: 200_00 },
   accounts: [],
 }
 

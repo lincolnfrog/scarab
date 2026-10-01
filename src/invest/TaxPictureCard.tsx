@@ -20,7 +20,7 @@ const rate = (cents: number, micro: number) => Math.round((cents * micro) / 1_00
  * nets them (short against long, then up to $3,000 of a net loss against
  * ordinary income), with the estimated tax at the household's marginal rates.
  * Gains realized inside IRAs and 401(k)s are shown apart: they never reach
- * the bill.
+ * the bill. A strip of figures across the screen — Taxes has the detail.
  */
 export default function TaxPictureCard({ totals, marginal, year, scope }: TaxPictureProps) {
   const n = netCapitalGains(totals.ytd_st, totals.ytd_lt)
@@ -31,17 +31,22 @@ export default function TaxPictureCard({ totals, marginal, year, scope }: TaxPic
     : null
 
   return (
-    <div className="card c4">
-      <h2>Tax picture · {year}</h2>
+    <div className="card c12 inv-taxcard">
+      <div className="h4row">
+        <h2>Tax picture · {year}</h2>
+        <span className="sub2">
+          <Link to={{ screen: 'tax' }}>Taxes</Link> has the full picture — withholding gap, harvesting, quarterlies
+        </span>
+      </div>
       {scope && <p className="inv-scopenote">The whole household’s, not only {scope}: every taxable account’s gains and losses meet on the return.</p>}
       <div className="inv-taxpic">
-        <div>
-          <div className="muted">Realized short-term, taxable accounts (ordinary rates)</div>
-          <div className="inv-big">{formatCents(totals.ytd_st, { sign: totals.ytd_st > 0 })}</div>
+        <div className="inv-row">
+          <span>Realized short-term, taxable accounts (ordinary rates)</span>
+          <b>{formatCents(totals.ytd_st, { sign: totals.ytd_st > 0 })}</b>
         </div>
-        <div>
-          <div className="muted">Realized long-term, taxable accounts (cap-gains rates)</div>
-          <div className="inv-big">{formatCents(totals.ytd_lt, { sign: totals.ytd_lt > 0 })}</div>
+        <div className="inv-row">
+          <span>Realized long-term, taxable accounts (cap-gains rates)</span>
+          <b>{formatCents(totals.ytd_lt, { sign: totals.ytd_lt > 0 })}</b>
         </div>
         {netted && netLoss === 0 && (
           <div className="inv-row">
@@ -72,11 +77,6 @@ export default function TaxPictureCard({ totals, marginal, year, scope }: TaxPic
             <b>{formatCents(totals.ytd_sheltered, { sign: totals.ytd_sheltered > 0 })}</b>
           </div>
         )}
-        <div className="sub2 topline">
-          Unrealized gain across holdings: <b className="inkstrong">{formatCents(totals.unrealized, { sign: true })}</b>.{' '}
-          <Link to={{ screen: 'tax' }}>Taxes</Link> has the full picture — withholding gap, harvesting, quarterlies. Hover
-          a lot's holding period for its after-tax sale value.
-        </div>
       </div>
     </div>
   )

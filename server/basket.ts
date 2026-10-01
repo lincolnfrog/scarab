@@ -27,8 +27,11 @@ import { upstreamSignal } from './upstream'
  * the tab can say "Vanguard Total Stock Market ETF" rather than just VTI.
  */
 
-/** A quote as fetched. `name`/`etf` are filled in where the source knows them. */
-export type BasketQuote = { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string; name?: string | null; etf?: boolean }
+/**
+ * A quote as fetched. `name`/`etf` are filled in where the source knows them; `prevCents` is the previous
+ * session's close (crypto: the price 24 hours earlier), which the day's gain or loss is measured from.
+ */
+export type BasketQuote = { symbol: string; kind: 'stock' | 'crypto'; cents: number; pricedOn: string; prevCents?: number | null; name?: string | null; etf?: boolean }
 export type Listing = { symbol: string; name: string; etf: boolean }
 
 const UA = { 'user-agent': 'Mozilla/5.0 (scarab price basket)' }
@@ -121,12 +124,12 @@ export function parseSpark(body: unknown): BasketQuote[] {
     const meta = r.response?.[0]?.meta
     const c = cents(meta?.regularMarketPrice)
     if (!r.symbol || c === null) continue
-    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(meta?.regularMarketTime) })
+    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(meta?.regularMarketTime), prevCents: cents(meta?.chartPreviousClose) })
   }
   return out
 }
 
-/** Yahoo v7 quote: { quoteResponse: { result: [{ symbol, regularMarketPrice, regularMarketTime }] } } */
+/** Yahoo v7 quote: { quoteResponse: { result: [{ symbol, regularMarketPrice, regularMarketTime, regularMarketPreviousClose }] } } */
 export function parseV7Quotes(body: unknown): BasketQuote[] {
   const results = (body as { quoteResponse?: { result?: Record<string, unknown>[] } })?.quoteResponse?.result
   if (!Array.isArray(results)) return []
@@ -134,12 +137,15 @@ export function parseV7Quotes(body: unknown): BasketQuote[] {
   for (const r of results) {
     const c = cents(r.regularMarketPrice)
     if (typeof r.symbol !== 'string' || c === null) continue
-    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(r.regularMarketTime) })
+    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(r.regularMarketTime), prevCents: cents(r.regularMarketPreviousClose) })
   }
   return out
 }
 
-/** CoinGecko /coins/markets: [{ symbol: 'btc', current_price, last_updated }] — first (largest) wins on symbol clashes. */
+/**
+ * CoinGecko /coins/markets: [{ symbol: 'btc', current_price, price_change_24h, last_updated }] — first (largest)
+ * wins on symbol clashes. The previous price is the current one less its 24-hour change.
+ */
 export function parseCoinGeckoMarkets(body: unknown, seen = new Set<string>()): BasketQuote[] {
   if (!Array.isArray(body)) return []
   const out: BasketQuote[] = []
@@ -150,7 +156,9 @@ export function parseCoinGeckoMarkets(body: unknown, seen = new Set<string>()): 
     seen.add(sym)
     const on = typeof r.last_updated === 'string' ? r.last_updated.slice(0, 10) : new Date().toISOString().slice(0, 10)
     const name = typeof r.name === 'string' ? r.name.trim() : ''
-    out.push({ symbol: sym, kind: 'crypto', cents: c, pricedOn: on, ...(name ? { name } : {}) })
+    const change = r.price_change_24h
+    const prev = typeof r.current_price === 'number' && typeof change === 'number' && Number.isFinite(change) ? cents(r.current_price - change) : null
+    out.push({ symbol: sym, kind: 'crypto', cents: c, pricedOn: on, prevCents: prev, ...(name ? { name } : {}) })
   }
   return out
 }
@@ -273,7 +281,7 @@ export function basketStatus(db: DbLike): BasketStatus {
  */
 export function getBasket(db: DbLike): BasketResponse {
   const rows = db
-    .prepare('SELECT symbol, kind, cents, priced_on AS pricedOn, name, etf FROM basket_quotes ORDER BY kind, symbol')
+    .prepare('SELECT symbol, kind, cents, priced_on AS pricedOn, prev_cents AS prevCents, name, etf FROM basket_quotes ORDER BY kind, symbol')
     .all() as (Omit<BasketQuoteRow, 'etf'> & { etf: number })[]
   return { ...basketStatus(db), quotes: rows.map((r) => ({ ...r, etf: r.etf === 1 })), history: historyStatus(db) }
 }
@@ -299,11 +307,11 @@ export function storeBasket(db: DbLike, quotes: BasketQuote[], errors: string[],
       const prune = db.prepare('DELETE FROM basket_quotes WHERE kind = ? AND priced_on < ?')
       for (const kind of new Set(quotes.map((q) => q.kind))) prune.run(kind, cutoff)
       const put = db.prepare(
-        `INSERT INTO basket_quotes (symbol, kind, cents, priced_on, name, etf) VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO basket_quotes (symbol, kind, cents, priced_on, prev_cents, name, etf) VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (symbol, kind) DO UPDATE SET cents = excluded.cents, priced_on = excluded.priced_on,
-           name = COALESCE(excluded.name, basket_quotes.name), etf = excluded.etf`,
+           prev_cents = excluded.prev_cents, name = COALESCE(excluded.name, basket_quotes.name), etf = excluded.etf`,
       )
-      for (const q of quotes) put.run(q.symbol, q.kind, q.cents, q.pricedOn, q.name || null, q.etf ? 1 : 0)
+      for (const q of quotes) put.run(q.symbol, q.kind, q.cents, q.pricedOn, q.prevCents ?? null, q.name || null, q.etf ? 1 : 0)
       setMeta(db, 'basket:built_at', builtAt)
     }
     setMeta(db, 'basket:errors', JSON.stringify(errors))

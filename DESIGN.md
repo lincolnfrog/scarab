@@ -18,10 +18,13 @@ appreciated-share gifts, gain and loss harvesting, safe harbor, the Medicare
 surtax, drift, price creep, the mortgage-rate trigger — sorted by dollar
 impact, each opening into its rule, inputs, arithmetic and what it leaves
 out; the bracket headroom bar; a tax calendar; and the Assumptions page:
-every constant with its source and vintage), **Investments** (account strip and
-drawer, holdings per account, a record-trade sheet that previews gain, tax
-and wash sales, the activity ledger, starting positions, balance check-in,
-owner filter, portfolio value vs. cost, return by holding, price charts),
+every constant with its source and vintage), **Investments** (a headline of
+worth, the day's change and overall return; portfolio value vs. cost; one
+sortable holdings table with day, gain, money-weighted return and a 90-day
+sparkline per row; a holding drawer with the price chart, lots and trades;
+the account strip and drawer; a record-trade sheet that previews gain, tax
+and wash sales; the activity ledger, starting positions, balance check-in,
+owner filter),
 **Real estate** (valuations, mortgages, equity), **Cash & budget** (imports,
 categorizer, plan-vs-actual, recurring bills), **Dream Home** (down-payment
 fund, loan options, payment matrix, rental scenario, tax gross-up,
@@ -194,14 +197,20 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             preset: :twr lines against a bench:<SYM>); its selection lives in
             route state, only a saved view's id (?v=) in the URL. screens.css
             (.scr-*).
-  invest/     Investments (.inv-*): AccountStrip, AccountDrawer (Positions ·
+  invest/     Investments (.inv-*): InvestSummary (worth, the day, overall),
+            HoldingsCard (one sortable row per symbol: day, value, gain,
+            return, Sparkline) opening HoldingDrawer (?d=holding&asset=<id>:
+            price and day, PriceChart, accounts and lots, its trades),
+            AccountStrip, AccountDrawer (Positions ·
             Activity · Grants · Settings), AddAccountFlow, TradeSheet (live
             preview from POST /trades/preview), ActivityTable (edit and delete
             trades in place), OpeningPositionsSheet, CheckinDrawer,
             BalanceAccounts, CashPanel, VestDialog, GrantsPanel, SetPrice,
             SymbolInput (a combobox over the shared basket — typing sends
-            nothing), HoldingsTable, TaxPictureCard, OwnerPills; pure
-            *Math.ts, ownerFilter, priceRefresh, symbolSearch, form8949.
+            nothing), HoldingsTable (an account's holdings, or one
+            holding's lots), TaxPictureCard, OwnerPills; pure *Math.ts
+            (dayMath: the day's change and the holdings sort), ownerFilter,
+            priceRefresh, symbolSearch, form8949.
   chart/      The chart core (.ch-*): TimeChart — every trend: UTC time axis,
             a crosshair that reads each series "as of" the snapped date,
             legend toggles, range presets, drag-to-zoom, keyboard stepping,
@@ -212,8 +221,8 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             ChartTip, Legend, Sparkline, DriverBars, SeriesPicker,
             PerformanceDialog, CountUp; pure *Model.ts files carry the logic.
   cards/      Cards built on it: StatTile, DreamHomeTile, ActivityCard,
-            PortfolioValueCard, HoldingsReturnsCard, PriceChartCard,
-            RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
+            PortfolioValueCard, PriceChart (one symbol's daily history, in
+            the holding drawer), RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
             CategorySpendCard; cardModel.ts.
   tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard, TwoYearCard), BracketBar, and their copy.
   viz.tsx BigChart.tsx  Donut, GroupedBars, HBars, Bullets; the daily price
@@ -243,7 +252,8 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                vests (net settlement), balance snapshots, the check-in.
   positions-paste.ts  Pure parser for pasted starting positions.
   prices.ts    Quotes in (upsertPrices; applyBasket → prices + prices_daily),
-               chart data with its coverage, the market-history codec
+               each with the previous close its source reported; chart data
+               with its coverage, recent closes for the sparklines, the market-history codec
                (encode/decodeMonthly, packMarket), applyMonthlyHistory, and
                the per-symbol fetch-flag names.
   networth.ts  Month-end series derived entirely from dated facts (each table
@@ -397,7 +407,8 @@ number.
 3. Investments/property: invest_accounts (lots- or balance-tracked), assets,
    trades (qty in **micro-shares**, integer), prices (one close per asset per
    day quoted: refresh quotes, hand-entered prices, and month-end closes from
-   a backfill or the market history), balance_snapshots, properties,
+   a backfill or the market history; a refresh's row also keeps the previous
+   close it came with — see 25), balance_snapshots, properties,
    property_valuations, liabilities, liability_balances.
 4. rsu_vests (superseded by 6; kept append-only).
 5. trades gains sold_lot_trade_id / acquired_on / basis_cents — specific-lot
@@ -445,6 +456,13 @@ number.
     pay, match_true_up) — the facts contribution pace derives from.
 24. assets.asset_class and invest_accounts.asset_class (balance-tracked
     accounts): the allocation class, NULL = guessed at read time.
+25. prices.prev_close_cents and basket_quotes.prev_cents — the previous
+    session's close as the quote source reported it (crypto: the price 24
+    hours earlier). The day's gain or loss is derived from it at read time
+    (`getPortfolio`: day_change_cents per position and account,
+    totals.day_change) and never from the row before, which may be days
+    older; shares bought on the quote's day are measured from their cost.
+    NULL (history, hand-entered prices, older rows) means no day change.
 
 **Server-only, never in a snapshot**: vault_blobs, vault_history,
 household_members, vault_invites, basket_quotes and the `basket:*` app_meta

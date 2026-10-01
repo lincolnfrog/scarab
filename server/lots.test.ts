@@ -136,9 +136,12 @@ describe('computePosition (FIFO)', () => {
 describe('parseYahooMeta', () => {
   it('extracts price and date, converting to cents exactly once', () => {
     const body = {
-      chart: { result: [{ meta: { regularMarketPrice: 379.65, regularMarketTime: 1785960000 } }] },
+      chart: { result: [{ meta: { regularMarketPrice: 379.65, regularMarketTime: 1785960000, chartPreviousClose: 377.105 } }] },
     }
-    expect(parseYahooMeta('VTI', body)).toEqual({ cents: 37965, pricedOn: '2026-08-05' })
+    expect(parseYahooMeta('VTI', body)).toEqual({ cents: 37965, pricedOn: '2026-08-05', prevCents: 37711 })
+    // No previous close in the reply: the quote stands, without one.
+    const bare = { chart: { result: [{ meta: { regularMarketPrice: 379.65, regularMarketTime: 1785960000 } }] } }
+    expect(parseYahooMeta('VTI', bare)).toEqual({ cents: 37965, pricedOn: '2026-08-05', prevCents: null })
   })
   it('reports missing quotes', () => {
     expect(parseYahooMeta('BOGUS', { chart: { result: [] } })).toEqual({ error: 'BOGUS: no quote from Yahoo' })

@@ -91,3 +91,6 @@ api10.put('/series/views', async (c) => {
 
 // Return by holding: money-weighted, from open lots and today's prices.
 api10.get('/portfolio/returns', (c) => handle(c, () => getHoldingsReturns(db, today())))
+
+// The Holdings table's sparklines: each asset's stored closes over the last 90 days. Reads only — nothing is fetched.
+api10.get('/portfolio/sparks', (c) => handle(c, () => svc.getRecentCloses(db, today())))

@@ -8,7 +8,6 @@ import {
   noRateDay,
   pctOfTarget,
   projectionHorizon,
-  returnBars,
   scopeReturns,
   sumSeries,
   tileGroups,
@@ -118,46 +117,6 @@ describe('tradeRug', () => {
       ['2026-09-23', 'down', 'Sold 1 VTI · Vanguard'],
     ])
     expect(new Set(rug.map((r) => r.id)).size).toBe(3)
-  })
-})
-
-describe('returnBars', () => {
-  const hr = (o: Partial<HoldingReturn>): HoldingReturn => ({
-    asset_id: 1,
-    symbol: 'X',
-    value_cents: 100,
-    cost_cents: 100,
-    unrealized_cents: 0,
-    unrealized_micro: 0,
-    irr_micro: null,
-    annualized: false,
-    held_days: 10,
-    weight_micro: 0,
-    priced: true,
-    ...o,
-  })
-  it('sorts best to worst, unpriced last, on one scale from the largest loss to the largest gain', () => {
-    const { bars, zeroPct } = returnBars([
-      hr({ symbol: 'ACME', unrealized_micro: 3_659 }),
-      hr({ symbol: 'ETH', unrealized_micro: -200_000 }),
-      hr({ symbol: 'NEW', priced: false, unrealized_micro: null }),
-      hr({ symbol: 'FXAIX', unrealized_micro: 600_000 }),
-    ])
-    expect(bars.map((b) => b.symbol)).toEqual(['FXAIX', 'ACME', 'ETH', 'NEW'])
-    // span 800_000: zero sits a quarter of the way in (inside 2% margins)
-    expect(zeroPct).toBe(26)
-    expect(bars[0]).toMatchObject({ x: 26, w: 72 })
-    expect(bars[1]).toMatchObject({ x: 26, w: 0.8 }) // a real but tiny return stays visible
-    expect(bars[2]).toMatchObject({ x: 2, w: 24 }) // a loss grows left from zero
-    expect(bars[3]).toMatchObject({ w: 0 })
-  })
-  it('puts zero at the left edge when nothing is down, and survives flat or unpriced lists', () => {
-    const up = returnBars([hr({ unrealized_micro: 500_000 }), hr({ unrealized_micro: 250_000 })])
-    expect(up.zeroPct).toBe(2)
-    expect(up.bars.map((b) => b.w)).toEqual([96, 48])
-    expect(returnBars([hr({ unrealized_micro: 0 })]).bars[0]!.w).toBe(0)
-    expect(returnBars([hr({ priced: false, unrealized_micro: null })]).bars[0]!.w).toBe(0)
-    expect(returnBars([])).toEqual({ bars: [], zeroPct: 2 })
   })
 })
 

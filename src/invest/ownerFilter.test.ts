@@ -74,7 +74,7 @@ const cashRow = (id: number, cents: number | null): PortfolioAccount => ({
   uncounted_proceeds_cents: 0,
 })
 const cash = new Map([[1, cashRow(1, 500_00)], [3, cashRow(3, null)]])
-const totals: PortfolioResponse['totals'] = { value: 11_500_00, cost: 8_000_00, unrealized: 3_500_00, cash: 500_00, ytd_st: 120_00, ytd_lt: 0, ytd_sheltered: 40_00 }
+const totals: PortfolioResponse['totals'] = { value: 11_500_00, cost: 8_000_00, unrealized: 3_500_00, cash: 500_00, day_change: 0, day_base: 0, ytd_st: 120_00, ytd_lt: 0, ytd_sheltered: 40_00 }
 
 describe('the owner pills', () => {
   it('Household, then each person in the household’s order (names matched ignoring case), then Joint — with subtotals', () => {

@@ -1,5 +1,5 @@
 import { getChartViews, getSeries, getSeriesCatalog, parseSeriesQuery, putChartViews, type MarketHistory } from '../../engine/analytics'
-import { applyBasket, applyMonthlyHistory, getChartData, isHistoryPack, needsMonthlyHistory, packMarket } from '../../engine/prices'
+import { applyBasket, applyMonthlyHistory, getChartData, getRecentCloses, isHistoryPack, needsMonthlyHistory, packMarket } from '../../engine/prices'
 import { getHoldingsReturns } from '../../engine/returns'
 import type { BasketResponse, HistoryApplyResult, HistoryPack, HistoryPending } from '../../shared/series-api'
 import { r, type LocalRoute } from './table'
@@ -154,4 +154,5 @@ export const ANALYTICS: LocalRoute[] = [
   r('PUT', '/series/views', (c) => putChartViews(c.db, c.body, { by: c.identity, now: new Date().toISOString() })),
 
   r('GET', '/portfolio/returns', (c) => getHoldingsReturns(c.db, c.today)),
+  r('GET', '/portfolio/sparks', (c) => getRecentCloses(c.db, c.today)),
 ]

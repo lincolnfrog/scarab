@@ -19,7 +19,16 @@ import { priceStale } from './priceRefresh'
  * basket lists exchange-traded symbols only), so their price is the
  * household's to enter.
  */
-export default function PriceCell({ p, today, onSaved }: { p: PortfolioPosition; today: string; onSaved: () => void }) {
+export default function PriceCell(props: { p: PortfolioPosition; today: string; onSaved: () => void }) {
+  return (
+    <td className="r num h-price">
+      <PriceControl {...props} />
+    </td>
+  )
+}
+
+/** PriceCell's contents, for anywhere outside a table (the holding drawer's summary). */
+export function PriceControl({ p, today, onSaved }: { p: PortfolioPosition; today: string; onSaved: () => void }) {
   const [open, setOpen] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
   const stale = p.price_cents !== null && priceStale(p.priced_on, today)
@@ -53,7 +62,7 @@ export default function PriceCell({ p, today, onSaved }: { p: PortfolioPosition;
   }
 
   return (
-    <td className="r num">
+    <>
       <span className="inv-price">
         {trigger && p.price_cents !== null && trigger}
         {p.price_cents !== null ? formatCents(p.price_cents) : trigger}
@@ -64,7 +73,7 @@ export default function PriceCell({ p, today, onSaved }: { p: PortfolioPosition;
           <SetPriceForm p={p} today={today} onDone={() => { setOpen(false); onSaved() }} onCancel={() => setOpen(false)} />
         </Popover>
       )}
-    </td>
+    </>
   )
 }
 

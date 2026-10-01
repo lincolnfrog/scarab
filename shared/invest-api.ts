@@ -155,9 +155,29 @@ export type PortfolioPosition = {
   value_cents: number
   unrealized_cents: number
   lots: PortfolioLot[]
-  accounts: { invest_account_id: number; name: string; kind: InvestKind; qty_micro: number; cost_cents: number; value_cents: number }[]
+  accounts: {
+    invest_account_id: number
+    name: string
+    kind: InvestKind
+    qty_micro: number
+    cost_cents: number
+    value_cents: number
+    /** This account's part of `day_change_cents`; null (or absent) when the position has none. */
+    day_change_cents?: number | null
+  }[]
   /** The latest price was entered by hand (POST /api/prices/manual), not quoted by the market. */
   price_manual?: boolean
+  /**
+   * The previous session's close, as the quote source reported it with the latest price (for crypto, the
+   * price 24 hours earlier). Null when the price was entered by hand, is more than a few days old, or came
+   * without one — then there is no day change either.
+   */
+  prev_close_cents?: number | null
+  /**
+   * What the position gained or lost on its price's day (`priced_on`): its shares at the price less at the
+   * previous close, with shares bought that day measured from their cost instead. Null (or absent) without a previous close.
+   */
+  day_change_cents?: number | null
 }
 
 /**
@@ -198,8 +218,20 @@ export type PortfolioResponse = {
    * value / cost / unrealized are holdings only (value is the positions summed); cash is the derived
    * cash of every anchored account, so value + cash is what net worth counts for lots accounts.
    * ytd_st / ytd_lt count taxable accounts only; ytd_sheltered is realized inside tax-advantaged ones.
+   * day_change is the day's gain or loss summed over the positions that have one, and day_base what those
+   * positions were worth before it (the percent's denominator; 0 when no position has a day change).
    */
-  totals: { value: number; cost: number; unrealized: number; cash: number; ytd_st: number; ytd_lt: number; ytd_sheltered: number }
+  totals: {
+    value: number
+    cost: number
+    unrealized: number
+    cash: number
+    day_change: number
+    day_base: number
+    ytd_st: number
+    ytd_lt: number
+    ytd_sheltered: number
+  }
   /** Every lots-tracked account in scope, in strip order (sort, then id). */
   accounts: PortfolioAccount[]
 }

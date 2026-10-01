@@ -7,12 +7,14 @@ import { Drawer } from '../ui/Dialog'
 import { EmptyState } from '../ui/EmptyState'
 import { Skeleton } from '../ui/Skeleton'
 import { Tabs, tabId } from '../ui/Tabs'
+import { Tooltip } from '../ui/Tooltip'
 import AccountSettings, { type AccountDeleted } from './AccountSettings'
 import { institutionLine, KIND_TEXT, typeLabel } from './accountTypes'
 import ActivityTable from './ActivityTable'
 import { BalancePanel, StaleChip, UpdateBalanceButton } from './BalanceAccounts'
 import { shortDay } from './balanceMath'
 import { cashView } from './cashMath'
+import { dayAmount, dayPercent, toneOf, totalDay } from './dayMath'
 import CashPanel from './CashPanel'
 import GrantsPanel from './GrantsPanel'
 import HoldingsTable from './HoldingsTable'
@@ -153,9 +155,11 @@ export default function AccountDrawer(p: AccountDrawerProps) {
               : 'Nothing held here right now'}
           </span>
           <span className="inv-rowactions">
-            <Button size="mini" onClick={() => p.onPasteOpening(a.id)} title="Lots already held, each booked on the day it was acquired">
-              Paste starting positions
-            </Button>
+            <Tooltip content="Lots already held, each booked on the day it was acquired">
+              <Button size="mini" onClick={() => p.onPasteOpening(a.id)}>
+                Paste starting positions
+              </Button>
+            </Tooltip>
             <Button size="mini" variant="gold" onClick={() => p.onRecordTrade(a.id)}>
               + Record trade
             </Button>
@@ -256,6 +260,7 @@ function Summary({ a, detail, today, onChanged }: { a: InvestAccountRow; detail:
   const year = today.slice(0, 4)
   const cash = cashView(detail?.cash, today)
   const withCash = cash?.state === 'set' ? cash.cents : null
+  const day = t ? totalDay(t) : null
   return (
     <div className="inv-dsum">
       <div className="inv-dsum-main">
@@ -266,6 +271,15 @@ function Summary({ a, detail, today, onChanged }: { a: InvestAccountRow; detail:
         </span>
       </div>
       <dl className="inv-dsum-stats">
+        {day && (
+          <div>
+            <dt>Day</dt>
+            <dd className={toneOf(day.cents)}>
+              {dayAmount(day.cents)}
+              {day.micro !== null && <span className="inv-subline inv-subtone">{dayPercent(day.micro)}</span>}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Cash</dt>
           <dd>

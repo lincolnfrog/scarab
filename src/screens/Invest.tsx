@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { todayLocal } from '../../shared/dates'
 import type { InvestAccountRow, PortfolioAccount, PortfolioLot, PortfolioPosition, PortfolioResponse, UnvestedRow } from '../../shared/invest-api'
-import type { HistoryApplyResult } from '../../shared/series-api'
+import type { HistoryApplyResult, ReturnsResponse, SparksResponse } from '../../shared/series-api'
 import { get, post } from '../api'
-import HoldingsReturnsCard from '../cards/HoldingsReturnsCard'
+import { scopeReturns, type ScopedReturns } from '../cards/cardModel'
 import PortfolioValueCard from '../cards/PortfolioValueCard'
-import PriceChartCard from '../cards/PriceChartCard'
 import AccountDrawer, { type DrawerTab } from '../invest/AccountDrawer'
 import AllocationCard from '../invest/AllocationCard'
 import AccountStrip from '../invest/AccountStrip'
 import ActivityTable from '../invest/ActivityTable'
+import { accountValueCents } from '../invest/accountTypes'
 import AddAccountFlow, { type AddAccountNext } from '../invest/AddAccountFlow'
 import { shortDay } from '../invest/balanceMath'
 import { portfolioCash } from '../invest/cashMath'
 import CheckinDrawer from '../invest/CheckinDrawer'
-import HoldingsTable from '../invest/HoldingsTable'
+import HoldingDrawer from '../invest/HoldingDrawer'
+import HoldingsCard from '../invest/HoldingsCard'
+import InvestSummary from '../invest/InvestSummary'
 import OpeningPositionsSheet from '../invest/OpeningPositionsSheet'
 import { HOUSEHOLD, inScope, ownerGroups, scopePortfolio, scopeWords, type OwnerKey } from '../invest/ownerFilter'
 import OwnerPills from '../invest/OwnerPills'
@@ -31,6 +33,7 @@ import { BASKET_EVENT } from '../ui/syncStatus'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { useAnchor, useScreen, useScreenRoute } from '../ui/screen'
 import { toast } from '../ui/Toast'
+import { Tooltip } from '../ui/Tooltip'
 import { useAction } from '../ui/useAction'
 
 type UnvestedList = { rows: UnvestedRow[]; total_est_cents: number }
@@ -57,7 +60,9 @@ async function priceContext(): Promise<PriceContext> {
     : null
   return { memory, clock: priceClock(session ? 'session' : 'household', builtAt, todayLocal()) }
 }
-/** A positive integer route param (`acct`, `lot`), or null. */
+/** Nothing open: every param a drawer or sheet uses, cleared. */
+const CLOSED = { d: null, acct: null, tab: null, lot: null, via: null, asset: null } as const
+/** A positive integer route param (`acct`, `lot`, `asset`), or null. */
 const idParam = (v: string | undefined): number | null => {
   const n = Number(v)
   return v && Number.isSafeInteger(n) && n > 0 ? n : null
@@ -66,8 +71,9 @@ const idParam = (v: string | undefined): number | null => {
 /**
  * Investments. What's open lives in the address, ids and enums only:
  *   ?d=account&acct=3[&tab=activity]       an account's drawer
+ *   ?d=holding&asset=7                      a holding's drawer (the asset's id — never its ticker)
  *   ?d=add-account                          the guided add
- *   ?d=trade[&acct=3][&lot=41][&via=account] the record-trade sheet (via=account: over the drawer, back to it on close)
+ *   ?d=trade[&acct=3][&lot=41][&via=account] the record-trade sheet (via=account|holding: over that drawer, back to it on close)
  *   ?d=checkin                              the balance check-in
  * so a link or a reload opens the same thing, and ⌘K can send people there.
  */
@@ -84,6 +90,9 @@ export default function Invest() {
   // The starting-positions sheet, and the account it opens on.
   const [opening, setOpening] = useState<{ accountId: number | null } | null>(null)
   const [taxMarginal, setTaxMarginal] = useState<Marginal | null>(null)
+  // Return by holding and the sparklines' closes: the Holdings table's extra columns, which it can draw without.
+  const [returns, setReturns] = useState<ReturnsResponse | null>(null)
+  const [sparks, setSparks] = useState<SparksResponse | null>(null)
   // What the last monthly-history import (a tab's refresh, B3) couldn't cover: shown quietly beside the refresh button.
   const [historyErrors, setHistoryErrors] = useState<string[]>([])
   const today = todayLocal()
@@ -91,6 +100,7 @@ export default function Invest() {
   const route = useScreenRoute()
   const d = route.params.d
   const acctParam = idParam(route.params.acct)
+  const assetParam = idParam(route.params.asset)
   const via = route.params.via
 
   const load = useCallback(async () => {
@@ -109,6 +119,12 @@ export default function Invest() {
     get<{ marginal: Marginal }>('/api/tax')
       .then((t) => setTaxMarginal(t.marginal))
       .catch(() => setTaxMarginal(null))
+    get<ReturnsResponse>('/api/portfolio/returns')
+      .then(setReturns)
+      .catch(() => undefined) // a failed refresh keeps the last ones
+    get<SparksResponse>('/api/portfolio/sparks')
+      .then(setSparks)
+      .catch(() => undefined)
     return p
   }, [])
   const reload = useCallback(() => {
@@ -211,10 +227,27 @@ export default function Invest() {
     [portfolio, scopeIds],
   )
   const cash = portfolio ? portfolioCash(scopeIds ? portfolio.accounts.filter((a) => scopeIds.has(a.invest_account_id)) : portfolio.accounts) : null
+  const viewReturns = useMemo(
+    (): ScopedReturns | null => (!returns || !portfolio ? null : scopeIds ? scopeReturns(returns, portfolio.positions, scopeIds) : returns),
+    [returns, portfolio, scopeIds],
+  )
+  // What the accounts in view are worth (their tiles, added up), and the part of it known only from statements.
+  const worth = useMemo(() => {
+    let value = 0
+    let byBalance = 0
+    for (const a of shownAccounts) {
+      const v = accountValueCents(a, portfolio?.positions ?? NO_POSITIONS, a.tracking === 'lots' ? cashByAccount.get(a.id) : undefined) ?? 0
+      value += v
+      if (a.tracking === 'balance') byBalance += v
+    }
+    return { value, byBalance }
+  }, [shownAccounts, portfolio, cashByAccount])
 
   const tradeOpen = d === 'trade'
   const drawerWanted = acctParam !== null && (d === 'account' || (tradeOpen && via === 'account'))
   const drawerAccount = loaded && drawerWanted ? (accounts.find((a) => a.id === acctParam) ?? null) : null
+  const holdingWanted = assetParam !== null && (d === 'holding' || (tradeOpen && via === 'holding'))
+  const holding = loaded && holdingWanted ? (view?.positions.find((x) => x.asset_id === assetParam) ?? null) : null
   const addOpen = loaded && d === 'add-account'
   const checkinOpen = loaded && d === 'checkin'
 
@@ -224,7 +257,7 @@ export default function Invest() {
   useEffect(() => {
     if (!noTradeAccount) return
     toast.info('Add a brokerage account first')
-    setParams({ d: 'add-account', acct: null, tab: null, lot: null, via: null })
+    setParams({ ...CLOSED, d: 'add-account' })
   }, [noTradeAccount])
 
   /**
@@ -246,13 +279,14 @@ export default function Invest() {
   const refocusTile = (key: number | 'add') => {
     landFocus.current = { sel: `.inv-strip [data-acct="${key}"]` }
   }
-  const openAccount = (id: number, tab?: DrawerTab) => setParams({ d: 'account', acct: id, tab: tab ?? null, lot: null, via: null })
+  const openAccount = (id: number, tab?: DrawerTab) => setParams({ ...CLOSED, d: 'account', acct: id, tab: tab ?? null })
   const closeAccount = () => {
-    setParams({ d: null, acct: null, tab: null, lot: null, via: null })
+    setParams(CLOSED)
     if (acctParam !== null) refocusTile(acctParam)
   }
-  const openAdd = () => setParams({ d: 'add-account', acct: null, tab: null, lot: null, via: null })
-  const openCheckin = () => setParams({ d: 'checkin', acct: null, tab: null, lot: null, via: null })
+  const openHolding = (assetId: number) => setParams({ ...CLOSED, d: 'holding', asset: assetId })
+  const openAdd = () => setParams({ ...CLOSED, d: 'add-account' })
+  const openCheckin = () => setParams({ ...CLOSED, d: 'checkin' })
   /** Opened from a link there's no opener to return to: land on the button that opens it. */
   const closeCheckin = () => {
     setParams({ d: null })
@@ -263,27 +297,36 @@ export default function Invest() {
     setOpening({ accountId: accountId ?? lotAccounts.find((a) => a.counts.trades === 0)?.id ?? lotAccounts[0]?.id ?? null })
 
   // The sheet's open state lives in the address (ids only), so a link or a reload opens it.
-  const openTrade = (o: { accountId?: number; lotTradeId?: number; overDrawer?: boolean } = {}) =>
-    setParams({ d: 'trade', acct: o.accountId ?? null, lot: o.lotTradeId ?? null, via: o.overDrawer ? 'account' : null })
-  // Opened over an account's drawer, the sheet closes back onto it.
+  const openTrade = (o: { accountId?: number; lotTradeId?: number; over?: 'account' | 'holding' } = {}) =>
+    setParams({ d: 'trade', acct: o.accountId ?? null, lot: o.lotTradeId ?? null, via: o.over ?? null, ...(o.over === 'holding' ? {} : { asset: null }) })
+  // Opened over a drawer, the sheet closes back onto it.
   const closeTrade = () =>
     via === 'account' && acctParam !== null
       ? setParams({ d: 'account', lot: null, via: null })
-      : setParams({ d: null, acct: null, lot: null, via: null, tab: null })
+      : via === 'holding' && assetParam !== null
+        ? setParams({ d: 'holding', acct: null, lot: null, via: null })
+        : setParams(CLOSED)
   /** Sell… on a lot: the sheet opens on that lot's account with the lot chosen. */
-  const sellLot = (lot: PortfolioLot, overDrawer = false) =>
-    openTrade({ accountId: lot.invest_account_id, lotTradeId: lot.trade_id ?? undefined, overDrawer })
+  const sellLot = (lot: PortfolioLot, over?: 'account' | 'holding') =>
+    openTrade({ accountId: lot.invest_account_id, lotTradeId: lot.trade_id ?? undefined, over })
 
-  // A link to an account that no longer exists (deleted, or another universe's id) just closes —
-  // after one fresh look, since the list may predate the account (a revisit's reload still in flight).
-  const [lookedAt, setLookedAt] = useState<{ acct: number; rev: number } | null>(null)
+  // A link to an account or a holding that isn't there (deleted, sold, outside the owner in view, or another
+  // universe's id) just closes — after one fresh look, since the list may predate it (a revisit's reload still in flight).
+  const missing = !(active && loaded)
+    ? null
+    : drawerWanted && drawerAccount === null
+      ? `account:${acctParam}`
+      : holdingWanted && holding === null && portfolio !== null
+        ? `holding:${assetParam}`
+        : null
+  const [lookedAt, setLookedAt] = useState<{ what: string; rev: number } | null>(null)
   useEffect(() => {
-    if (!(active && loaded && drawerWanted && drawerAccount === null) || acctParam === null) return
-    if (lookedAt?.acct !== acctParam) {
-      setLookedAt({ acct: acctParam, rev })
+    if (missing === null) return
+    if (lookedAt?.what !== missing) {
+      setLookedAt({ what: missing, rev })
       reload()
-    } else if (rev > lookedAt.rev) setParams({ d: null, acct: null, tab: null, lot: null, via: null })
-  }, [active, loaded, drawerWanted, drawerAccount, acctParam, lookedAt, rev, reload])
+    } else if (rev > lookedAt.rev) setParams(CLOSED)
+  }, [missing, lookedAt, rev, reload])
 
   function afterAdd(next: AddAccountNext) {
     if (next.to === 'paste') {
@@ -294,6 +337,30 @@ export default function Invest() {
   }
 
   const pricedOn = portfolio?.positions.reduce<string | null>((m, p) => (p.priced_on && (!m || p.priced_on > m) ? p.priced_on : m), null)
+  const hasHoldings = (portfolio?.positions.length ?? 0) > 0
+  const strip = (
+    <AccountStrip
+      accounts={shownAccounts}
+      positions={portfolio?.positions ?? NO_POSITIONS}
+      cash={cashByAccount}
+      unvested={unvestedByAccount}
+      owners={owners}
+      today={today}
+      loaded={loaded}
+      onOpen={(id) => openAccount(id)}
+      onAdd={openAdd}
+      actions={
+        loaded &&
+        accounts.length > 0 && (
+          <Tooltip content="Update every balance from this month’s statements">
+            <Button size="mini" data-checkin onClick={openCheckin}>
+              Check in balances
+            </Button>
+          </Tooltip>
+        )
+      }
+    />
+  )
 
   return (
     <div className="grid12">
@@ -312,43 +379,40 @@ export default function Invest() {
         }
       />
 
-      {/* ---------- accounts ---------- */}
-      <AccountStrip
-        accounts={shownAccounts}
-        positions={portfolio?.positions ?? NO_POSITIONS}
-        cash={cashByAccount}
-        unvested={unvestedByAccount}
-        owners={owners}
-        today={today}
-        loaded={loaded}
-        onOpen={(id) => openAccount(id)}
-        onAdd={openAdd}
-        filter={<OwnerPills groups={groups} value={group?.key ?? HOUSEHOLD} onChange={setOwnerPick} />}
-        actions={
-          loaded && (
-            <>
-              {(portfolio?.positions.length ?? 0) > 0 && (
-                <>
-                  {pricedOn && <span className="muted">prices as of {shortDay(pricedOn, today)}</span>}
-                  {historyErrors.length > 0 && (
-                    <span className="muted inv-hist-errs" title={historyErrors.join('\n')}>
-                      {historyLine(historyErrors)}
-                    </span>
-                  )}
-                  <Button size="mini" busy={refresh.busy} onClick={() => void refresh.run(false)}>
-                    Refresh prices
-                  </Button>
-                </>
-              )}
-              {accounts.length > 0 && (
-                <Button size="mini" data-checkin onClick={openCheckin} title="Update every balance from this month’s statements">
-                  Check in balances
+      {/* ---------- the headline: worth, today, overall ---------- */}
+      {(!loaded || accounts.length > 0) && (
+        <InvestSummary
+          loaded={loaded}
+          valueCents={worth.value}
+          totals={view?.totals ?? null}
+          positions={view?.positions ?? NO_POSITIONS}
+          cashCents={cash ? cash.cents : null}
+          balanceCents={worth.byBalance}
+          rate={viewReturns?.totals ?? null}
+          today={today}
+          scopeLabel={scopeLabel}
+          filter={<OwnerPills groups={groups} value={group?.key ?? HOUSEHOLD} onChange={setOwnerPick} />}
+          actions={
+            loaded &&
+            hasHoldings && (
+              <>
+                {pricedOn && <span className="muted">prices as of {shortDay(pricedOn, today)}</span>}
+                {historyErrors.length > 0 && (
+                  <Tooltip content={historyErrors.join(' · ')}>
+                    <span className="muted inv-hist-errs">{historyLine(historyErrors)}</span>
+                  </Tooltip>
+                )}
+                <Button size="mini" busy={refresh.busy} onClick={() => void refresh.run(false)}>
+                  Refresh prices
                 </Button>
-              )}
-            </>
-          )
-        }
-      />
+              </>
+            )
+          }
+        />
+      )}
+
+      {/* Until something is held, the accounts come first: they are what there is to set up. */}
+      {!hasHoldings && strip}
 
       {/* ---------- nothing held yet: bring it in ---------- */}
       {loaded && lotAccounts.length > 0 && portfolio !== null && portfolio.positions.length === 0 && !scoped && (
@@ -373,36 +437,51 @@ export default function Invest() {
 
       <PortfolioValueCard rev={rev} accountIds={scopeLotIds} scopeLabel={scopeLabel} />
 
-      {/* ---------- holdings + tax ---------- */}
+      {/* ---------- holdings ---------- */}
       {portfolio && view && view.positions.length > 0 && (
-        <>
-          <HoldingsTable
-            positions={view.positions}
-            totals={view.totals}
-            marginal={taxMarginal}
-            today={today}
-            onSell={(lot) => sellLot(lot)}
-            onPriceSaved={reload}
-            cash={cash && { cents: cash.cents, note: `in ${cash.accounts} account${cash.accounts === 1 ? '' : 's'}` }}
-          />
-          <TaxPictureCard totals={portfolio.totals} marginal={taxMarginal} year={today.slice(0, 4)} scope={scopeLabel ?? null} />
-        </>
+        <HoldingsCard
+          positions={view.positions}
+          totals={view.totals}
+          returns={viewReturns}
+          sparks={sparks}
+          today={today}
+          onOpen={openHolding}
+          onPriceSaved={reload}
+          cash={cash && { cents: cash.cents, note: `in ${cash.accounts} account${cash.accounts === 1 ? '' : 's'}` }}
+          scopeLabel={scopeLabel}
+        />
       )}
 
-      <HoldingsReturnsCard rev={rev} positions={portfolio?.positions} accountIds={scopeLotIds} scopeLabel={scopeLabel} />
+      {/* ---------- accounts ---------- */}
+      {hasHoldings && strip}
+
+      {/* ---------- tax (household-wide: one return) ---------- */}
+      {portfolio && hasHoldings && <TaxPictureCard totals={portfolio.totals} marginal={taxMarginal} year={today.slice(0, 4)} scope={scopeLabel ?? null} />}
 
       {/* ---------- target allocation (household-wide: the owner filter doesn't narrow it) ---------- */}
-      {loaded && accounts.length > 0 && <AllocationCard rev={rev} anchor={allocationAnchor} />}
-
-      {/* ---------- detailed charts ---------- */}
-      <PriceChartCard positions={view?.positions ?? NO_POSITIONS} />
+      {loaded && accounts.length > 0 && <AllocationCard rev={rev} anchor={allocationAnchor} planOpen={route.rest[0] === 'allocation'} />}
 
       {/* ---------- the activity ledger ---------- */}
       {lotAccounts.length > 0 && (!scoped || shownAccounts.some((a) => a.tracking === 'lots')) && (
         <ActivityTable accounts={accounts} rev={rev} today={today} onChanged={reloadAndPrice} onRecord={() => openTrade()} scope={scopeIds} />
       )}
 
-      {/* The drawer renders before the trade sheet: opened together from a link, the sheet stacks on top. */}
+      {/* The drawers render before the trade sheet: opened together from a link, the sheet stacks on top. */}
+      <HoldingDrawer
+        position={holding}
+        ret={holding ? viewReturns?.rows.find((r) => r.asset_id === holding.asset_id) : undefined}
+        portfolioValue={view?.totals.value ?? 0}
+        accounts={accounts}
+        scope={scopeIds}
+        scopeLabel={scopeLabel}
+        rev={rev}
+        today={today}
+        marginal={taxMarginal}
+        onClose={() => setParams(CLOSED)}
+        onChanged={reloadAndPrice}
+        onRecordTrade={(accountId, lot) => (lot ? sellLot(lot, 'holding') : openTrade({ accountId, over: 'holding' }))}
+      />
+
       <AccountDrawer
         account={drawerAccount}
         accounts={accounts}
@@ -414,10 +493,10 @@ export default function Invest() {
         onTab={(tab) => setParams({ tab })}
         onClose={closeAccount}
         onChanged={reloadAndPrice}
-        onRecordTrade={(accountId, lot) => (lot ? sellLot(lot, true) : openTrade({ accountId, overDrawer: true }))}
+        onRecordTrade={(accountId, lot) => (lot ? sellLot(lot, 'account') : openTrade({ accountId, over: 'account' }))}
         onPasteOpening={(accountId) => openOpening(accountId)}
         onDeleted={() => {
-          setParams({ d: null, acct: null, tab: null, lot: null, via: null })
+          setParams(CLOSED)
           // Its tile (where focus would return) is gone: once the list reloads, land on the strip instead of the page.
           landFocus.current = { sel: '.inv-strip .inv-tile', afterRev: rev }
           reload()

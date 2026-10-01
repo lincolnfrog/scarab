@@ -187,6 +187,16 @@ export type ChartResponse = {
   coverage: PriceCoverage
 }
 
+// GET /api/portfolio/sparks → SparksResponse. Every traded asset's stored
+// closes over the last 90 days (engine/prices.ts getRecentCloses), oldest
+// first — the Holdings table's sparklines. Only what is stored: an asset with
+// fewer than two closes in the window draws nothing.
+export type SparksResponse = {
+  from: string // YYYY-MM-DD, the window's first day
+  to: string // today
+  series: { asset_id: number; closes: { d: string; c: number }[] }[]
+}
+
 // GET /api/basket → BasketResponse (server/basket.ts). The whole shared daily
 // price basket, identical for every caller; network-only (a tab fetches it and
 // matches its own symbols locally). `name` is the security's name where the
@@ -196,6 +206,8 @@ export type BasketQuoteRow = {
   kind: 'stock' | 'crypto'
   cents: number
   pricedOn: string // YYYY-MM-DD, the quote's own market day
+  /** The previous session's close (crypto: the price 24 hours earlier), where the source gave one. */
+  prevCents?: number | null
   name: string | null
   etf: boolean
 }
