@@ -906,10 +906,14 @@ export async function addPasskey(label: string, o: { identity?: string } = {}): 
   requirePasskeysHere(s)
   const identity = o.identity === undefined ? ownIdentity() : o.identity.trim().toLowerCase()
   if (identity !== null && !isWrapIdentity(identity)) throw new Error(`${o.identity} isn’t a sign-in email`)
+  // For someone else, exclude only their passkeys: excluding ours makes this device's own store refuse the prompt
+  // before their phone can answer it.
+  const otherPerson = identity !== ownIdentity()
   const pk = await registerPasskey({
     prfSaltB64: s.header.prfSalt,
     label,
-    excludeCredentialIds: s.header.keys.map((k) => k.credentialId),
+    excludeCredentialIds: s.header.keys.filter((k) => !otherPerson || k.identity === identity).map((k) => k.credentialId),
+    otherPerson,
   })
   const wrap = await wrapForPasskey(s.rawDataKey, pk.prfOutput, { credentialId: pk.credentialId, label, identity })
   await queue.save((cur) => {
@@ -919,7 +923,7 @@ export async function addPasskey(label: string, o: { identity?: string } = {}): 
     return { ...cur, header: { ...cur.header, keys: [...cur.header.keys.filter((k) => k.credentialId !== wrap.credentialId), wrap] } }
   })
   // Made by this device's own authenticator — and for the person signed in here, not someone handed the prompt.
-  if (identity === ownIdentity()) noteDevicePasskey(pk)
+  if (!otherPerson) noteDevicePasskey(pk)
   return wrap
 }
 

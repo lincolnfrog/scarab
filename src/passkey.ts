@@ -74,10 +74,10 @@ const prfFrom = (cred: PublicKeyCredential): Uint8Array | null => {
   return first ? new Uint8Array(first as ArrayBuffer) : null
 }
 
-function explain(e: unknown): Error {
+function explain(e: unknown, ctx: { excluded?: string } = {}): Error {
   if (e instanceof DOMException) {
     if (e.name === 'NotAllowedError') return new Error('passkey prompt was cancelled or timed out')
-    if (e.name === 'InvalidStateError') return new Error('this authenticator already holds a passkey for the vault')
+    if (e.name === 'InvalidStateError') return new Error(ctx.excluded ?? 'this authenticator already holds a passkey for the vault')
     if (e.name === 'NotSupportedError') return new Error('this browser cannot create passkeys here')
     return new Error(`passkey: ${e.message}`)
   }
@@ -91,6 +91,12 @@ function explain(e: unknown): Error {
  * Existing credentials are excluded, so an authenticator that already holds
  * one refuses instead of minting a duplicate.
  *
+ * `otherPerson`: the passkey is for someone else's phone (a household
+ * member, here in person). The prompt then asks for a cross-platform
+ * authenticator — straight to the QR code — rather than this device's own
+ * store, which holds the signed-in person's passkeys and would refuse on
+ * them (browsers check excluded credentials against the local store first).
+ *
  * Some platforms return PRF output at creation; the rest only on assertion.
  * When it is missing we assert immediately against the new credential —
  * two prompts on registration, one on every unlock after.
@@ -99,6 +105,7 @@ export async function registerPasskey(opts: {
   prfSaltB64: string
   label: string
   excludeCredentialIds: string[]
+  otherPerson?: boolean
 }): Promise<PasskeyResult> {
   const salt = b64decode(opts.prfSaltB64)
   let cred: PublicKeyCredential | null
@@ -116,14 +123,21 @@ export async function registerPasskey(opts: {
           { type: 'public-key', alg: -7 }, // ES256
           { type: 'public-key', alg: -257 }, // RS256 (Windows Hello)
         ],
-        authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+        authenticatorSelection: {
+          residentKey: 'required',
+          userVerification: 'required',
+          ...(opts.otherPerson ? { authenticatorAttachment: 'cross-platform' as const } : {}),
+        },
+        ...(opts.otherPerson ? { hints: ['hybrid'] } : {}),
         excludeCredentials: opts.excludeCredentialIds.map((id) => ({ type: 'public-key', id: b64urlDecode(id) as BufferSource })),
         extensions: { prf: { eval: { first: salt as BufferSource } } },
         timeout: 120_000,
-      },
+      } as PublicKeyCredentialCreationOptions,
     })) as PublicKeyCredential | null
   } catch (e) {
-    throw explain(e)
+    throw explain(e, {
+      excluded: opts.otherPerson ? 'that phone already holds a passkey of theirs for this vault' : undefined,
+    })
   }
   if (!cred) throw new Error('no passkey was created')
   const ext = cred.getClientExtensionResults() as { prf?: { enabled?: boolean; results?: { first?: ArrayBuffer } } }

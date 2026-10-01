@@ -40,6 +40,8 @@ const authn = vi.hoisted(() => ({
   /** The credential ids each assertion offered. */
   asked: [] as string[][],
   registered: [] as string[],
+  /** What each registration excluded, and whether it was for someone else. */
+  registerOpts: [] as { excludeCredentialIds: string[]; otherPerson?: boolean }[],
 }))
 vi.mock('./passkey', async (importOriginal) => {
   const real = await importOriginal<typeof import('./passkey')>()
@@ -51,7 +53,8 @@ vi.mock('./passkey', async (importOriginal) => {
   }
   return {
     ...real,
-    async registerPasskey(o: { prfSaltB64: string }) {
+    async registerPasskey(o: { prfSaltB64: string; excludeCredentialIds: string[]; otherPerson?: boolean }) {
+      authn.registerOpts.push({ excludeCredentialIds: [...o.excludeCredentialIds], otherPerson: o.otherPerson })
       if (authn.cancelNext) throw cancelled()
       const id = b64urlEncode(new Uint8Array(randomBytes(16)))
       authn.creds.set(id, randomBytes(32))
@@ -236,6 +239,8 @@ describe('the household panel, end to end', () => {
       { label: 'Nicole’s iPhone', identity: 'nicole@x' },
     ])
     expect(session.thisDevicePasskeys().has(r.wrap.credentialId)).toBe(false)
+    // Her prompt goes to a phone, and excludes none of mine: this device's store holds them and would refuse.
+    expect(authn.registerOpts.at(-1)).toEqual({ excludeCredentialIds: [], otherPerson: true })
     await vi.waitFor(() => expect(session.follow.household).toEqual({ owner: 'max@x', members: [], invited: ['nicole@x'] }))
     // She accepts on her own device: now she reaches the vault, and the next poll tells this tab.
     await accepts('nicole@x')
@@ -275,8 +280,10 @@ describe('the household panel, end to end', () => {
 
   it('my own passkey made on a phone over the QR prompt is mine, but not "this device"', async () => {
     authn.attachment = 'cross-platform'
+    const before = storedBlob().keys.map((k) => k.credentialId)
     const phone = await session.addPasskey('Max’s iPhone')
     expect(phone.identity).toBe('max@x')
+    expect(authn.registerOpts.at(-1)).toEqual({ excludeCredentialIds: before, otherPerson: false }) // my own: every passkey on the vault
     expect(session.thisDevicePasskeys().has(phone.credentialId)).toBe(false)
     authn.attachment = 'platform'
     const laptop = await session.addPasskey('Max’s laptop')
@@ -428,6 +435,7 @@ describe('the household panel, end to end', () => {
     fetchMock.mockClear()
     const spare = await session.addHouseholdMember('nicole@x', 'Nicole’s spare')
     expect(spare).toMatchObject({ already: false, pending: true })
+    expect(authn.registerOpts.at(-1)!.excludeCredentialIds).toEqual([first.wrap.credentialId]) // hers, never mine
     expect(calls().filter((c) => c.startsWith('POST /api/vault/members'))).toEqual([])
     await session.removePasskey(spare.wrap.credentialId)
     await accepts('nicole@x')
