@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { getAssumptions } from './assumptions'
 import { ackCheckup, getCheckup } from './checkup'
 import { putCheckupSettings } from './checkup-settings'
+import { getContributions } from './contributions'
 import type { DbLike } from './db'
 import { PMMS_KEY } from './digest'
+import { putPeople } from './people'
 import { putTaxSettings } from './tax'
 import { seedHousehold } from './test/household'
 import { onBothEngines } from './test/parity'
@@ -22,7 +24,13 @@ function household(db: DbLike) {
   putTaxSettings(db, { filingStatus: 'mfj', state: 'CA', wagesAnnualCents: 30_000_000 })
   db.prepare('UPDATE liabilities SET rate_micro = 65000 WHERE id = 1').run()
   db.prepare("UPDATE invest_accounts SET stock_plan = 1 WHERE id = 1").run()
-  db.prepare("INSERT INTO pay_sources (earner, employer, cadence, paid_on, gross_cents, invest_account_id) VALUES ('Max', 'Acme', 'biweekly', '2026-09-11', 1100000, 1)").run()
+  db.prepare(
+    `INSERT INTO pay_sources (earner, employer, cadence, paid_on, gross_cents, retirement_cents, roth_cents, invest_account_id, match_rate_micro, match_cap_micro)
+     VALUES ('Max', 'Acme', 'biweekly', '2026-09-11', 1100000, 90000, 30000, 1, 500000, 60000)`,
+  ).run()
+  putPeople(db, { people: [{ name: 'Max', birthYear: 1972, hsaCoverage: 'family', hsaCents: 300000 }] }, '2026-09-22')
+  db.prepare("INSERT INTO invest_accounts (name, kind, tracking, subtype, owner) VALUES ('Old IRA', 'retirement', 'balance', 'ira', 'Max')").run()
+  db.prepare("INSERT INTO balance_snapshots (invest_account_id, balanced_on, balance_cents) VALUES ((SELECT id FROM invest_accounts WHERE name = 'Old IRA'), '2026-09-01', 4000000)").run()
   db.prepare("INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents) VALUES (1, 2, '2023-02-01', 'buy', 20000000, 400000)").run()
   db.prepare("INSERT INTO prices (asset_id, priced_on, close_cents) VALUES (2, '2026-09-19', 52000)").run()
   db.prepare("INSERT INTO categories (name, kind) VALUES ('Giving', 'expense'), ('Property tax', 'expense')").run()
@@ -58,6 +66,13 @@ describe('Checkup parity: better-sqlite3 vs sql.js', () => {
       return getCheckup(db, TODAY, 'max@x').findings.map((f) => [f.id, f.isNew])
     })
     expect(browser).toEqual(server)
+  })
+
+  it('paces the same contributions', async () => {
+    const { server, browser } = await onBothEngines(household, (db) => getContributions(db, TODAY))
+    expect(browser).toEqual(server)
+    expect(server.people[0]!.sources[0]!.match).not.toBeNull()
+    expect(server.people[0]!.ira.pretaxIraCents).toBe(4000000)
   })
 
   it('lists the same assumptions', async () => {

@@ -27,6 +27,12 @@ export type FindingKind =
   | 'allocation-drift'
   | 'price-creep'
   | 'mortgage-rate'
+  | 'deferral-room'
+  | 'match-stops'
+  | 'match-unclaimed'
+  | 'deferral-excess'
+  | 'hsa-room'
+  | 'backdoor-roth'
 
 /**
  * One derived observation. Every finding carries the five parts the Finding

@@ -215,7 +215,7 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             PortfolioValueCard, HoldingsReturnsCard, PriceChartCard,
             RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
             CategorySpendCard; cardModel.ts.
-  tax/        Taxes cards (HarvestCard, RealizedCard), BracketBar, and their copy.
+  tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard), BracketBar, and their copy.
   viz.tsx BigChart.tsx  Donut, GroupedBars, HBars, Bullets; the daily price
             chart (log scale, 50D/200D/200W, buys and sells marked).
   ui/Finding.tsx  One Checkup finding: the five parts every finding carries.
@@ -258,6 +258,11 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                harvest list, trade preview, realized report; paychecks.ts
                projects per-person payroll.
   digest.ts recurring.ts  The digest and recurring-transaction detection.
+  contributions.ts  Contribution pace: each person's 401(k)/403(b) deferrals
+               walked to Dec 31 against the limit their age allows, the match
+               and where it stops, HSA room, Roth IRA eligibility and pre-tax
+               IRAs for the pro-rata rule (limits: LIMITS_2026 in tax.ts).
+               people.ts holds birth years and HSA coverage per person.
   checkup.ts   The Checkup: findings (Finding, shared/checkup-api.ts) from
                the ledger and the tax year, bracket headroom, the tax
                calendar, a per-reader seen mark. checkup-settings.ts holds
@@ -298,7 +303,7 @@ server/     Node-only shell.
   api4.ts     The vault courier (blob, version + baseSha256 concurrency,
               updated_by, history and its pruning, purge on re-key, owner-only
               DELETE), members and invitations, body caps, export/import.
-  api5–7.ts   Tax, digest/recurring, scenarios.
+  api5–7.ts   Tax (with contribution pace and people), digest/recurring, scenarios.
   api11.ts    The Checkup (findings, seen mark, settings) and the assumptions.
   api8.ts     /mode (the front door, and a session's poll) and the price
               basket (GET, status, throttled rebuild).
@@ -363,7 +368,7 @@ specific lots, per-account pools), tax, money parsing, series and returns
 math, chart scales (including a non-vacuous America/Los_Angeles test), and
 simulation determinism.
 
-## 3. Data model (migrations 1–21)
+## 3. Data model (migrations 1–23)
 
 Ledger philosophy: **store dated facts, derive everything**. Transactions,
 trades, prices, valuations, balances are facts; balance sheets, charts, cost
@@ -390,7 +395,7 @@ number.
    names its grant in trades.grant_id.
 7. Household categories (Gardening/Alcohol/Pets/Taxes) + merchant rules;
    card-payment patterns file as Transfer.
-8. goal_settings (JSON blobs: goal, rental, tax, checkup) + loan_options;
+8. goal_settings (JSON blobs: goal, rental, tax, checkup, people) + loan_options;
    brokerage ACH files as Transfer (moving your own money is not income).
 9. prices_daily — daily closes for the price chart (Yahoo on a household
    server; in a tab, each day's basket quote accrues here) — and onchain_daily,
@@ -421,6 +426,10 @@ number.
     HISTORY_POLICY), vault_blobs.updated_by, vault_invites.
 21. vault_invites keyed on (email, household): each household's invitation
     waits on its own; none replaces another's.
+22. (see 6) a grant id per unvested position; trades.grant_id.
+23. pay_sources gains a Roth 401(k) line (roth_cents, ytd_roth_cents) and the
+    employer match (match_rate_micro of deferrals up to match_cap_micro of
+    pay, match_true_up) — the facts contribution pace derives from.
 
 **Server-only, never in a snapshot**: vault_blobs, vault_history,
 household_members, vault_invites, basket_quotes and the `basket:*` app_meta

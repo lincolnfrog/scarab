@@ -12,9 +12,9 @@ the lot engine — our strongest asset), digest second, decision engine third
 (biggest win, most design-heavy). All three shipped, and so did the
 2026-09-23 improvement pass (zero knowledge for two, brokerage, analytics, UI
 shell, charts — see its section below). Next is the **copilot layer** (§4,
-planned 2026-09-30): findings that show their work (4a, shipped 2026-10-01),
-contribution pace, a Future that knows about taxes and account types, and
-target allocation.
+planned 2026-09-30): findings that show their work (4a) and contribution
+pace (4b), both shipped 2026-10-01; next a Future that knows about taxes and
+account types (4c), then target allocation.
 Around it: follow-ups, the vault-only milestone, and the backlog at the end.
 
 ## Active: 1 — Tax intelligence layer
@@ -295,20 +295,44 @@ Follow-ups:
 
 ### 4b — Contribution pace & limits
 
-- [ ] **Limits table** next to the brackets in `engine/tax.ts`: 401(k)/403(b)
-      elective deferral + catch-up (50+, and the 60–63 tier), IRA + catch-up,
-      HSA self/family + 55+ catch-up, the Roth IRA MAGI phase-out, the
-      combined §415(c) limit. One vintage string; the `Finding` prints it.
-- [ ] **Pace from paystubs.** `pay_sources` already carries the per-check
-      401(k) and the cadence: project to Dec 31 and report the shortfall — or
-      the month the cap is hit and the match that stops (an optional
-      employer-match formula per pay source). HSA via the §125 line only if
-      the stub splits it out; otherwise a setting.
-- [ ] **Backdoor Roth flag**: projected MAGI (from `computeTaxYear`) over the
-      phase-out → a finding that names the mechanics and the pro-rata rule
-      (needs the pre-tax IRA balance: the `ira` subtype's balances).
-- [ ] **Birth year per person** — a setting shared with 4c (age axis, RMD
-      age, catch-up eligibility). Household data; rides the snapshot.
+**Shipped 2026-10-01** (`engine/contributions.ts`, `engine/people.ts`,
+`engine/checkup-contributions.ts`, `src/tax/ContributionsCard.tsx`;
+migration 23, tier B). Limits verified against IRS Notice 2025-67 and Rev.
+Proc. 2025-19.
+
+- [x] **Limits table** next to the brackets in `engine/tax.ts`
+      (`LIMITS_2026`, `ROTH_IRA_PHASEOUT_2026`, one `LIMITS_VINTAGE`):
+      deferrals $24,500 + catch-up $8,000 (50+) / $11,250 (60–63), the $150k
+      Roth-catch-up wage line, §415(c) $72,000, IRA $7,500 + $1,100, HSA
+      $4,400 / $8,750 + $1,000 (55+), Roth IRA phase-outs by status. On the
+      Assumptions page too.
+- [x] **Pace from paystubs.** Migration 23 adds the stub's Roth 401(k) line
+      (+ YTD) and the employer match (rate, up to a share of pay, true-up).
+      Each plan's checks are walked to Dec 31 — the estimated checks so far
+      too, when no YTD column is entered — stopping at the person's limit;
+      the card shows the pace, the date the limit is reached and the match
+      it costs. Findings: room left (priced as income tax deferred), the
+      match that stops at the limit, the match left unclaimed, two jobs over
+      the limit together. HSA is a per-person setting (coverage + planned
+      contributions; family coverage is one shared limit).
+- [x] **Backdoor Roth flag**: income over the phase-out start → a finding
+      naming the mechanics and the pro-rata rule, priced as the tax the
+      `ira`-subtype balances in each person's name would add to a conversion
+      (owner-less IRAs are listed, not guessed, when there are two people).
+- [x] **Birth year per person** — `goal_settings` 'people' (with HSA
+      coverage), edited on Taxes' Contribution pace card; drives catch-ups
+      now and 4c's age axis / RMD age next.
+
+Follow-ups:
+
+- [ ] Taxes still projects pre-tax deferrals per check without the limit, so a
+      stub-based year that would pass $24,500 understates taxable wages; feed
+      the pace's capped figure into `computePayroll`.
+- [ ] IRA contributions aren't read from the ledger (they're transfers or
+      trades), so there's no IRA "room" finding — only the limit and Roth
+      eligibility.
+- [ ] The match model is per check with no vesting; no mega-backdoor
+      (after-tax) line yet, so §415(c) is computed but never fires.
 
 ### 4c — Future v3: taxes, buckets, age
 

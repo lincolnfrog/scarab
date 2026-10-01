@@ -1,7 +1,9 @@
 import type { BracketHeadroom, CalendarItem, Checkup, Finding } from '../shared/checkup-api'
 import { addMonthsToMonth } from '../shared/dates'
 import { formatDollars, formatQtyMicro } from '../shared/money'
+import { contributionFindings } from './checkup-contributions'
 import { getCheckupSettings, resolveRoles, type Roles } from './checkup-settings'
+import { computeContributions } from './contributions'
 import type { DbLike } from './db'
 import { allocationShift, DRIFT_MICRO, PMMS_KEY } from './digest'
 import { cashAt, loadHoldings, type CashTrade } from './holdings'
@@ -807,6 +809,12 @@ export function getCheckup(db: DbLike, today: string, reader: string): Checkup {
     ...allocationDrift(c),
     ...priceCreep(c),
     ...mortgageRate(c),
+    ...contributionFindings(
+      computeContributions(db, today, c.ty.out.settings.filingStatus, c.ty.out.incomes.totalIncomeCents),
+      // Deferrals, HSA money and conversions move income tax only — never Medicare wages, so no 0.9% surtax.
+      Math.round(((c.taxWith({ ordinaryCents: c.ty.inputs.ordinaryCents + 1_000_00 }) - c.taxWith({})) * 1_000_000) / 1_000_00),
+      c.wagesEntered,
+    ),
   ]
   const seen = readSeen(db, reader)
   const findings = drafts

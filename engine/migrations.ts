@@ -478,6 +478,20 @@ export const migrations: string[] = [
    ALTER TABLE unvested_positions_22 RENAME TO unvested_positions;
    CREATE INDEX unvested_positions_holding ON unvested_positions (invest_account_id, asset_id);
    ALTER TABLE trades ADD COLUMN grant_id INTEGER`,
+
+  // 23 — contribution pace (copilot §4b). A paystub's Roth 401(k) line (it
+  // shares the elective-deferral limit with the pre-tax line but doesn't
+  // lower taxable wages), with its year-to-date figure, and the employer's
+  // match formula: `match_rate_micro` of the deferral, up to
+  // `match_cap_micro` of each check's gross, with or without a year-end
+  // true-up. Facts off the stub and the plan document; the pace, the month
+  // the cap is reached and the match that stops are derived. Additive for a
+  // snapshot (tier B): an older dump's paychecks get no Roth line and no match.
+  `ALTER TABLE pay_sources ADD COLUMN roth_cents INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE pay_sources ADD COLUMN ytd_roth_cents INTEGER;
+   ALTER TABLE pay_sources ADD COLUMN match_rate_micro INTEGER;
+   ALTER TABLE pay_sources ADD COLUMN match_cap_micro INTEGER;
+   ALTER TABLE pay_sources ADD COLUMN match_true_up INTEGER NOT NULL DEFAULT 0`,
 ]
 
 export function migrate(db: DbLike): void {

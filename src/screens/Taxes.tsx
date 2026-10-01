@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { formatCents, formatCentsPlain, formatDollars, formatQtyMicro } from '../../shared/money'
 import { del, get, post, put } from '../api'
 import { Link } from '../router'
+import ContributionsCard from '../tax/ContributionsCard'
 import HarvestCard from '../tax/HarvestCard'
 import { gapLine, scheduleNote } from '../tax/copy'
 import RealizedCard from '../tax/RealizedCard'
@@ -68,6 +69,11 @@ type PaySource = {
   ytdFedWithheldCents: number | null
   ytdStateWithheldCents: number | null
   investAccountId: number | null
+  rothCents: number
+  ytdRothCents: number | null
+  matchRateMicro: number | null
+  matchCapMicro: number | null
+  matchTrueUp: boolean
 }
 type PayProjection = PaySource & {
   stale: boolean
@@ -280,11 +286,17 @@ type PayForm = {
   ytdFedWithheldCents: number | null
   ytdStateWithheldCents: number | null
   investAccountId: string
+  rothCents: number | null
+  ytdRothCents: number | null
+  matchRateMicro: number | null
+  matchCapMicro: number | null
+  matchTrueUp: boolean
 }
 const emptyPay = (earner = ''): PayForm => ({
   id: null, earner, employer: '', cadence: 'biweekly', paidOn: '', grossCents: null, retirementCents: null,
   benefitsCents: null, fedWithheldCents: null, stateWithheldCents: null, ytdGrossCents: null, ytdRetirementCents: null,
   ytdBenefitsCents: null, ytdFedWithheldCents: null, ytdStateWithheldCents: null, investAccountId: '',
+  rothCents: null, ytdRothCents: null, matchRateMicro: null, matchCapMicro: null, matchTrueUp: false,
 })
 const toPayForm = (p: PaySource): PayForm => ({
   id: p.id,
@@ -303,6 +315,11 @@ const toPayForm = (p: PaySource): PayForm => ({
   ytdFedWithheldCents: p.ytdFedWithheldCents,
   ytdStateWithheldCents: p.ytdStateWithheldCents,
   investAccountId: p.investAccountId === null ? '' : String(p.investAccountId),
+  rothCents: orNull(p.rothCents),
+  ytdRothCents: p.ytdRothCents,
+  matchRateMicro: p.matchRateMicro,
+  matchCapMicro: p.matchCapMicro,
+  matchTrueUp: p.matchTrueUp,
 })
 const toPayBody = (f: PayForm) => ({
   earner: f.earner,
@@ -321,6 +338,12 @@ const toPayBody = (f: PayForm) => ({
   ytdFedWithheldCents: f.ytdGrossCents === null ? null : f.ytdFedWithheldCents,
   ytdStateWithheldCents: f.ytdGrossCents === null ? null : f.ytdStateWithheldCents,
   investAccountId: f.investAccountId ? Number(f.investAccountId) : null,
+  rothCents: f.rothCents ?? 0,
+  ytdRothCents: f.ytdGrossCents === null ? null : f.ytdRothCents,
+  // A match is both numbers or neither (the engine refuses half of one).
+  matchRateMicro: f.matchRateMicro !== null && f.matchCapMicro !== null ? f.matchRateMicro : null,
+  matchCapMicro: f.matchRateMicro !== null && f.matchCapMicro !== null ? f.matchCapMicro : null,
+  matchTrueUp: f.matchTrueUp,
 })
 
 /**
@@ -400,11 +423,13 @@ export default function Taxes() {
   const settingsRef = useRef<HTMLDivElement>(null)
   const payRef = useRef<HTMLDivElement>(null)
   const earnersListId = useId()
-  // '#/tax/paychecks', '#/tax/settings', '#/tax/safe-harbor' and '#/tax/harvest' scroll to these cards (the Dashboard, the Checkup and other screens link here).
+  // '#/tax/paychecks', '#/tax/settings', '#/tax/safe-harbor', '#/tax/harvest' and '#/tax/contributions' scroll to these cards (the Dashboard, the Checkup and other screens link here).
   const paychecksAnchor = useAnchor('paychecks')
   const settingsAnchor = useAnchor('settings')
   const safeHarborAnchor = useAnchor('safe-harbor')
   const harvestAnchor = useAnchor('harvest')
+  const contributionsAnchor = useAnchor('contributions')
+  const [loads, setLoads] = useState(0) // bumps on every load, so the contribution pace follows a saved paycheck
   const [opened, setOpened] = useState(0) // bumps on every "+ Paycheck", so a second click scrolls back to the editor
 
   /** The stored settings the form was last filled from: an unedited form follows the store, an edited one is kept. */
@@ -413,6 +438,7 @@ export default function Taxes() {
     const [t, a] = await Promise.all([get<Tax>('/api/tax'), get<InvestAccount[]>('/api/invest/accounts')])
     setTax(t)
     setAccounts(a)
+    setLoads((n) => n + 1)
     // A half-edited settings form survives the refetch (and a trip to another screen). An unedited one takes the
     // stored settings, so a change saved elsewhere (the other member) shows instead of reading as "unsaved changes"
     // that Save would write back over it.
@@ -553,7 +579,8 @@ export default function Taxes() {
   const earners = [...new Set(payroll.sources.map((p) => p.earner))]
   const amtGap = tax.tax.addlMedicareCents - payroll.addlMedicareWithheldCents
   const settingsDirty = !sameSettings(toSettings(form), toSettings(toForm(tax.settings)))
-  const payReady = !!pay && !!pay.earner.trim() && !!pay.paidOn && (pay.grossCents ?? 0) > 0
+  const payReady =
+    !!pay && !!pay.earner.trim() && !!pay.paidOn && (pay.grossCents ?? 0) > 0 && (pay.matchRateMicro === null) === (pay.matchCapMicro === null)
 
   const onSaveSettings = () => {
     if (!refuseIfInvalid(settingsRef.current)) void saveSettings.run(toSettings(form))
@@ -822,8 +849,11 @@ export default function Taxes() {
                 <Field label="Gross pay">
                   <MoneyInput value={pay.grossCents} onChange={(c) => setP({ grossCents: c })} />
                 </Field>
-                <Field label="401(k) / 403(b)" hint="lowers taxable wages">
+                <Field label="401(k) / 403(b)" hint="pre-tax: lowers taxable wages">
                   <MoneyInput value={pay.retirementCents} placeholder="0.00" onChange={(c) => setP({ retirementCents: c })} />
+                </Field>
+                <Field label="Roth 401(k)" hint="same limit, taxed now">
+                  <MoneyInput value={pay.rothCents} placeholder="0.00" onChange={(c) => setP({ rothCents: c })} />
                 </Field>
                 <Field label="Pre-tax benefits" hint="§125, HSA, FSA">
                   <MoneyInput value={pay.benefitsCents} placeholder="0.00" onChange={(c) => setP({ benefitsCents: c })} />
@@ -844,6 +874,9 @@ export default function Taxes() {
                 <Field label="YTD 401(k)">
                   <MoneyInput value={pay.ytdRetirementCents} disabled={pay.ytdGrossCents === null} onChange={(c) => setP({ ytdRetirementCents: c })} />
                 </Field>
+                <Field label="YTD Roth 401(k)">
+                  <MoneyInput value={pay.ytdRothCents} disabled={pay.ytdGrossCents === null} onChange={(c) => setP({ ytdRothCents: c })} />
+                </Field>
                 <Field label="YTD benefits">
                   <MoneyInput value={pay.ytdBenefitsCents} disabled={pay.ytdGrossCents === null} onChange={(c) => setP({ ytdBenefitsCents: c })} />
                 </Field>
@@ -855,8 +888,25 @@ export default function Taxes() {
                 </Field>
               </FieldGrid>
             </Group>
+            <Group title="Employer match" note="optional — from the plan’s summary: e.g. 50% of what you defer, up to 6% of pay">
+              <FieldGrid min={140}>
+                <Field label="Matches">
+                  <PercentInput valueMicro={pay.matchRateMicro} placeholder="e.g. 50" onChange={(m) => setP({ matchRateMicro: m })} />
+                </Field>
+                <Field label="Up to" hint="of each check's pay">
+                  <PercentInput valueMicro={pay.matchCapMicro} placeholder="e.g. 6" onChange={(m) => setP({ matchCapMicro: m })} />
+                </Field>
+                <label className="scr-check">
+                  <input type="checkbox" checked={pay.matchTrueUp} onChange={(e) => setP({ matchTrueUp: e.target.checked })} />
+                  Year-end true-up
+                </label>
+              </FieldGrid>
+            </Group>
             <div className="scr-formfoot">
               {!payReady && <span className="sub2 scr-note">Earner, pay date and gross pay are needed.</span>}
+              {payReady && (pay.matchRateMicro === null) !== (pay.matchCapMicro === null) && (
+                <span className="sub2 scr-note">A match needs both numbers — or leave both blank.</span>
+              )}
               <Button variant="ghost" onClick={() => setPay(null)} disabled={savePay.busy}>Cancel</Button>
               <Button variant="gold" busy={savePay.busy} disabled={!payReady} onClick={onSavePay}>
                 {pay.id === null ? 'Add paycheck' : 'Save paycheck'}
@@ -865,6 +915,8 @@ export default function Taxes() {
           </div>
         )}
       </div>
+
+      <ContributionsCard anchor={contributionsAnchor} version={loads} />
 
       {/* ---------- settings ---------- */}
       <div className="card c12" ref={settingsAnchor}>

@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
+import { getContributions } from '../engine/contributions'
 import type { DbLike } from '../engine/db'
 import { createPaySource, deletePaySource, updatePaySource } from '../engine/paychecks'
+import { listPeople, putPeople } from '../engine/people'
 import { getTax, putTaxSettings } from '../engine/tax'
 import { handle } from './api'
 import { db as rawDb } from './db'
@@ -28,3 +30,11 @@ api5.put('/paychecks/:id', async (c) => {
   return handle(c, () => updatePaySource(db, Number(c.req.param('id')), b))
 })
 api5.delete('/paychecks/:id', (c) => handle(c, () => deletePaySource(db, Number(c.req.param('id')))))
+
+// Contribution pace (copilot §4b) and the people it reads: birth years, HSA coverage.
+api5.get('/contributions', (c) => handle(c, () => getContributions(db, today())))
+api5.get('/people', (c) => handle(c, () => listPeople(db)))
+api5.put('/people', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => putPeople(db, b, today()))
+})

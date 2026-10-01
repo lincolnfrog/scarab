@@ -1,0 +1,36 @@
+/* Contribution pace (src/tax/ContributionsCard.tsx). One series (s1): what's in so far, solid; what the checks
+   ahead add by Dec 31, lighter; the track is the limit. */
+.ct-person + .ct-person { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ct-person h3 { margin-bottom: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ct-person h3 .muted { font-weight: 400; }
+.ct-row {
+  display: grid;
+  grid-template-columns: 120px minmax(120px, 220px) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 14px;
+  padding: 5px 0;
+  font-size: 12.5px;
+}
+.ct-what { color: var(--ink-3); }
+.ct-num { font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ct-num b { color: var(--ink); font-weight: 600; }
+.ct-num .muted { font-family: var(--sans); }
+.ct-note { color: var(--ink-2); min-width: 0; }
+.ct-wide { grid-column: 2 / -1; }
+.ct-meter { position: relative; height: 10px; border-radius: 999px; background: var(--card-hi); overflow: hidden; }
+.ct-meter:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.ct-meter i { position: absolute; top: 0; bottom: 0; left: 0; display: block; border-radius: 999px; }
+.ct-ahead { background: color-mix(in srgb, var(--s1) 45%, transparent); }
+.ct-ytd { background: var(--s1); }
+.ct-people-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; font-size: 12.5px; color: var(--ink); }
+.ct-person-fields { align-items: flex-start; }
+.ct-person-fields + .ct-person-fields { margin-top: 8px; }
+.ct-name { margin-top: 30px; font-size: 13px; color: var(--ink); } /* level with the inputs, under their labels */
+
+@container card (width < 640px) {
+  .ct-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .ct-what { grid-column: 1 / -1; }
+  .ct-meter { grid-column: 1 / -1; }
+  .ct-note, .ct-wide { grid-column: 1 / -1; }
+  .ct-name { flex-basis: 100%; margin-top: 0; font-weight: 600; }
+}

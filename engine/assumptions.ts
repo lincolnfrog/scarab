@@ -15,8 +15,11 @@ import {
   FEDERAL_STD_DEDUCTION_2026,
   FEDERAL_SUPPLEMENTAL_MICRO,
   getTaxSettings,
+  LIMITS_2026,
+  LIMITS_VINTAGE,
   NIIT_RATE_MICRO,
   NIIT_THRESHOLD,
+  ROTH_IRA_PHASEOUT_2026,
   STATE_TABLES,
   stateEstRule,
   STATES,
@@ -145,6 +148,25 @@ export function getAssumptions(db: DbLike): AssumptionGroup[] {
             : []
         })(),
       ],
+    },
+    {
+      id: 'contributions',
+      title: 'Contribution limits',
+      vintage: LIMITS_VINTAGE,
+      source: 'IRC §402(g), §414(v), §415(c), §219(b), §408A(c)(3), §223(b)',
+      rows: [
+        { label: '401(k) / 403(b) deferrals, pre-tax + Roth', value: `${$(LIMITS_2026.deferralCents)} per person` },
+        { label: 'Catch-up from 50 / for ages 60–63', value: `${$(LIMITS_2026.catchUp50Cents)} / ${$(LIMITS_2026.catchUp60to63Cents)}` },
+        { label: 'Catch-ups must be Roth after prior-year wages over', value: $(LIMITS_2026.rothCatchUpWageCents) },
+        { label: 'Everything into one plan (§415(c))', value: $(LIMITS_2026.annualAdditionsCents) },
+        { label: 'IRA, traditional + Roth', value: `${$(LIMITS_2026.iraCents)} (+${$(LIMITS_2026.iraCatchUpCents)} from 50)` },
+        ...FILINGS.map((f) => {
+          const [a, b] = ROTH_IRA_PHASEOUT_2026[f.id]
+          return { label: `Roth IRA phase-out — ${f.label}`, value: `${$(a)} – ${$(b)}` }
+        }),
+        { label: 'HSA, self-only / family', value: `${$(LIMITS_2026.hsaSelfCents)} / ${$(LIMITS_2026.hsaFamilyCents)} (+${$(LIMITS_2026.hsaCatchUp55Cents)} from 55)` },
+      ],
+      note: 'Catch-up ages go by the age reached by Dec 31 — birth years are set on Taxes.',
     },
     {
       id: 'gifts',

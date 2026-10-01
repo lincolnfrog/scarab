@@ -38,15 +38,23 @@ export type PaySource = {
   paidOn: string // pay date of the stub these numbers came from
   grossCents: number // per paycheck, EXCLUDING stock comp (that comes from the ledger)
   retirementCents: number // pre-tax retirement (401k/403b): reduces income-tax wages only
+  rothCents: number // Roth 401(k)/403(b): shares the deferral limit, reduces no wages
   benefitsCents: number // §125 premiums, HSA, FSA: reduce income-tax AND payroll-tax wages
   fedWithheldCents: number
   stateWithheldCents: number
   ytdGrossCents: number | null // NULL = not entered; assume every paycheck this year matched
   ytdRetirementCents: number | null
+  ytdRothCents: number | null
   ytdBenefitsCents: number | null
   ytdFedWithheldCents: number | null // as printed on the stub — includes any RSU supplemental withholding to date
   ytdStateWithheldCents: number | null
   investAccountId: number | null // the account this employer's RSUs vest into
+  /** The employer match: this share of each check's deferral (pre-tax + Roth)… null = no match entered. */
+  matchRateMicro: number | null
+  /** …on deferrals up to this share of the check's gross. */
+  matchCapMicro: number | null
+  /** The plan trues up at year end: a match missed after the deferral limit is paid anyway. */
+  matchTrueUp: boolean
   sort: number
 }
 
@@ -58,21 +66,27 @@ type Row = {
   paid_on: string
   gross_cents: number
   retirement_cents: number
+  roth_cents: number
   benefits_cents: number
   fed_withheld_cents: number
   state_withheld_cents: number
   ytd_gross_cents: number | null
   ytd_retirement_cents: number | null
+  ytd_roth_cents: number | null
   ytd_benefits_cents: number | null
   ytd_fed_withheld_cents: number | null
   ytd_state_withheld_cents: number | null
   invest_account_id: number | null
+  match_rate_micro: number | null
+  match_cap_micro: number | null
+  match_true_up: number
   sort: number
 }
 
-const SELECT = `SELECT id, earner, employer, cadence, paid_on, gross_cents, retirement_cents, benefits_cents,
-  fed_withheld_cents, state_withheld_cents, ytd_gross_cents, ytd_retirement_cents, ytd_benefits_cents,
-  ytd_fed_withheld_cents, ytd_state_withheld_cents, invest_account_id, sort FROM pay_sources`
+const SELECT = `SELECT id, earner, employer, cadence, paid_on, gross_cents, retirement_cents, roth_cents, benefits_cents,
+  fed_withheld_cents, state_withheld_cents, ytd_gross_cents, ytd_retirement_cents, ytd_roth_cents, ytd_benefits_cents,
+  ytd_fed_withheld_cents, ytd_state_withheld_cents, invest_account_id, match_rate_micro, match_cap_micro, match_true_up,
+  sort FROM pay_sources`
 
 const fromRow = (r: Row): PaySource => ({
   id: r.id,
@@ -82,15 +96,20 @@ const fromRow = (r: Row): PaySource => ({
   paidOn: r.paid_on,
   grossCents: r.gross_cents,
   retirementCents: r.retirement_cents,
+  rothCents: r.roth_cents,
   benefitsCents: r.benefits_cents,
   fedWithheldCents: r.fed_withheld_cents,
   stateWithheldCents: r.state_withheld_cents,
   ytdGrossCents: r.ytd_gross_cents,
   ytdRetirementCents: r.ytd_retirement_cents,
+  ytdRothCents: r.ytd_roth_cents,
   ytdBenefitsCents: r.ytd_benefits_cents,
   ytdFedWithheldCents: r.ytd_fed_withheld_cents,
   ytdStateWithheldCents: r.ytd_state_withheld_cents,
   investAccountId: r.invest_account_id,
+  matchRateMicro: r.match_rate_micro,
+  matchCapMicro: r.match_cap_micro,
+  matchTrueUp: r.match_true_up === 1,
   sort: r.sort,
 })
 
@@ -111,15 +130,20 @@ export type PaySourceInput = {
   paidOn?: string
   grossCents?: number
   retirementCents?: number
+  rothCents?: number
   benefitsCents?: number
   fedWithheldCents?: number
   stateWithheldCents?: number
   ytdGrossCents?: number | null
   ytdRetirementCents?: number | null
+  ytdRothCents?: number | null
   ytdBenefitsCents?: number | null
   ytdFedWithheldCents?: number | null
   ytdStateWithheldCents?: number | null
   investAccountId?: number | null
+  matchRateMicro?: number | null
+  matchCapMicro?: number | null
+  matchTrueUp?: boolean
 }
 
 const cents = (v: unknown, name: string, fallback: number): number => {
@@ -131,6 +155,12 @@ const optCents = (v: unknown, name: string, fallback: number | null): number | n
   if (v === undefined) return fallback
   if (v === null || v === '') return null
   return cents(v, name, 0)
+}
+const optMicro = (v: unknown, name: string, fallback: number | null, max: number): number | null => {
+  if (v === undefined) return fallback
+  if (v === null || v === '') return null
+  if (!Number.isSafeInteger(v) || (v as number) < 0 || (v as number) > max) bad(`${name} must be an integer from 0 to ${max} (micro)`)
+  return v as number
 }
 
 function validate(db: DbLike, b: PaySourceInput, cur: PaySource | null): Omit<PaySource, 'id' | 'sort'> {
@@ -144,8 +174,16 @@ function validate(db: DbLike, b: PaySourceInput, cur: PaySource | null): Omit<Pa
   const grossCents = cents(b.grossCents, 'grossCents', cur?.grossCents ?? -1)
   if (grossCents <= 0) bad('grossCents must be positive')
   const retirementCents = cents(b.retirementCents, 'retirementCents', cur?.retirementCents ?? 0)
+  const rothCents = cents(b.rothCents, 'rothCents', cur?.rothCents ?? 0)
   const benefitsCents = cents(b.benefitsCents, 'benefitsCents', cur?.benefitsCents ?? 0)
-  if (retirementCents + benefitsCents > grossCents) bad('pre-tax deductions exceed gross')
+  if (retirementCents + rothCents + benefitsCents > grossCents) bad('deductions exceed gross')
+  const match = {
+    matchRateMicro: optMicro(b.matchRateMicro, 'matchRateMicro', cur?.matchRateMicro ?? null, 10_000_000),
+    matchCapMicro: optMicro(b.matchCapMicro, 'matchCapMicro', cur?.matchCapMicro ?? null, 1_000_000),
+    matchTrueUp: b.matchTrueUp === undefined ? (cur?.matchTrueUp ?? false) : b.matchTrueUp === true,
+  }
+  // A match is a rate on deferrals up to a share of pay: one without the other means nothing.
+  if ((match.matchRateMicro === null) !== (match.matchCapMicro === null)) bad('a match needs both its rate and the share of pay it applies up to')
   const investAccountId = b.investAccountId === undefined ? (cur?.investAccountId ?? null) : b.investAccountId
   if (investAccountId !== null) {
     if (!Number.isSafeInteger(investAccountId)) bad('investAccountId must be an integer or null')
@@ -155,6 +193,7 @@ function validate(db: DbLike, b: PaySourceInput, cur: PaySource | null): Omit<Pa
   const ytd = {
     ytdGrossCents: optCents(b.ytdGrossCents, 'ytdGrossCents', cur?.ytdGrossCents ?? null),
     ytdRetirementCents: optCents(b.ytdRetirementCents, 'ytdRetirementCents', cur?.ytdRetirementCents ?? null),
+    ytdRothCents: optCents(b.ytdRothCents, 'ytdRothCents', cur?.ytdRothCents ?? null),
     ytdBenefitsCents: optCents(b.ytdBenefitsCents, 'ytdBenefitsCents', cur?.ytdBenefitsCents ?? null),
     ytdFedWithheldCents: optCents(b.ytdFedWithheldCents, 'ytdFedWithheldCents', cur?.ytdFedWithheldCents ?? null),
     ytdStateWithheldCents: optCents(b.ytdStateWithheldCents, 'ytdStateWithheldCents', cur?.ytdStateWithheldCents ?? null),
@@ -162,35 +201,38 @@ function validate(db: DbLike, b: PaySourceInput, cur: PaySource | null): Omit<Pa
   // The YTD column is all-or-nothing: gross anchors it, the rest default to 0.
   if (ytd.ytdGrossCents === null) {
     ytd.ytdRetirementCents = null
+    ytd.ytdRothCents = null
     ytd.ytdBenefitsCents = null
     ytd.ytdFedWithheldCents = null
     ytd.ytdStateWithheldCents = null
   } else {
     ytd.ytdRetirementCents ??= 0
+    ytd.ytdRothCents ??= 0
     ytd.ytdBenefitsCents ??= 0
     ytd.ytdFedWithheldCents ??= 0
     ytd.ytdStateWithheldCents ??= 0
     if (ytd.ytdGrossCents < grossCents) bad('year-to-date gross is less than one paycheck')
-    if (ytd.ytdRetirementCents + ytd.ytdBenefitsCents > ytd.ytdGrossCents) bad('year-to-date pre-tax deductions exceed gross')
+    if (ytd.ytdRetirementCents + ytd.ytdRothCents + ytd.ytdBenefitsCents > ytd.ytdGrossCents) bad('year-to-date deductions exceed gross')
   }
   return {
-    earner, employer, cadence: cadence!, paidOn: paidOn!, grossCents, retirementCents, benefitsCents,
+    earner, employer, cadence: cadence!, paidOn: paidOn!, grossCents, retirementCents, rothCents, benefitsCents,
     fedWithheldCents: cents(b.fedWithheldCents, 'fedWithheldCents', cur?.fedWithheldCents ?? 0),
     stateWithheldCents: cents(b.stateWithheldCents, 'stateWithheldCents', cur?.stateWithheldCents ?? 0),
     ...ytd,
     investAccountId,
+    ...match,
   }
 }
 
 const COLS = [
-  'earner', 'employer', 'cadence', 'paid_on', 'gross_cents', 'retirement_cents', 'benefits_cents',
-  'fed_withheld_cents', 'state_withheld_cents', 'ytd_gross_cents', 'ytd_retirement_cents', 'ytd_benefits_cents',
-  'ytd_fed_withheld_cents', 'ytd_state_withheld_cents', 'invest_account_id',
+  'earner', 'employer', 'cadence', 'paid_on', 'gross_cents', 'retirement_cents', 'roth_cents', 'benefits_cents',
+  'fed_withheld_cents', 'state_withheld_cents', 'ytd_gross_cents', 'ytd_retirement_cents', 'ytd_roth_cents', 'ytd_benefits_cents',
+  'ytd_fed_withheld_cents', 'ytd_state_withheld_cents', 'invest_account_id', 'match_rate_micro', 'match_cap_micro', 'match_true_up',
 ] as const
 const values = (v: Omit<PaySource, 'id' | 'sort'>) => [
-  v.earner, v.employer, v.cadence, v.paidOn, v.grossCents, v.retirementCents, v.benefitsCents,
-  v.fedWithheldCents, v.stateWithheldCents, v.ytdGrossCents, v.ytdRetirementCents, v.ytdBenefitsCents,
-  v.ytdFedWithheldCents, v.ytdStateWithheldCents, v.investAccountId,
+  v.earner, v.employer, v.cadence, v.paidOn, v.grossCents, v.retirementCents, v.rothCents, v.benefitsCents,
+  v.fedWithheldCents, v.stateWithheldCents, v.ytdGrossCents, v.ytdRetirementCents, v.ytdRothCents, v.ytdBenefitsCents,
+  v.ytdFedWithheldCents, v.ytdStateWithheldCents, v.investAccountId, v.matchRateMicro, v.matchCapMicro, v.matchTrueUp ? 1 : 0,
 ]
 
 export function createPaySource(db: DbLike, b: PaySourceInput): PaySource {
@@ -348,6 +390,12 @@ export function projectPaySource(s: PaySource, year: number): PayProjection {
       ficaWagesCents: projected.grossCents - projected.benefitsCents,
     },
   }
+}
+
+/** The pay dates still ahead in `year` after the stub (all of the year's, for a stale stub) — what projectPaySource counts. */
+export function remainingPayDates(s: PaySource, year: number): string[] {
+  const jan1 = `${year}-01-01`
+  return payDatesAfter(s.paidOn < jan1 ? lastBefore(s, jan1) : s.paidOn, s.cadence, `${year}-12-31`)
 }
 
 /** For a stale stub, the last pay date on the cadence before `jan1`, so the

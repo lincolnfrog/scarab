@@ -75,6 +75,36 @@ export const ADDL_MEDICARE_THRESHOLD: Record<FilingStatus, number> = {
   hoh: 200_000_00,
 }
 
+// Contribution limits, 2026 (IRS Notice 2025-67; HSA: Rev. Proc. 2025-19).
+// One vintage for the table: bump it with the numbers each November.
+export const LIMITS_VINTAGE = 'Contribution limits: 2026 (IRS Notice 2025-67; Rev. Proc. 2025-19)'
+export const LIMITS_2026 = {
+  /** §402(g) elective deferrals to 401(k)/403(b), pre-tax and Roth together, per person across employers. */
+  deferralCents: 24_500_00,
+  /** §414(v) catch-up from the year you turn 50… */
+  catchUp50Cents: 8_000_00,
+  /** …and the larger one for the years you turn 60 through 63 (SECURE 2.0 §109). */
+  catchUp60to63Cents: 11_250_00,
+  /** From 2026, catch-ups must be Roth for anyone whose prior-year FICA wages from that employer passed this (§414(v)(7)). */
+  rothCatchUpWageCents: 150_000_00,
+  /** §415(c): everything going into one employer's plan for a person — deferrals, match, after-tax. */
+  annualAdditionsCents: 72_000_00,
+  /** §219(b) IRA contributions, traditional and Roth together, per person; catch-up from 50. */
+  iraCents: 7_500_00,
+  iraCatchUpCents: 1_100_00,
+  /** §223(b) HSA, employer money included; catch-up from 55, per person. */
+  hsaSelfCents: 4_400_00,
+  hsaFamilyCents: 8_750_00,
+  hsaCatchUp55Cents: 1_000_00,
+} as const
+/** §408A(c)(3) Roth IRA contribution phase-out by MAGI: [start, end] in cents. */
+export const ROTH_IRA_PHASEOUT_2026: Record<FilingStatus, [number, number]> = {
+  single: [153_000_00, 168_000_00],
+  hoh: [153_000_00, 168_000_00],
+  mfj: [242_000_00, 252_000_00],
+  mfs: [0, 10_000_00],
+}
+
 // Federal supplemental-wage withholding on stock comp: a flat 22% (37% only
 // once supplemental wages pass $1M in a year). State flat rates for bonuses
 // and stock, where the state publishes one.

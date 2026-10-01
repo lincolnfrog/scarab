@@ -1,8 +1,10 @@
 import { getAssumptions } from '../../engine/assumptions'
 import { ackCheckup, getCheckup } from '../../engine/checkup'
+import { getContributions } from '../../engine/contributions'
 import { putCheckupSettings } from '../../engine/checkup-settings'
 import { ackDigest, getDigest, inheritDigestMark } from '../../engine/digest'
 import { createPaySource, deletePaySource, updatePaySource } from '../../engine/paychecks'
+import { listPeople, putPeople } from '../../engine/people'
 import { getRecurring } from '../../engine/recurring'
 import {
   compareScenarios,
@@ -102,6 +104,9 @@ export const CORE: LocalRoute[] = [
   r('POST', '/paychecks', (c) => createPaySource(c.db, c.body)),
   r('PUT', '/paychecks/:id', (c) => updatePaySource(c.db, Number(c.params.id), c.body)),
   r('DELETE', '/paychecks/:id', (c) => deletePaySource(c.db, Number(c.params.id))),
+  r('GET', '/contributions', (c) => getContributions(c.db, c.today)),
+  r('GET', '/people', (c) => listPeople(c.db)),
+  r('PUT', '/people', (c) => putPeople(c.db, c.body, c.today)),
 
   /* ---------- digest and recurring (api6.ts) ---------- */
   r('GET', '/digest', (c) => {
