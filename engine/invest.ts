@@ -35,6 +35,7 @@ import { ApiError, bad, isoDay, notFound } from './errors'
 import { ALL_TIME, cashAt, cashEffectCents, holdingLedger, loadHoldings, type CashTrade, type LedgerTrade } from './holdings'
 import { computePosition, longTermOn, lotCostShare, positionValueCents, saleRealized, type Sale } from './lots'
 import { priceFlagKeys, upsertPrices } from './prices'
+import { listReportedRealized, reportedTotals } from './realized-reported'
 
 /**
  * Investment accounts, trades, the portfolio and unvested RSUs, as pure
@@ -64,13 +65,14 @@ function accountRows(db: DbLike, onlyId?: number): InvestAccountRow[] {
     `SELECT (SELECT count(*) FROM trades WHERE invest_account_id = ?) AS trades,
             (SELECT count(*) FROM balance_snapshots WHERE invest_account_id = ?) AS balances,
             (SELECT count(*) FROM unvested_positions WHERE invest_account_id = ?) AS unvested,
-            (SELECT count(*) FROM pay_sources WHERE invest_account_id = ?) AS paychecks`,
+            (SELECT count(*) FROM pay_sources WHERE invest_account_id = ?) AS paychecks,
+            (SELECT count(*) FROM realized_reported WHERE invest_account_id = ?) AS reported`,
   )
   return rows.map((r) => ({
     ...r,
     subtype: isInvestSubtype(r.subtype) ? r.subtype : null,
     latest_snapshot: (latest.get(r.id) as InvestAccountRow['latest_snapshot'] | undefined) ?? null,
-    counts: counts.get(r.id, r.id, r.id, r.id) as InvestAccountRow['counts'],
+    counts: counts.get(r.id, r.id, r.id, r.id, r.id) as InvestAccountRow['counts'],
   }))
 }
 
@@ -235,6 +237,10 @@ export function updateInvestAccount(db: DbLike, id: number, b: Partial<Record<ke
       bad(
         `${cur.name} has ${plural(cur.counts.balances, 'balance update')} — tracking trades would drop them from net worth. Delete them first, or add a separate account that tracks trades`,
       )
+    if (cur.tracking === 'balance' && cur.counts.reported > 0)
+      bad(
+        `${cur.name} has realized gains reported for ${plural(cur.counts.reported, 'year')} — tracking trades would count its sales from them instead. Delete them first, or add a separate account that tracks trades`,
+      )
   }
   const stockPlan = b.stockPlan === undefined ? cur.stock_plan === 1 : b.stockPlan === true
   stockPlanOk(next.tracking, stockPlan)
@@ -290,12 +296,13 @@ export function getInvestAccount(db: DbLike, id: number, today: string): InvestA
     grants: getUnvested(db, { accountId: id }).rows,
     counts: account.counts,
     cash: pf.accounts[0] ?? null,
+    reported: account.tracking === 'balance' ? listReportedRealized(db, { accountId: id }) : [],
   }
 }
 
 /**
  * Delete an account and every dated fact recorded against it — trades, balance
- * snapshots, unvested shares. Nothing is derived-and-stored, so holdings, net
+ * snapshots, unvested shares, realized gains its broker reported. Nothing is derived-and-stored, so holdings, net
  * worth and the tax picture simply recompute without it. Paychecks that named
  * it as their stock-comp destination lose only that link. Assets left with no
  * trades and no unvested shares go too, along with their price history.
@@ -307,7 +314,7 @@ export function deleteInvestAccount(db: DbLike, id: number) {
   if (!row) notFound('no such investment account')
   const n = (t: string) =>
     (db.prepare(`SELECT count(*) AS n FROM ${t} WHERE invest_account_id = ?`).get(id) as { n: number }).n
-  const removed = { trades: n('trades'), balances: n('balance_snapshots'), unvested: n('unvested_positions') }
+  const removed = { trades: n('trades'), balances: n('balance_snapshots'), unvested: n('unvested_positions'), reported: n('realized_reported') }
   const unlinkedPaychecks = n('pay_sources')
   db.transaction(() => {
     // Lots pool per account, so a sell elsewhere that names a lot from here
@@ -319,7 +326,7 @@ export function deleteInvestAccount(db: DbLike, id: number) {
       'UPDATE trades SET sold_lot_trade_id = NULL WHERE sold_lot_trade_id IN (SELECT id FROM trades WHERE invest_account_id = ?)',
     ).run(id)
     db.prepare('UPDATE pay_sources SET invest_account_id = NULL WHERE invest_account_id = ?').run(id)
-    for (const t of ['rsu_vests', 'unvested_positions', 'balance_snapshots', 'trades'])
+    for (const t of ['rsu_vests', 'unvested_positions', 'balance_snapshots', 'realized_reported', 'trades'])
       db.prepare(`DELETE FROM ${t} WHERE invest_account_id = ?`).run(id)
     db.prepare('DELETE FROM invest_accounts WHERE id = ?').run(id)
     dropOrphanAssets(db)
@@ -1180,7 +1187,16 @@ function portfolioOf(db: DbLike, today: string, accountId?: number): PortfolioRe
   const manual = manualPriceMarks(db)
   const priceOf = new Map<number, Price | undefined>()
   const positions = new Map<number, PortfolioPosition>()
-  const totals = { value: 0, cost: 0, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+  const totals = { value: 0, cost: 0, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 }
+  if (accountId === undefined) {
+    // Household-wide, the year's broker-reported realized gains (balance accounts) meet the trades' on the return.
+    const rep = reportedTotals(db, Number(today.slice(0, 4)))
+    totals.ytd_reported_st = rep.stCents
+    totals.ytd_reported_lt = rep.ltCents
+    totals.ytd_st += rep.stCents
+    totals.ytd_lt += rep.ltCents
+    totals.ytd_sheltered += rep.shelteredCents
+  }
   const freshFrom = addDaysIso(today, -DAY_CHANGE_FRESH_DAYS)
   const warnings: string[] = []
   const valueOf = new Map<number, number>() // holdings value per account

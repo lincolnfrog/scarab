@@ -85,11 +85,19 @@ describe('the owner pills (B13)', () => {
   })
 
   it('the tax picture says it is still the household’s when narrowed', () => {
-    const totals: PortfolioResponse['totals'] = { value: 1, cost: 1, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+    const totals: PortfolioResponse['totals'] = { value: 1, cost: 1, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 }
     expect(text(renderToStaticMarkup(<TaxPictureCard totals={totals} marginal={null} year="2026" scope="Max’s accounts" />))).toContain(
       'The whole household’s, not only Max’s accounts',
     )
     expect(text(renderToStaticMarkup(<TaxPictureCard totals={totals} marginal={null} year="2026" />))).not.toContain('not only')
+  })
+
+  it('the tax picture names the broker-reported part and nets last year’s carryover in', () => {
+    const totals: PortfolioResponse['totals'] = { value: 1, cost: 1, unrealized: 0, cash: 0, day_change: 0, day_base: 0, ytd_st: -35_000_00, ytd_lt: 2_000_00, ytd_sheltered: 0, ytd_reported_st: -40_000_00, ytd_reported_lt: 0 }
+    const t = text(renderToStaticMarkup(<TaxPictureCard totals={totals} marginal={null} year="2026" carryIn={{ stCents: 0, ltCents: 5_000_00 }} />))
+    expect(t).toContain('Realized short-term, taxable accounts (ordinary rates) · incl. -$40,000.00 reported by the broker -$35,000.00')
+    expect(t).toContain('Loss carried in from 2025 -$5,000.00')
+    expect(t).toContain('Net capital loss: $3,000.00 offsets ordinary income this year, $35,000.00 carries forward')
   })
 })
 
@@ -109,6 +117,7 @@ describe('the realized-gains report (B14)', () => {
     sheltered: { sales: 2, gain_cents: 600_00 },
     withheld: { sales: 2, cents: 2_468_00 },
     flags: { no_basis: 1, wash_risk: 1 },
+    reported: [],
   }
 
   it('totals by part, the netting, what to check, and each line', () => {
@@ -139,6 +148,18 @@ describe('the realized-gains report (B14)', () => {
     expect(text(renderToStaticMarkup(<RealizedBody r={plain} all onAll={() => {}} />)).trim()).toBe(
       'No sales in taxable accounts in 2026. Shares withheld at a vest to pay the tax ($1,600.00) weren’t sold by you, so they aren’t listed.',
     )
+  })
+
+  it('lists broker-reported figures apart from the lines, and stands on them alone', () => {
+    const flex = { invest_account_id: 5, account: 'Flex 250', tax_year: 2026, st_cents: -40_000_00, lt_cents: -1_000_00, as_of: '2026-09-30', sheltered: false }
+    const t = text(renderToStaticMarkup(<RealizedBody r={{ ...report, reported: [flex] }} all onAll={() => {}} />))
+    expect(t).toContain('Flex 250 reported by the broker · through 2026-09-30 — — -$41,000.00 ST -$40,000.00 LT -$1,000.00')
+    expect(t).toContain('the broker’s own totals')
+    const alone = { ...report, lines: [], st: { ...report.st, lines: 0 }, lt: { ...report.lt, lines: 0 }, reported: [flex], netted: { netStCents: 0, netLtCents: 0, capLossUsedCents: 3_000_00, capLossCarryCents: 38_000_00 } }
+    const t2 = text(renderToStaticMarkup(<RealizedBody r={alone} all onAll={() => {}} />))
+    expect(t2).toContain('Net capital loss $41,000.00: $3,000.00 offsets ordinary income, $38,000.00 carries forward.')
+    expect(t2).not.toContain('Part I')
+    expect(t2).not.toContain('From Scarab’s lots')
   })
 
   it('shows the first 8 lines, then offers the rest', () => {

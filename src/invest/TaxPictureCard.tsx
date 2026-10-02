@@ -11,6 +11,8 @@ export type TaxPictureProps = {
   year: string
   /** The screen is narrowed to some accounts ("Max’s accounts"): this card still speaks for the household. */
   scope?: string | null
+  /** The loss carried in from last year's return (Taxes' settings), positive cents; null while unknown. */
+  carryIn?: { stCents: number; ltCents: number } | null
 }
 
 const rate = (cents: number, micro: number) => Math.round((cents * micro) / 1_000_000)
@@ -20,11 +22,18 @@ const rate = (cents: number, micro: number) => Math.round((cents * micro) / 1_00
  * nets them (short against long, then up to $3,000 of a net loss against
  * ordinary income), with the estimated tax at the household's marginal rates.
  * Gains realized inside IRAs and 401(k)s are shown apart: they never reach
- * the bill. A strip of figures across the screen — Taxes has the detail.
+ * the bill. Realized gains brokers report for balance-tracked accounts are in
+ * the totals (and said so), and last year's carryover nets in by character.
+ * A strip of figures across the screen — Taxes has the detail.
  */
-export default function TaxPictureCard({ totals, marginal, year, scope }: TaxPictureProps) {
-  const n = netCapitalGains(totals.ytd_st, totals.ytd_lt)
-  const netted = n.netStCents !== totals.ytd_st || n.netLtCents !== totals.ytd_lt
+export default function TaxPictureCard({ totals, marginal, year, scope, carryIn }: TaxPictureProps) {
+  const cSt = carryIn?.stCents ?? 0
+  const cLt = carryIn?.ltCents ?? 0
+  const st = totals.ytd_st - cSt
+  const lt = totals.ytd_lt - cLt
+  const n = netCapitalGains(st, lt)
+  const netted = n.netStCents !== st || n.netLtCents !== lt
+  const reported = (c: number) => (c !== 0 ? ` · incl. ${formatCents(c, { sign: c > 0 })} reported by the broker` : '')
   const netLoss = n.capLossUsedCents + n.capLossCarryCents
   const estTax = marginal
     ? rate(n.netStCents, marginal.stMicro) + rate(n.netLtCents, marginal.ltMicro) - rate(n.capLossUsedCents, marginal.ordinaryMicro)
@@ -41,16 +50,22 @@ export default function TaxPictureCard({ totals, marginal, year, scope }: TaxPic
       {scope && <p className="inv-scopenote">The whole household’s, not only {scope}: every taxable account’s gains and losses meet on the return.</p>}
       <div className="inv-taxpic">
         <div className="inv-row">
-          <span>Realized short-term, taxable accounts (ordinary rates)</span>
+          <span>Realized short-term, taxable accounts (ordinary rates){reported(totals.ytd_reported_st)}</span>
           <b>{formatCents(totals.ytd_st, { sign: totals.ytd_st > 0 })}</b>
         </div>
         <div className="inv-row">
-          <span>Realized long-term, taxable accounts (cap-gains rates)</span>
+          <span>Realized long-term, taxable accounts (cap-gains rates){reported(totals.ytd_reported_lt)}</span>
           <b>{formatCents(totals.ytd_lt, { sign: totals.ytd_lt > 0 })}</b>
         </div>
+        {cSt + cLt > 0 && (
+          <div className="inv-row">
+            <span>Loss carried in from {Number(year) - 1}</span>
+            <b>{formatCents(-(cSt + cLt))}</b>
+          </div>
+        )}
         {netted && netLoss === 0 && (
           <div className="inv-row">
-            <span>After netting short against long</span>
+            <span>After netting{cSt + cLt > 0 ? '' : ' short against long'}</span>
             <b>
               {n.netStCents !== 0 ? `${formatCents(n.netStCents)} ST` : `${formatCents(n.netLtCents)} LT`}
             </b>

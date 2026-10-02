@@ -22,6 +22,7 @@ import {
   updateTrade,
   vestUnvested,
 } from '../../engine/invest'
+import { deleteReportedRealized, putReportedRealized } from '../../engine/realized-reported'
 import { getRealizedReport, previewTrade } from '../../engine/tax'
 import { r, type LocalRoute } from './table'
 
@@ -48,6 +49,8 @@ export const INVEST: LocalRoute[] = [
   r('PUT', '/invest/balances', (c) => putBalanceSnapshot(c.db, c.body, c.today)),
   r('GET', '/invest/balances', (c) => listBalanceSnapshots(c.db, { accountId: c.query.get('accountId') })),
   r('DELETE', '/invest/balances/:accountId/:date', (c) => deleteBalanceSnapshot(c.db, Number(c.params.accountId), c.params.date!)),
+  r('PUT', '/invest/accounts/:id/realized/:year', (c) => putReportedRealized(c.db, Number(c.params.id), c.params.year, c.body, c.today)),
+  r('DELETE', '/invest/accounts/:id/realized/:year', (c) => deleteReportedRealized(c.db, Number(c.params.id), c.params.year, c.today)),
 
   r('POST', '/trades', (c) => createTrade(c.db, c.body, c.today)),
   r('POST', '/trades/opening', (c) => createOpeningPositions(c.db, c.body, c.today)),

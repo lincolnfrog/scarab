@@ -57,7 +57,7 @@ export default function HoldingDrawer(p: HoldingDrawerProps) {
   const subtitle = [KIND[h.kind], `${formatQtyMicro(h.qty_micro)} held`, h.accounts.length > 1 ? `${h.accounts.length} accounts` : h.accounts[0]?.name, p.scopeLabel]
     .filter(Boolean)
     .join(' · ')
-  const totals = { value: h.value_cents, cost: h.cost_cents, unrealized: h.unrealized_cents, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+  const totals = { value: h.value_cents, cost: h.cost_cents, unrealized: h.unrealized_cents, cash: 0, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 }
 
   return (
     <Drawer open={p.position !== null} onClose={p.onClose} width={820} title={h.symbol} subtitle={subtitle}>

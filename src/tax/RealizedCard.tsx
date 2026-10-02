@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RSU_WITHHOLDING_NOTE, type RealizedLine, type RealizedReport } from '../../shared/invest-api'
+import { RSU_WITHHOLDING_NOTE, type RealizedLine, type RealizedReport, type ReportedRealizedRow } from '../../shared/invest-api'
 import { formatCents, formatQtyMicro } from '../../shared/money'
 import { get } from '../api'
 import { form8949Csv, form8949Filename } from '../invest/form8949'
@@ -40,6 +40,7 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
   useEffect(() => load(), [load])
 
   const r = report?.year === year ? report : null
+  const anything = !!r && (r.lines.length > 0 || r.reported.length > 0)
   const download = () => {
     if (!r) return
     try {
@@ -58,7 +59,7 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
 
   const years = report?.years ?? [thisYear]
   return (
-    <div className="card c6 inv-taxcard inv-rz" style={!r || r.lines.length === 0 ? { alignSelf: 'start' } : undefined}>
+    <div className="card c6 inv-taxcard inv-rz" style={!anything ? { alignSelf: 'start' } : undefined}>
       <div className="h4row">
         <h2>Realized gains</h2>
         <div className="right">
@@ -69,7 +70,7 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
               ))}
             </Select>
           )}
-          <Button size="mini" disabled={!r || r.lines.length === 0} onClick={download} title="Every line, Part I and Part II, with totals — to check against the 1099-B or hand to a preparer">
+          <Button size="mini" disabled={!anything} onClick={download} title="Every line, Part I and Part II, with totals — to check against the 1099-B or hand to a preparer">
             Download CSV (Form 8949)
           </Button>
         </div>
@@ -100,7 +101,7 @@ const withheldText = (w: RealizedReport['withheld']) =>
 
 /** The report itself: exported for the render test. */
 export function RealizedBody({ r, all, onAll }: { r: RealizedReport; all: boolean; onAll: () => void }) {
-  if (r.lines.length === 0)
+  if (r.lines.length === 0 && r.reported.length === 0)
     return (
       <p className="sub2">
         No sales in taxable accounts in {r.year}
@@ -122,7 +123,8 @@ export function RealizedBody({ r, all, onAll }: { r: RealizedReport; all: boolea
             </tr>
           </thead>
           <tbody>
-            {([['Short-term', 'Part I', r.st], ['Long-term', 'Part II', r.lt]] as const).map(([label, part, t]) => (
+            {/* With only reported figures, empty parts would be rows of zeros. */}
+            {([['Short-term', 'Part I', r.st], ['Long-term', 'Part II', r.lt]] as const).filter(([, , t]) => t.lines > 0 || r.lines.length > 0).map(([label, part, t]) => (
               <tr key={label}>
                 <td>
                   {label}
@@ -134,6 +136,9 @@ export function RealizedBody({ r, all, onAll }: { r: RealizedReport; all: boolea
                 <td className="r num muted">{formatCents(t.cost_cents)}</td>
                 <td className={`r num ${t.gain_cents > 0 ? 'pos' : t.gain_cents < 0 ? 'neg' : ''}`}>{signed(t.gain_cents)}</td>
               </tr>
+            ))}
+            {r.reported.map((x) => (
+              <ReportedRow key={x.invest_account_id} x={x} />
             ))}
           </tbody>
         </table>
@@ -166,20 +171,22 @@ export function RealizedBody({ r, all, onAll }: { r: RealizedReport; all: boolea
           )}
         </ul>
       )}
-      <div className="inv-tablewrap">
-        <table className="inv-rz-lines">
-          <thead>
-            <tr>
-              <th>Sold</th><th>Lot</th><th className="r">Gain · proceeds</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => (
-              <LineRow key={`${l.sale_trade_id ?? 'x'}-${i}`} l={l} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {r.lines.length > 0 && (
+        <div className="inv-tablewrap">
+          <table className="inv-rz-lines">
+            <thead>
+              <tr>
+                <th>Sold</th><th>Lot</th><th className="r">Gain · proceeds</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l, i) => (
+                <LineRow key={`${l.sale_trade_id ?? 'x'}-${i}`} l={l} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {!all && r.lines.length > SHOWN && (
         <div className="inv-more">
           <Button size="mini" onClick={onAll}>
@@ -188,9 +195,32 @@ export function RealizedBody({ r, all, onAll }: { r: RealizedReport; all: boolea
         </div>
       )}
       <p className="inv-note inv-rz-foot">
-        From Scarab’s lots, not your broker’s 1099-B: match each line against it, and take the box (A–F) and any adjustments from there.
+        {r.lines.length > 0 && 'From Scarab’s lots, not your broker’s 1099-B: match each line against it, and take the box (A–F) and any adjustments from there.'}
+        {r.lines.length > 0 && r.reported.length > 0 && ' '}
+        {r.reported.length > 0 &&
+          `${r.reported.length === 1 ? 'The reported figures are' : 'Reported figures are'} the broker’s own totals, entered on the account — its 1099-B has the lines, and already reflects any wash sale it caught.`}
       </p>
     </>
+  )
+}
+
+/** An account tracked by balance: the year's realized gain as its broker reports it, by term — no proceeds or basis of Scarab's. */
+function ReportedRow({ x }: { x: ReportedRealizedRow }) {
+  const total = x.st_cents + x.lt_cents
+  return (
+    <tr>
+      <td>
+        {x.account}
+        <span className="inv-rz-sub">reported by the broker · through {x.as_of}</span>
+      </td>
+      <td className="r num muted">—</td>
+      <td className="r num muted">—</td>
+      <td className={`r num ${total > 0 ? 'pos' : total < 0 ? 'neg' : ''}`}>
+        {signed(total)}
+        <span className="inv-rz-sub">ST {signed(x.st_cents)}</span>
+        <span className="inv-rz-sub">LT {signed(x.lt_cents)}</span>
+      </td>
+    </tr>
   )
 }
 

@@ -1,4 +1,4 @@
-import { RSU_WITHHOLDING_NOTE, type RealizedLine, type RealizedReport } from '../../shared/invest-api'
+import { RSU_WITHHOLDING_NOTE, type RealizedLine, type RealizedReport, type ReportedRealizedRow } from '../../shared/invest-api'
 import { formatQtyMicro } from '../../shared/money'
 
 /**
@@ -10,6 +10,10 @@ import { formatQtyMicro } from '../../shared/money'
  * Columns (f) code and (g) adjustment stay empty: they come from the broker's
  * 1099-B (a wash sale's disallowed loss is code W), which Scarab never sees —
  * lines that may need one say so in the note.
+ *
+ * Realized gains entered as a broker reports them (an account tracked by
+ * balance) follow each part's total as one summary row per account: a gain
+ * with no proceeds or basis, since the 1099-B holds the lines themselves.
  */
 
 /** Integer cents as a plain dollar figure, exactly: -123456 → "-1234.56". No float ever touches it. */
@@ -53,14 +57,16 @@ export const FORM_8949_HEADER = [
   'Check before filing',
 ]
 
-export function form8949Csv(r: Pick<RealizedReport, 'lines' | 'st' | 'lt'>): string {
+export const REPORTED_NOTE = 'Reported by the broker, not Scarab’s lots: take its lines, box and any adjustments from the 1099-B'
+
+export function form8949Csv(r: Pick<RealizedReport, 'lines' | 'st' | 'lt'> & { reported?: readonly ReportedRealizedRow[] }): string {
   const out = [row(FORM_8949_HEADER)]
   for (const [term, part, totals] of [
     ['st', 'I (short-term)', r.st],
     ['lt', 'II (long-term)', r.lt],
   ] as const) {
     const lines = r.lines.filter((l) => l.term === term)
-    if (lines.length === 0) continue
+    const reported = (r.reported ?? []).filter((x) => (term === 'st' ? x.st_cents : x.lt_cents) !== 0)
     for (const l of lines)
       out.push(
         row([
@@ -77,7 +83,24 @@ export function form8949Csv(r: Pick<RealizedReport, 'lines' | 'st' | 'lt'>): str
           lineNote(l),
         ]),
       )
-    out.push(row([`${part} total`, '', '', '', csvDollars(totals.proceeds_cents), csvDollars(totals.cost_cents), '', '', csvDollars(totals.gain_cents), '', '']))
+    if (lines.length > 0)
+      out.push(row([`${part} total`, '', '', '', csvDollars(totals.proceeds_cents), csvDollars(totals.cost_cents), '', '', csvDollars(totals.gain_cents), '', '']))
+    for (const x of reported)
+      out.push(
+        row([
+          `${part} reported`,
+          `Realized through ${formDate(x.as_of)}`,
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          csvDollars(term === 'st' ? x.st_cents : x.lt_cents),
+          x.account,
+          REPORTED_NOTE,
+        ]),
+      )
   }
   return `${out.join('\r\n')}\r\n`
 }

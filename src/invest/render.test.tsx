@@ -32,7 +32,7 @@ const portfolio: PortfolioResponse = {
     },
   ],
   warnings: [],
-  totals: { value: 4_500_00, cost: 3_000_00, unrealized: 1_500_00, cash: 0, day_change: 0, day_base: 0, ytd_st: -500_00, ytd_lt: 2_000_00, ytd_sheltered: 200_00 },
+  totals: { value: 4_500_00, cost: 3_000_00, unrealized: 1_500_00, cash: 0, day_change: 0, day_base: 0, ytd_st: -500_00, ytd_lt: 2_000_00, ytd_sheltered: 200_00, ytd_reported_st: 0, ytd_reported_lt: 0 },
   accounts: [],
 }
 
@@ -84,7 +84,7 @@ describe('brokerage cards render from the contract', () => {
     const loss = text(
       renderToStaticMarkup(
         <TaxPictureCard
-          totals={{ ...portfolio.totals, ytd_st: -5_000_00, ytd_lt: 1_000_00, ytd_sheltered: 0 }}
+          totals={{ ...portfolio.totals, ytd_st: -5_000_00, ytd_lt: 1_000_00, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 }}
           marginal={{ ordinaryMicro: 400_000, stMicro: 450_000, ltMicro: 250_000 }}
           year="2026"
         />,
@@ -147,7 +147,7 @@ describe('brokerage cards render from the contract', () => {
       id: 3, name: 'Fidelity 401(k)', kind: 'retirement', tracking: 'balance', stock_plan: 0,
       latest_snapshot: { balanced_on: '2026-06-30', balance_cents: 44_500_00 },
       subtype: '401k', institution: 'Fidelity', owner: 'Nicole', mask: '1234', sort: 0,
-      counts: { trades: 0, balances: 2, unvested: 0, paychecks: 0 },
+      counts: { trades: 0, balances: 2, unvested: 0, paychecks: 0, reported: 0 },
     }
     const html = renderToStaticMarkup(
       <BalancePanel

@@ -161,7 +161,17 @@ function context(db: DbLike, today: string): Context {
     thisInputs: inputs,
     nextBase,
     view: {
-      thisYear: view(year, inputs, out.incomes.wagesCents, out.incomes.rsuYtdCents + out.incomes.rsuProjectedCents, out.incomes.dividendsYtdCents, { st: 0, lt: 0 }, inputs.stGainCents, inputs.ltGainCents),
+      // This year's realized gains apart from the carryover the return brought in (Taxes' setting): the inputs net the two.
+      thisYear: view(
+        year,
+        inputs,
+        out.incomes.wagesCents,
+        out.incomes.rsuYtdCents + out.incomes.rsuProjectedCents,
+        out.incomes.dividendsYtdCents,
+        { st: out.incomes.carryInStCents, lt: out.incomes.carryInLtCents },
+        out.incomes.realizedStCents,
+        out.incomes.realizedLtCents,
+      ),
       nextYear: view(next, nextBase, wages, rsu, div, carry, 0, 0),
       basis,
       vintage: `${TAX_DATA_VINTAGE} — held for ${next}`,

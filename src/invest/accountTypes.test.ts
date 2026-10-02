@@ -33,7 +33,7 @@ const acct = (over: Partial<InvestAccountRow> = {}): InvestAccountRow => ({
   mask: '1234',
   sort: 0,
   latest_snapshot: null,
-  counts: { trades: 0, balances: 0, unvested: 0, paychecks: 0 },
+  counts: { trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 0 },
   ...over,
 })
 const pos = (over: Partial<PortfolioPosition> & Pick<PortfolioPosition, 'asset_id' | 'symbol'>): PortfolioPosition => ({
@@ -115,12 +115,13 @@ describe('the settings form sends only what changed', () => {
 
   it('says why tracking or the stock-plan flag is locked, before anyone tries', () => {
     expect(trackingLock(acct())).toBeNull()
-    expect(trackingLock(acct({ counts: { trades: 3, balances: 0, unvested: 0, paychecks: 0 } }))).toMatch(/It has 3 trades/)
-    expect(trackingLock(acct({ tracking: 'balance', counts: { trades: 0, balances: 1, unvested: 0, paychecks: 0 } }))).toMatch(/1 balance update\./)
+    expect(trackingLock(acct({ counts: { trades: 3, balances: 0, unvested: 0, paychecks: 0, reported: 0 } }))).toMatch(/It has 3 trades/)
+    expect(trackingLock(acct({ tracking: 'balance', counts: { trades: 0, balances: 1, unvested: 0, paychecks: 0, reported: 0 } }))).toMatch(/1 balance update\./)
+    expect(trackingLock(acct({ tracking: 'balance', counts: { trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 2 } }))).toMatch(/realized gains reported for 2 years/)
     expect(stockPlanLock(acct())).toBeNull()
     expect(stockPlanLock(acct({ stock_plan: 1 }))).toBeNull()
-    expect(stockPlanLock(acct({ stock_plan: 1, counts: { trades: 0, balances: 0, unvested: 2, paychecks: 0 } }))).toMatch(/Grants tab/)
-    expect(stockPlanLock(acct({ stock_plan: 1, counts: { trades: 0, balances: 0, unvested: 0, paychecks: 1 } }))).toMatch(/paycheck/)
+    expect(stockPlanLock(acct({ stock_plan: 1, counts: { trades: 0, balances: 0, unvested: 2, paychecks: 0, reported: 0 } }))).toMatch(/Grants tab/)
+    expect(stockPlanLock(acct({ stock_plan: 1, counts: { trades: 0, balances: 0, unvested: 0, paychecks: 1, reported: 0 } }))).toMatch(/paycheck/)
   })
 })
 
@@ -139,7 +140,7 @@ describe('the account strip', () => {
     expect(accountValueCents(acct({ id: 9, tracking: 'balance' }), positions)).toBeNull()
     expect(heldLine(acct(), positions)).toBe('2 holdings')
     expect(heldLine(acct({ id: 9 }), positions)).toBe('no holdings yet')
-    expect(heldLine(acct({ id: 9, counts: { trades: 2, balances: 0, unvested: 0, paychecks: 0 } }), positions)).toBe('nothing held now')
+    expect(heldLine(acct({ id: 9, counts: { trades: 2, balances: 0, unvested: 0, paychecks: 0, reported: 0 } }), positions)).toBe('nothing held now')
   })
 
   it('marks an old number: a balance past 45 days, or a holding with no fresh price (hand-set prices count as fresh)', () => {
@@ -152,7 +153,9 @@ describe('the account strip', () => {
 
   it("opens the drawer on a tab the account has", () => {
     expect(drawerTabs(acct())).toEqual(['positions', 'activity', 'grants', 'settings'])
-    expect(drawerTabs(acct({ tracking: 'balance' }))).toEqual(['balances', 'settings'])
+    expect(drawerTabs(acct({ tracking: 'balance' }))).toEqual(['balances', 'realized', 'settings'])
+    expect(drawerTabs(acct({ tracking: 'balance', kind: 'retirement' }))).toEqual(['balances', 'settings'])
+    expect(drawerTab(acct({ tracking: 'balance', kind: 'retirement' }), 'realized')).toBe('balances')
     expect(drawerTab(acct(), 'activity')).toBe('activity')
     expect(drawerTab(acct(), 'balances')).toBe('positions')
     expect(drawerTab(acct({ tracking: 'balance' }), undefined)).toBe('balances')

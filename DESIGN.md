@@ -29,7 +29,8 @@ owner filter),
 categorizer, plan-vs-actual, recurring bills), **Dream Home** (down-payment
 fund, loan options, payment matrix, rental scenario, tax gross-up,
 carry-vs-payoff), **Taxes** (federal + state estimate, paychecks, withholding
-gap, harvesting, realized-gains report with a Form 8949-shaped CSV),
+gap, harvesting, realized-gains report with a Form 8949-shaped CSV, last
+year's capital-loss carryover by character),
 **Future** (scenarios over a Monte Carlo of the real balance sheet),
 **Compare** (any series Scarab tracks, overlaid as values, rebased to 100,
 % change or A−B, with a Performance preset and saved views), and **Data &
@@ -202,7 +203,8 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             return, Sparkline) opening HoldingDrawer (?d=holding&asset=<id>:
             price and day, PriceChart, accounts and lots, its trades),
             AccountStrip, AccountDrawer (Positions ·
-            Activity · Grants · Settings), AddAccountFlow, TradeSheet (live
+            Activity · Grants · Settings; a balance account's Balances ·
+            Realized · Settings, ReportedPanel), AddAccountFlow, TradeSheet (live
             preview from POST /trades/preview), ActivityTable (edit and delete
             trades in place), OpeningPositionsSheet, CheckinDrawer,
             BalanceAccounts, CashPanel, VestDialog, GrantsPanel, SetPrice,
@@ -250,6 +252,10 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                create, update and delete with a replay check), the portfolio,
                account detail, opening positions, manual prices, grants and
                vests (net settlement), balance snapshots, the check-in.
+  realized-reported.ts  Realized gains as the broker reports them, per
+               balance-tracked taxable account and tax year (Flex-style
+               managed strategies Scarab can't hold as lots); Taxes, the
+               portfolio totals and the realized report add them in.
   positions-paste.ts  Pure parser for pasted starting positions.
   prices.ts    Quotes in (upsertPrices; applyBasket → prices + prices_daily),
                each with the previous close its source reported; chart data
@@ -463,6 +469,10 @@ number.
     totals.day_change) and never from the row before, which may be days
     older; shares bought on the quote's day are measured from their cost.
     NULL (history, hand-entered prices, older rows) means no day change.
+26. realized_reported — one row per (balance-tracked account, tax year): the
+    year-to-date short- and long-term realized gain the broker reports, and
+    the day it runs through. A fact off a statement; never on a lots account
+    (its sales come from its trades) or a retirement one.
 
 **Server-only, never in a snapshot**: vault_blobs, vault_history,
 household_members, vault_invites, basket_quotes and the `basket:*` app_meta
@@ -491,6 +501,12 @@ belong to the deployment.
   vest') plus a same-day sale of the withheld shares at exactly their share of
   that cost ('RSU withholding'), so the withholding realizes $0 and stays off
   the realized report.
+- **Broker-reported realized gains** (migration 26) stand in for the sales of
+  an account tracked by balance: they join the trades' realized gains on the
+  tax bill, the portfolio's household totals and the realized report (as
+  summary rows, not 8949 lines). A loss carried in from last year's return is
+  a Taxes setting (`carryInYear`, ST and LT cents) that applies only in that
+  year, netted by character before this year's netting.
 - **Hand-entered prices** are ordinary price rows marked by
   `price:manual:<SYM>`; a later market quote supersedes them.
 - **Snapshot compatibility** (`engine/upgrades.ts`): tier A (UX) and B

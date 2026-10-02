@@ -18,22 +18,27 @@ import { dayAmount, dayPercent, toneOf, totalDay } from './dayMath'
 import CashPanel from './CashPanel'
 import GrantsPanel from './GrantsPanel'
 import HoldingsTable from './HoldingsTable'
+import ReportedPanel from './ReportedPanel'
 import './invest.css'
 
-export type DrawerTab = 'positions' | 'activity' | 'grants' | 'balances' | 'settings'
+export type DrawerTab = 'positions' | 'activity' | 'grants' | 'balances' | 'realized' | 'settings'
 
-/** The tabs an account has: a lots account's holdings, trades and (stock plans) grants; a balance account's history. */
-export function drawerTabs(a: Pick<InvestAccountRow, 'tracking'>): DrawerTab[] {
-  return a.tracking === 'lots' ? ['positions', 'activity', 'grants', 'settings'] : ['balances', 'settings']
+/**
+ * The tabs an account has: a lots account's holdings, trades and (stock plans) grants; a balance account's
+ * history, and — taxable — the realized gains its broker reports.
+ */
+export function drawerTabs(a: Pick<InvestAccountRow, 'tracking' | 'kind'>): DrawerTab[] {
+  if (a.tracking === 'lots') return ['positions', 'activity', 'grants', 'settings']
+  return a.kind === 'retirement' ? ['balances', 'settings'] : ['balances', 'realized', 'settings']
 }
 
 /** The tab to show for a `tab` route param: one this account has, else its first. */
-export function drawerTab(a: Pick<InvestAccountRow, 'tracking'>, param: string | undefined): DrawerTab {
+export function drawerTab(a: Pick<InvestAccountRow, 'tracking' | 'kind'>, param: string | undefined): DrawerTab {
   const tabs = drawerTabs(a)
   return tabs.find((t) => t === param) ?? tabs[0]!
 }
 
-const TAB_LABEL: Record<DrawerTab, string> = { positions: 'Positions', activity: 'Activity', grants: 'Grants', balances: 'Balances', settings: 'Settings' }
+const TAB_LABEL: Record<DrawerTab, string> = { positions: 'Positions', activity: 'Activity', grants: 'Grants', balances: 'Balances', realized: 'Realized', settings: 'Settings' }
 
 export type AccountDrawerProps = {
   /** The account shown; null closes the drawer (it keeps the last one through the exit). */
@@ -134,6 +139,7 @@ export default function AccountDrawer(p: AccountDrawerProps) {
       </div>
     )
   else if (tab === 'balances') panel = <BalancePanel account={a} snapshots={shown.balances} today={p.today} onChanged={p.onChanged} />
+  else if (tab === 'realized') panel = <ReportedPanel key={a.id} account={a} rows={shown.reported} today={p.today} onChanged={p.onChanged} />
   else if (tab === 'grants')
     panel =
       a.stock_plan === 1 ? (
@@ -201,7 +207,7 @@ export default function AccountDrawer(p: AccountDrawerProps) {
 
   return (
     <Drawer open={open} onClose={p.onClose} width={780} title={a.name} subtitle={subtitle}>
-      <Summary a={a} detail={shown} today={p.today} onChanged={p.onChanged} />
+      <Summary a={a} detail={shown} today={p.today} onChanged={p.onChanged} onTab={p.onTab} />
       <Tabs
         aria-label={`${a.name} sections`}
         idPrefix="inv-acct"
@@ -217,7 +223,9 @@ export default function AccountDrawer(p: AccountDrawerProps) {
                 ? a.counts.unvested
                 : t === 'balances' && a.counts.balances > 0
                   ? a.counts.balances
-                  : undefined,
+                  : t === 'realized' && a.counts.reported > 0
+                    ? a.counts.reported
+                    : undefined,
         }))}
       />
       <div role="tabpanel" id={`inv-acct-panel-${tab}`} aria-labelledby={tabId('inv-acct', tab)} className="inv-tabpanel">
@@ -228,9 +236,17 @@ export default function AccountDrawer(p: AccountDrawerProps) {
 }
 
 /** The numbers at the top: what it's worth, and for a balance account when that was, with Update balance. */
-function Summary({ a, detail, today, onChanged }: { a: InvestAccountRow; detail: InvestAccountDetail | null; today: string; onChanged: () => void }) {
+function Summary({ a, detail, today, onChanged, onTab }: {
+  a: InvestAccountRow
+  detail: InvestAccountDetail | null
+  today: string
+  onChanged: () => void
+  onTab: (t: DrawerTab) => void
+}) {
   if (a.tracking === 'balance') {
     const snap = a.latest_snapshot
+    const year = Number(today.slice(0, 4))
+    const rep = detail?.reported.find((r) => r.tax_year === year) ?? null
     return (
       <div className="inv-dsum">
         <div className="inv-dsum-main">
@@ -243,9 +259,25 @@ function Summary({ a, detail, today, onChanged }: { a: InvestAccountRow; detail:
         </div>
         <div className="inv-dsum-side">
           <span className="inv-note">
-            {a.kind === 'retirement'
-              ? 'Tax-advantaged · counted in net worth from its statements.'
-              : 'Counted in net worth from its statements; tracked by balance, its sales aren’t in the tax picture.'}
+            {a.kind === 'retirement' ? (
+              'Tax-advantaged · counted in net worth from its statements.'
+            ) : rep ? (
+              <>
+                Realized {year}{' '}
+                <b className={rep.st_cents + rep.lt_cents > 0 ? 'pos' : rep.st_cents + rep.lt_cents < 0 ? 'neg' : 'inkstrong'}>
+                  {formatCents(rep.st_cents + rep.lt_cents, { sign: rep.st_cents + rep.lt_cents > 0 })}
+                </b>{' '}
+                as the broker reports it, through {shortDay(rep.as_of, today)} — on Taxes with every other sale.
+              </>
+            ) : (
+              <>
+                Counted in net worth from its statements. Its sales reach Taxes once you{' '}
+                <button type="button" className="inv-linkbtn" onClick={() => onTab('realized')}>
+                  report its realized gains
+                </button>
+                .
+              </>
+            )}
           </span>
           <UpdateBalanceButton account={a} snapshots={detail?.balances} today={today} onSaved={onChanged} className="inv-dsum-btn">
             Update balance

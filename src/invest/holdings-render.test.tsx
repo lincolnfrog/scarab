@@ -28,7 +28,7 @@ const fund: PortfolioPosition = {
   lots: [lot(1, 'Schwab', 10_000_000, 1_200_00)],
   accounts: [{ invest_account_id: 1, name: 'Schwab', kind: 'brokerage', qty_micro: 10_000_000, cost_cents: 1_200_00, value_cents: 1_000_00, day_change_cents: null }],
 }
-const totals: PortfolioResponse['totals'] = { value: 5_500_00, cost: 4_200_00, unrealized: 1_300_00, cash: 0, day_change: 30_00, day_base: 4_470_00, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+const totals: PortfolioResponse['totals'] = { value: 5_500_00, cost: 4_200_00, unrealized: 1_300_00, cash: 0, day_change: 30_00, day_base: 4_470_00, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 }
 const row = (p: PortfolioPosition, irr: number | null, annualized: boolean, held: number) => ({
   asset_id: p.asset_id, symbol: p.symbol, value_cents: p.value_cents, cost_cents: p.cost_cents, unrealized_cents: p.unrealized_cents,
   unrealized_micro: 0, irr_micro: irr, annualized, held_days: held, weight_micro: 0, priced: true,

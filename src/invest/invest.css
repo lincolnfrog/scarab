@@ -405,6 +405,9 @@
 .inv-baltable td { vertical-align: middle; }
 .inv-baltable .inv-histrow td { background: none; font-size: 13px; }
 .inv-baltable .inv-histdate { padding-left: 0; }
+/* A balance account's reported realized gains: flush to the panel's edges, so the row menu fits a phone. */
+.inv-reptable th:first-child, .inv-reptable td:first-child { padding-left: 0; }
+.inv-reptable th:last-child, .inv-reptable td:last-child { padding-right: 0; }
 .inv-grants td { vertical-align: middle; }
 .inv-grantform { padding-top: 12px; border-top: 1px solid var(--line); }
 .inv-panel > .inv-grantform:first-child { padding-top: 0; border-top: 0; }

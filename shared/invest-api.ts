@@ -60,7 +60,8 @@ export type InvestAccountRow = {
   mask: string | null
   sort: number
   latest_snapshot: { balanced_on: string; balance_cents: number } | null
-  counts: { trades: number; balances: number; unvested: number; paychecks: number }
+  /** `reported`: years of realized gains entered as the broker reports them (a balance account's). */
+  counts: { trades: number; balances: number; unvested: number; paychecks: number; reported: number }
 }
 
 /**
@@ -127,7 +128,30 @@ export type InvestAccountDetail = {
   counts: InvestAccountRow['counts']
   /** A lots account's holdings value and derived cash (the portfolio's row for it); null for a balance account. */
   cash: PortfolioAccount | null
+  /** A balance account's realized gains as its broker reports them, newest year first. */
+  reported: ReportedRealizedRow[]
 }
+
+/**
+ * One account's realized gains for one tax year as the broker states them
+ * (its realized gain/loss page during the year, the 1099-B after it) — for an
+ * account tracked by balance, whose sales Scarab never sees. The latest
+ * year-to-date figures replace the earlier ones; `as_of` is the day they run
+ * through. Negative is a loss. A retirement account's never reach the tax
+ * bill (`sheltered`), and can't be entered — only left over from a kind change.
+ */
+export type ReportedRealizedRow = {
+  invest_account_id: number
+  account: string
+  tax_year: number
+  st_cents: number
+  lt_cents: number
+  as_of: string
+  sheltered: boolean
+}
+/** PUT /api/invest/accounts/:id/realized/:year. `asOf` defaults to today, or Dec 31 for a past year. */
+export type ReportedRealizedBody = { stCents: number; ltCents: number; asOf?: string }
+// … → { ok: true; changed: boolean; row: ReportedRealizedRow }. DELETE the same path → { ok: true; removed: ReportedRealizedRow }.
 
 // GET /api/invest/owners → string[]: paycheck earners, then anyone else named as an account's owner.
 
@@ -218,6 +242,8 @@ export type PortfolioResponse = {
    * value / cost / unrealized are holdings only (value is the positions summed); cash is the derived
    * cash of every anchored account, so value + cash is what net worth counts for lots accounts.
    * ytd_st / ytd_lt count taxable accounts only; ytd_sheltered is realized inside tax-advantaged ones.
+   * Household-wide, they include this year's broker-reported realized gains of balance accounts
+   * (ytd_reported_st / ytd_reported_lt are that part); one account's drawer has none.
    * day_change is the day's gain or loss summed over the positions that have one, and day_base what those
    * positions were worth before it (the percent's denominator; 0 when no position has a day change).
    */
@@ -231,6 +257,8 @@ export type PortfolioResponse = {
     ytd_st: number
     ytd_lt: number
     ytd_sheltered: number
+    ytd_reported_st: number
+    ytd_reported_lt: number
   }
   /** Every lots-tracked account in scope, in strip order (sort, then id). */
   accounts: PortfolioAccount[]
@@ -459,12 +487,12 @@ export type RealizedTotals = { proceeds_cents: number; cost_cents: number; gain_
 // GET /api/invest/realized?year=YYYY → RealizedReport (the current year through today).
 export type RealizedReport = {
   year: number
-  /** Years with any sale in a taxable account, newest first (the asked-for year included). */
+  /** Years with any sale in a taxable account (or reported realized gains), newest first (the asked-for year included). */
   years: number[]
   lines: RealizedLine[]
   st: RealizedTotals
   lt: RealizedTotals
-  /** Short against long, then up to $3,000 of a net loss against ordinary income (§1211/1222). */
+  /** Lines plus `reported`, short against long, then up to $3,000 of a net loss against ordinary income (§1211/1222). */
   netted: { netStCents: number; netLtCents: number; capLossUsedCents: number; capLossCarryCents: number }
   /** Sales inside tax-advantaged accounts that year: never reported, never taxed. */
   sheltered: { sales: number; gain_cents: number }
@@ -475,6 +503,11 @@ export type RealizedReport = {
   withheld: { sales: number; cents: number }
   /** Lines needing attention before filing: shares with no basis, possible wash sales. */
   flags: { no_basis: number; wash_risk: number }
+  /**
+   * That year's realized gains entered as brokers report them, for accounts tracked by balance (taxable
+   * only): not lines — summary figures off a 1099-B — but in `netted`, since they meet on the return.
+   */
+  reported: ReportedRealizedRow[]
 }
 
 /* ---------- assets ---------- */

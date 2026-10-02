@@ -512,6 +512,23 @@ export const migrations: string[] = [
   // Additive for a snapshot (tier B).
   `ALTER TABLE prices ADD COLUMN prev_close_cents INTEGER;
    ALTER TABLE basket_quotes ADD COLUMN prev_cents INTEGER`,
+
+  // 26 — realized gains as the broker reports them. An account Scarab knows
+  // only by its balance (a managed long/short strategy making hundreds of
+  // trades, shorts included) still realizes gains and losses that reach the
+  // return; the broker's realized gain/loss page (the 1099-B at year end)
+  // states them by term. One row per account and tax year — the latest
+  // year-to-date figures, `as_of` the day they were read — a fact off a
+  // statement, like a balance. Never written for a lots account, whose sales
+  // are derived from its trades. Additive for a snapshot (tier B).
+  `CREATE TABLE realized_reported (
+     invest_account_id INTEGER NOT NULL REFERENCES invest_accounts(id),
+     tax_year          INTEGER NOT NULL,
+     st_cents          INTEGER NOT NULL DEFAULT 0,
+     lt_cents          INTEGER NOT NULL DEFAULT 0,
+     as_of             TEXT NOT NULL,
+     PRIMARY KEY (invest_account_id, tax_year)
+   )`,
 ]
 
 export function migrate(db: DbLike): void {

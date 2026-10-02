@@ -19,7 +19,8 @@ import {
   vestUnvested,
 } from './invest'
 import { netWorthSeries } from './networth'
-import { getRealizedReport, getTax, previewTrade } from './tax'
+import { deleteReportedRealized, putReportedRealized } from './realized-reported'
+import { getRealizedReport, getTax, previewTrade, putTaxSettings } from './tax'
 import { seedHousehold } from './test/household'
 import { onBothEngines } from './test/parity'
 
@@ -217,5 +218,36 @@ describe('brokerage parity: better-sqlite3 and sql.js', () => {
     // The report's lines add up to what Taxes counts, on both engines.
     expect([server.realized.st.gain_cents, server.realized.lt.gain_cents]).toEqual([server.tax.realizedStCents, server.tax.realizedLtCents])
     expect(server.earlier.lines).toEqual([])
+  })
+
+  it('broker-reported realized gains and a loss carryover read and write identically, and reach Taxes', async () => {
+    const run = (db: DbLike) => {
+      db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Flex', 'brokerage', 'balance')").run() // 5
+      const put = putReportedRealized(db, 5, '2026', { stCents: -40_000_00, ltCents: -5_000_00, asOf: '2026-09-19' }, TODAY)
+      const again = putReportedRealized(db, 5, 2026, { stCents: -40_000_00, ltCents: -5_000_00, asOf: '2026-09-19' }, TODAY)
+      putReportedRealized(db, 5, 2025, { stCents: -12_000_00, ltCents: 0 }, TODAY)
+      const gone = deleteReportedRealized(db, 5, 2025, TODAY)
+      putTaxSettings(db, { carryInYear: 2026, carryInStCents: 7_000_00, carryInLtCents: 0 })
+      return {
+        put,
+        again,
+        gone,
+        detail: getInvestAccount(db, 5, TODAY).reported,
+        totals: getPortfolio(db, TODAY).totals,
+        realized: getRealizedReport(db, 2026, TODAY),
+        tax: getTax(db, TODAY),
+      }
+    }
+    const { server, browser } = await onBothEngines(brokerage, run)
+    expect(browser).toEqual(server)
+    expect(server.put).toMatchObject({ changed: true, row: { account: 'Flex', tax_year: 2026, st_cents: -40_000_00, sheltered: false } })
+    expect(server.again.changed).toBe(false)
+    expect(server.gone.removed.tax_year).toBe(2025)
+    expect(server.detail.map((r) => r.tax_year)).toEqual([2026])
+    expect(server.totals.ytd_reported_st).toBe(-40_000_00)
+    expect(server.realized.reported).toHaveLength(1)
+    expect(server.realized.netted.capLossCarryCents).toBeGreaterThan(0)
+    expect(server.tax.incomes).toMatchObject({ reportedStCents: -40_000_00, reportedLtCents: -5_000_00, carryInStCents: 7_000_00 })
+    expect(server.tax.incomes.realizedStCents).toBe(server.realized.st.gain_cents - 40_000_00)
   })
 })

@@ -104,10 +104,10 @@ describe('deleting an investment account', () => {
       `INSERT INTO pay_sources (earner, employer, cadence, paid_on, gross_cents, invest_account_id)
        VALUES ('Max', 'Acme', 'biweekly', '2026-09-04', 500_000, ?)`,
     ).run(gone.id)
-    expect(listInvestAccounts(db)[0]!.counts).toEqual({ trades: 1, balances: 0, unvested: 1, paychecks: 1 })
+    expect(listInvestAccounts(db)[0]!.counts).toEqual({ trades: 1, balances: 0, unvested: 1, paychecks: 1, reported: 0 })
 
     const r = deleteInvestAccount(db, gone.id)
-    expect(r.removed).toEqual({ trades: 1, balances: 0, unvested: 1 })
+    expect(r.removed).toEqual({ trades: 1, balances: 0, unvested: 1, reported: 0 })
     expect(r.unlinkedPaychecks).toBe(1)
     expect(listInvestAccounts(db).map((a) => a.name)).toEqual(['Keeper'])
     expect(count(db, 'unvested_positions')).toBe(0)
@@ -236,7 +236,7 @@ describe('the portfolio pools lots per account', () => {
     t({ investAccountId: b, symbol: 'VTI', side: 'sell', tradedOn: '2026-06-01', qty: '10', totalCents: 3_200_00 }) // FIFO
 
     const p = getPortfolio(db, TODAY)
-    expect(p.totals).toMatchObject({ ytd_st: 200_00, ytd_lt: 0, ytd_sheltered: 0 })
+    expect(p.totals).toMatchObject({ ytd_st: 200_00, ytd_lt: 0, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 })
     expect(p.positions).toHaveLength(1)
     const vti = p.positions[0]!
     expect(vti).toMatchObject({ symbol: 'VTI', kind: 'stock', qty_micro: 10_000_000, cost_cents: 1_500_00 })
@@ -264,7 +264,7 @@ describe('the portfolio pools lots per account', () => {
 
     const p: PortfolioResponse = getPortfolio(db, TODAY)
     // Roth QQQ: 2 of the 6 sold at $550 against $450 basis → $200 gain; BND $70 zero-basis. Neither is taxable.
-    expect(p.totals).toMatchObject({ ytd_st: 0, ytd_lt: 0, ytd_sheltered: 200_00 + 70_00 })
+    expect(p.totals).toMatchObject({ ytd_st: 0, ytd_lt: 0, ytd_sheltered: 200_00 + 70_00, ytd_reported_st: 0, ytd_reported_lt: 0 })
     const qqq = p.positions.find((x) => x.symbol === 'QQQ')!
     expect(qqq).toMatchObject({ asset_id: 1, qty_micro: 8_000_000, price_cents: 50_000, priced_on: '2026-09-19', value_cents: 4_000_00 })
     expect(qqq.cost_cents).toBe(1_600_00 + 1_800_00)
@@ -1034,7 +1034,7 @@ describe('account profiles: type, institution, owner, last 4 (B8, migration #18)
     const db = mem()
     const k = createInvestAccount(db, { name: ' Fidelity 401(k) ', subtype: '401k', tracking: 'balance', institution: ' Fidelity ', owner: 'Nicole', mask: '••1234' })
     expect(k).toMatchObject({ name: 'Fidelity 401(k)', kind: 'retirement', tracking: 'balance', subtype: '401k', institution: 'Fidelity', owner: 'Nicole', mask: '1234', sort: 0, stock_plan: 0 })
-    expect(k.counts).toEqual({ trades: 0, balances: 0, unvested: 0, paychecks: 0 })
+    expect(k.counts).toEqual({ trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 0 })
     const joint = createInvestAccount(db, { name: 'Schwab', subtype: 'taxable', tracking: 'lots', owner: 'joint', mask: 'XXXX-ab12', institution: '' })
     expect(joint).toMatchObject({ kind: 'brokerage', owner: null, mask: 'AB12', institution: null })
     // The old shape — kind and tracking, no profile — still works, and infers its type.
@@ -1094,7 +1094,7 @@ describe('account profiles: type, institution, owner, last 4 (B8, migration #18)
 
     expect(updateInvestAccount(db, a, { subtype: 'roth_ira' }).account).toMatchObject({ subtype: 'roth_ira', kind: 'retirement' })
     expect(getTax(db, TODAY).incomes).toMatchObject({ realizedStCents: 0, realizedShelteredCents: 300_00 })
-    expect(getPortfolio(db, TODAY).totals).toMatchObject({ ytd_st: 0, ytd_sheltered: 300_00 })
+    expect(getPortfolio(db, TODAY).totals).toMatchObject({ ytd_st: 0, ytd_sheltered: 300_00, ytd_reported_st: 0, ytd_reported_lt: 0 })
 
     // A kind that contradicts the type is refused; 'other' goes with any kind.
     expect(failure(() => updateInvestAccount(db, a, { kind: 'brokerage' }))).toMatchObject({ status: 400, message: /Roth IRA is kind retirement/ })
@@ -1145,7 +1145,7 @@ describe('one account, as its drawer shows it (B8)', () => {
     seedHousehold(db)
     const taxable = getInvestAccount(db, 1, TODAY)
     expect(taxable.account).toMatchObject({ id: 1, name: 'Taxable', tracking: 'lots' })
-    expect(taxable.counts).toEqual({ trades: 2, balances: 0, unvested: 0, paychecks: 0 })
+    expect(taxable.counts).toEqual({ trades: 2, balances: 0, unvested: 0, paychecks: 0, reported: 0 })
     expect(taxable.positions.map((p) => [p.symbol, p.qty_micro, p.accounts.map((a) => a.invest_account_id)])).toEqual([['VTI', 6_000_000, [1]]])
     expect(taxable.balances).toEqual([])
     expect(taxable.totals.ytd_st).not.toBe(0)

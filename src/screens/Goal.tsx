@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { formatCents, formatDollars } from '../../shared/money'
+import { formatCents, formatCentsPlain, formatDollars } from '../../shared/money'
 import { del, get, patch, post, put } from '../api'
+import { Link } from '../router'
 import { fmtMonth, fmtShort } from '../viz'
 import GoalFundChart from '../cards/GoalFundChart'
 import { CountUp } from '../chart/CountUpText'
@@ -82,6 +83,8 @@ function MoneySetting(p: {
   hint?: ReactNode
   cents: number
   required?: boolean
+  /** Shown while blank: what blank stands for. */
+  placeholder?: string
   onSave: (cents: number) => Promise<unknown>
 }) {
   const shown = (c: number) => (c === 0 && !p.required ? null : c)
@@ -101,7 +104,7 @@ function MoneySetting(p: {
   }
   return (
     <Field label={p.label} hint={p.hint} error={err}>
-      <MoneyInput value={v} placeholder="0.00" onChange={setV} onCommit={(c) => void commit(c)} />
+      <MoneyInput value={v} placeholder={p.placeholder ?? '0.00'} onChange={setV} onCommit={(c) => void commit(c)} />
     </Field>
   )
 }
@@ -154,16 +157,20 @@ export default function Goal() {
   const rentalAnchor = useAnchor('rental')
 
   // A failed first load says so (with a retry) instead of "Loading…" forever; a failed refresh keeps the last data.
-  const load = useCallback(
-    () =>
-      get<GoalData>('/api/goal')
-        .then((d) => {
-          setData(d)
-          setLoadErr(null)
-        })
-        .catch((e: unknown) => setLoadErr(e instanceof Error ? e.message : String(e))),
-    [],
-  )
+  // The loss Taxes carries out of this year (recorded sales, broker-reported figures and last year's carryover):
+  // what the gross-up uses while no carryforward is typed here. null while unknown.
+  const [taxCarry, setTaxCarry] = useState<number | null>(null)
+  const load = useCallback(() => {
+    get<{ tax: { capLossCarryCents: number } }>('/api/tax')
+      .then((t) => setTaxCarry(t.tax.capLossCarryCents))
+      .catch(() => setTaxCarry(null))
+    return get<GoalData>('/api/goal')
+      .then((d) => {
+        setData(d)
+        setLoadErr(null)
+      })
+      .catch((e: unknown) => setLoadErr(e instanceof Error ? e.message : String(e)))
+  }, [])
   useEffect(() => {
     load()
   }, [load])
@@ -610,7 +617,16 @@ export default function Goal() {
           <div className="scr-f fill">
             <MoneySetting
               label="Loss carryforward"
-              hint="banked losses offset gains"
+              hint={
+                taxCarry ? (
+                  <>
+                    blank = {formatDollars(taxCarry)} carried forward on <Link className="scr-link" to={{ screen: 'tax' }}>Taxes</Link>
+                  </>
+                ) : (
+                  'banked losses offset gains'
+                )
+              }
+              placeholder={taxCarry ? formatCentsPlain(taxCarry) : undefined}
               cents={goal.lossCarryforwardCents}
               onSave={(c) => saveGoal.run({ lossCarryforwardCents: c }, `Loss carryforward set to ${formatCents(c)}`)}
             />
@@ -627,7 +643,7 @@ export default function Goal() {
         </div>
         {remaining > 0 ? (
           (() => {
-            const g = grossSaleForNet(remaining, goal.saleBasisPctMicro, goal.capGainsRateMicro, goal.lossCarryforwardCents)
+            const g = grossSaleForNet(remaining, goal.saleBasisPctMicro, goal.capGainsRateMicro, goal.lossCarryforwardCents || (taxCarry ?? 0))
             return (
               <table style={{ marginTop: 10, maxWidth: 440 }}>
                 <tbody>

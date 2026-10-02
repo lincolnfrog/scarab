@@ -90,6 +90,7 @@ export default function Invest() {
   // The starting-positions sheet, and the account it opens on.
   const [opening, setOpening] = useState<{ accountId: number | null } | null>(null)
   const [taxMarginal, setTaxMarginal] = useState<Marginal | null>(null)
+  const [taxCarryIn, setTaxCarryIn] = useState<{ stCents: number; ltCents: number } | null>(null)
   // Return by holding and the sparklines' closes: the Holdings table's extra columns, which it can draw without.
   const [returns, setReturns] = useState<ReturnsResponse | null>(null)
   const [sparks, setSparks] = useState<SparksResponse | null>(null)
@@ -116,9 +117,15 @@ export default function Invest() {
     setOwners(o)
     setLoaded(true)
     setRev((n) => n + 1)
-    get<{ marginal: Marginal }>('/api/tax')
-      .then((t) => setTaxMarginal(t.marginal))
-      .catch(() => setTaxMarginal(null))
+    get<{ marginal: Marginal; incomes: { carryInStCents: number; carryInLtCents: number } }>('/api/tax')
+      .then((t) => {
+        setTaxMarginal(t.marginal)
+        setTaxCarryIn({ stCents: t.incomes.carryInStCents, ltCents: t.incomes.carryInLtCents })
+      })
+      .catch(() => {
+        setTaxMarginal(null)
+        setTaxCarryIn(null)
+      })
     get<ReturnsResponse>('/api/portfolio/returns')
       .then(setReturns)
       .catch(() => undefined) // a failed refresh keeps the last ones
@@ -456,7 +463,9 @@ export default function Invest() {
       {hasHoldings && strip}
 
       {/* ---------- tax (household-wide: one return) ---------- */}
-      {portfolio && hasHoldings && <TaxPictureCard totals={portfolio.totals} marginal={taxMarginal} year={today.slice(0, 4)} scope={scopeLabel ?? null} />}
+      {portfolio && (hasHoldings || portfolio.totals.ytd_reported_st !== 0 || portfolio.totals.ytd_reported_lt !== 0) && (
+        <TaxPictureCard totals={portfolio.totals} marginal={taxMarginal} year={today.slice(0, 4)} scope={scopeLabel ?? null} carryIn={taxCarryIn} />
+      )}
 
       {/* ---------- target allocation (household-wide: the owner filter doesn't narrow it) ---------- */}
       {loaded && accounts.length > 0 && <AllocationCard rev={rev} anchor={allocationAnchor} planOpen={route.rest[0] === 'allocation'} />}

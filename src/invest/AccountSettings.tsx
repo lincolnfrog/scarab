@@ -24,9 +24,11 @@ import {
 import './invest.css'
 
 const plural = (n: number, noun: string) => (n === 0 ? '' : `${n} ${noun}${n === 1 ? '' : 's'}`)
+/** Years of realized gains entered as the broker reports them (a balance account's). */
+const reportedYears = (n: number) => (n === 0 ? '' : `realized gains for ${plural(n, 'year')}`)
 const sameForm = (a: AccountForm, b: AccountForm) => (Object.keys(a) as (keyof AccountForm)[]).every((k) => a[k] === b[k])
 
-export type AccountDeleted = { name: string; removed: { trades: number; balances: number; unvested: number }; unlinkedPaychecks: number }
+export type AccountDeleted = { name: string; removed: { trades: number; balances: number; unvested: number; reported: number }; unlinkedPaychecks: number }
 
 /**
  * The account drawer's Settings tab: the profile (name, type, institution,
@@ -67,7 +69,7 @@ export default function AccountSettings({ account, owners, institutions, onSaved
 
   const remove = useAction(() => del<AccountDeleted>(`/api/invest/accounts/${account.id}`), {
     success: (r) => {
-      const bits = [plural(r.removed.trades, 'trade'), plural(r.removed.balances, 'balance update'), plural(r.removed.unvested, 'unvested grant')].filter(Boolean)
+      const bits = [plural(r.removed.trades, 'trade'), plural(r.removed.balances, 'balance update'), plural(r.removed.unvested, 'unvested grant'), reportedYears(r.removed.reported)].filter(Boolean)
       return (
         (bits.length ? `Deleted “${r.name}” and ${bits.join(', ')}.` : `Deleted “${r.name}”.`) +
         (r.unlinkedPaychecks ? ` ${plural(r.unlinkedPaychecks, 'paycheck')} lost the stock-comp link.` : '')
@@ -100,7 +102,7 @@ export default function AccountSettings({ account, owners, institutions, onSaved
 
   async function confirmDelete() {
     const c = account.counts
-    const facts = [plural(c.trades, 'trade'), plural(c.balances, 'balance update'), plural(c.unvested, 'unvested grant')].filter(Boolean)
+    const facts = [plural(c.trades, 'trade'), plural(c.balances, 'balance update'), plural(c.unvested, 'unvested grant'), reportedYears(c.reported)].filter(Boolean)
     const ok = await confirm({
       title: `Delete “${account.name}”?`,
       body: (

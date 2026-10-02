@@ -14,7 +14,7 @@ const acct = (id: number, name: string, owner: string | null, extra: Partial<Inv
   mask: null,
   sort: 0,
   latest_snapshot: null,
-  counts: { trades: 1, balances: 0, unvested: 0, paychecks: 0 },
+  counts: { trades: 1, balances: 0, unvested: 0, paychecks: 0, reported: 0 },
   ...extra,
 })
 
@@ -74,7 +74,7 @@ const cashRow = (id: number, cents: number | null): PortfolioAccount => ({
   uncounted_proceeds_cents: 0,
 })
 const cash = new Map([[1, cashRow(1, 500_00)], [3, cashRow(3, null)]])
-const totals: PortfolioResponse['totals'] = { value: 11_500_00, cost: 8_000_00, unrealized: 3_500_00, cash: 500_00, day_change: 0, day_base: 0, ytd_st: 120_00, ytd_lt: 0, ytd_sheltered: 40_00 }
+const totals: PortfolioResponse['totals'] = { value: 11_500_00, cost: 8_000_00, unrealized: 3_500_00, cash: 500_00, day_change: 0, day_base: 0, ytd_st: 120_00, ytd_lt: 0, ytd_sheltered: 40_00, ytd_reported_st: 0, ytd_reported_lt: 0 }
 
 describe('the owner pills', () => {
   it('Household, then each person in the household’s order (names matched ignoring case), then Joint — with subtotals', () => {

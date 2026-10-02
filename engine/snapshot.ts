@@ -36,6 +36,7 @@ export const TABLES = [
   'prices',
   'prices_daily',
   'balance_snapshots',
+  'realized_reported',
   'properties',
   'property_valuations',
   'liabilities',

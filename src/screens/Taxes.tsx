@@ -49,7 +49,11 @@ type TaxSettings = {
   qualifiedDividendShareMicro: number
   rsuWithholdFederalMicro: number
   rsuWithholdStateMicro: number | null
+  carryInYear: number
+  carryInStCents: number
+  carryInLtCents: number
 }
+type ReportedRealized = { invest_account_id: number; account: string; st_cents: number; lt_cents: number; as_of: string }
 type VestEvent = { symbol: string; account: string; account_id: number; vest_on: string; qty_micro: number; cents: number | null }
 type PayCadence = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly'
 type PayAmounts = { grossCents: number; retirementCents: number; benefitsCents: number; fedWithheldCents: number; stateWithheldCents: number }
@@ -142,6 +146,11 @@ type Tax = {
     dividendsOrdinaryCents: number
     realizedStCents: number
     realizedLtCents: number
+    reportedStCents: number
+    reportedLtCents: number
+    reported: ReportedRealized[]
+    carryInStCents: number
+    carryInLtCents: number
     totalIncomeCents: number
     deductionCents: number
     deductionSource: 'standard' | 'typed' | 'derived'
@@ -213,7 +222,7 @@ function Warn(p: { tip: string }) {
  */
 type Form = Omit<TaxSettings, 'customStateRateMicro' | 'wagesAnnualCents' | 'otherIncomeCents' | 'itemizedCents'
   | 'withheldFederalCents' | 'withheldStateCents' | 'estPaidFederalCents' | 'estPaidStateCents' | 'priorYearTaxFederalCents'
-  | 'priorYearTaxStateCents' | 'qualifiedDividendShareMicro' | 'rsuWithholdFederalMicro'> & {
+  | 'priorYearTaxStateCents' | 'qualifiedDividendShareMicro' | 'rsuWithholdFederalMicro' | 'carryInStCents' | 'carryInLtCents'> & {
   customStateRateMicro: number | null
   wagesAnnualCents: number | null
   otherIncomeCents: number | null
@@ -226,9 +235,12 @@ type Form = Omit<TaxSettings, 'customStateRateMicro' | 'wagesAnnualCents' | 'oth
   priorYearTaxStateCents: number | null
   qualifiedDividendShareMicro: number | null
   rsuWithholdFederalMicro: number | null
+  /** The carryover fields are for this tax year (`carryInYear`): one entered for an earlier year shows blank. */
+  carryInStCents: number | null
+  carryInLtCents: number | null
 }
 const orNull = (n: number) => (n === 0 ? null : n)
-const toForm = (s: TaxSettings): Form => ({
+const toForm = (s: TaxSettings, year: number): Form => ({
   filingStatus: s.filingStatus,
   state: s.state,
   customStateRateMicro: orNull(s.customStateRateMicro),
@@ -246,6 +258,9 @@ const toForm = (s: TaxSettings): Form => ({
   qualifiedDividendShareMicro: orNull(s.qualifiedDividendShareMicro),
   rsuWithholdFederalMicro: s.rsuWithholdFederalMicro,
   rsuWithholdStateMicro: s.rsuWithholdStateMicro,
+  carryInYear: year,
+  carryInStCents: s.carryInYear === year ? orNull(s.carryInStCents) : null,
+  carryInLtCents: s.carryInYear === year ? orNull(s.carryInLtCents) : null,
 })
 /** What PUT /api/tax/settings receives — also the form's identity for the "unsaved changes" check. */
 const toSettings = (f: Form): TaxSettings => ({
@@ -266,6 +281,9 @@ const toSettings = (f: Form): TaxSettings => ({
   qualifiedDividendShareMicro: f.qualifiedDividendShareMicro ?? 0,
   rsuWithholdFederalMicro: f.rsuWithholdFederalMicro ?? 0,
   rsuWithholdStateMicro: f.rsuWithholdStateMicro,
+  carryInYear: f.carryInStCents || f.carryInLtCents ? f.carryInYear : 0,
+  carryInStCents: f.carryInStCents ?? 0,
+  carryInLtCents: f.carryInLtCents ?? 0,
 })
 const sameSettings = (a: TaxSettings, b: TaxSettings) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -446,7 +464,7 @@ export default function Taxes() {
     // that Save would write back over it.
     const from = formFrom.current
     formFrom.current = t.settings
-    setForm((f) => (f === null || from === null || sameSettings(toSettings(f), toSettings(toForm(from))) ? toForm(t.settings) : f))
+    setForm((f) => (f === null || from === null || sameSettings(toSettings(f), toSettings(toForm(from, t.year))) ? toForm(t.settings, t.year) : f))
     setLoadError(null)
   }, [])
 
@@ -496,7 +514,7 @@ export default function Taxes() {
       onDone: (r) => {
         // Adopt what was stored on both sides of the "unsaved changes" check at once, so it clears without a flicker.
         setTax((cur) => (cur ? { ...cur, settings: r.settings } : cur))
-        setForm(toForm(r.settings))
+        setForm((f) => toForm(r.settings, f?.carryInYear ?? r.settings.carryInYear))
         formFrom.current = r.settings
         reload()
       },
@@ -580,7 +598,7 @@ export default function Taxes() {
   const stockPlan = accounts.find((a) => a.tracking === 'lots' && a.stock_plan === 1) ?? null
   const earners = [...new Set(payroll.sources.map((p) => p.earner))]
   const amtGap = tax.tax.addlMedicareCents - payroll.addlMedicareWithheldCents
-  const settingsDirty = !sameSettings(toSettings(form), toSettings(toForm(tax.settings)))
+  const settingsDirty = !sameSettings(toSettings(form), toSettings(toForm(tax.settings, tax.year)))
   const payReady =
     !!pay && !!pay.earner.trim() && !!pay.paidOn && (pay.grossCents ?? 0) > 0 && (pay.matchRateMicro === null) === (pay.matchCapMicro === null)
 
@@ -658,8 +676,41 @@ export default function Taxes() {
               <tr><td className="muted">Dividends &amp; interest</td><td className="r num">{formatCents(incomes.dividendsYtdCents)}</td></tr>
             )}
             <tr><td className="muted">Other income</td><td className="r num">{formatCents(incomes.otherCents)}</td></tr>
-            <tr><td className="muted">Realized short-term</td><td className={`r num ${incomes.realizedStCents < 0 ? 'neg' : ''}`}>{formatCents(incomes.realizedStCents, { sign: incomes.realizedStCents > 0 })}</td></tr>
-            <tr><td className="muted">Realized long-term</td><td className={`r num ${incomes.realizedLtCents < 0 ? 'neg' : ''}`}>{formatCents(incomes.realizedLtCents, { sign: incomes.realizedLtCents > 0 })}</td></tr>
+            {([['short-term', incomes.realizedStCents, incomes.reportedStCents, 'st_cents'], ['long-term', incomes.realizedLtCents, incomes.reportedLtCents, 'lt_cents']] as const).map(([term, cents, reported, key]) => (
+              <tr key={term}>
+                <td className="muted">
+                  {incomes.reported.length > 0 ? (
+                    <Note
+                      tip={[
+                        `${formatCents(cents - reported, { sign: cents - reported > 0 })} from recorded sales`,
+                        ...incomes.reported.map((x) => `${formatCents(x[key], { sign: x[key] > 0 })} reported for ${x.account}, through ${x.as_of}`),
+                      ]}
+                    >
+                      Realized {term}
+                    </Note>
+                  ) : (
+                    <>Realized {term}</>
+                  )}
+                </td>
+                <td className={`r num ${cents < 0 ? 'neg' : ''}`}>{formatCents(cents, { sign: cents > 0 })}</td>
+              </tr>
+            ))}
+            {incomes.carryInStCents + incomes.carryInLtCents > 0 && (
+              <tr>
+                <td className="muted">
+                  <Note
+                    tip={[
+                      incomes.carryInStCents ? `${formatCents(incomes.carryInStCents)} short-term — nets against short-term gains first` : '',
+                      incomes.carryInLtCents ? `${formatCents(incomes.carryInLtCents)} long-term — nets against long-term gains first` : '',
+                      'From the settings below',
+                    ].filter(Boolean)}
+                  >
+                    Loss carried in from {tax.year - 1}
+                  </Note>
+                </td>
+                <td className="r num neg">−{formatCents(incomes.carryInStCents + incomes.carryInLtCents)}</td>
+              </tr>
+            )}
             {t.capLossUsedCents > 0 && <tr><td className="muted">Capital loss vs ordinary</td><td className="r num">−{formatCents(t.capLossUsedCents)}</td></tr>}
             {t.capLossCarryCents > 0 && <tr><td className="muted">Loss carryforward</td><td className="r num">{formatCents(t.capLossCarryCents)}</td></tr>}
             <tr>
@@ -1021,6 +1072,19 @@ export default function Taxes() {
               </label>
             </FieldGrid>
           </Group>
+          <Group
+            title="Capital losses"
+            note="a balance-tracked account’s realized gains go on its Realized tab, on Investments"
+          >
+            <FieldGrid min={180}>
+              <Field label={`Short-term carryover into ${tax.year}`} hint={`from ${tax.year - 1}’s Schedule D carryover worksheet`}>
+                <MoneyInput value={form.carryInStCents} placeholder="0.00" onChange={(c) => setF({ carryInStCents: c })} />
+              </Field>
+              <Field label={`Long-term carryover into ${tax.year}`} hint="the same worksheet’s long-term line">
+                <MoneyInput value={form.carryInLtCents} placeholder="0.00" onChange={(c) => setF({ carryInLtCents: c })} />
+              </Field>
+            </FieldGrid>
+          </Group>
           <Group title="Dividends & vests">
             <FieldGrid min={180}>
               <Field label="Qualified dividends" hint="share of dividends & interest; broad ETFs run 90%+, interest 0%">
@@ -1044,7 +1108,7 @@ export default function Taxes() {
         <p className="sub2" style={{ marginTop: 10 }}>
           Estimation for planning, not tax advice or preparation. Brackets: {tax.vintage}.
           {stateInfo?.note ? ` ${stateInfo.note}` : ''} RSU vest income and
-          realized gains are derived from the ledger; scheduled vests are valued at today's price (grants and their vest
+          realized gains are derived from the ledger (or entered as the broker reports them, for an account tracked by balance); scheduled vests are valued at today's price (grants and their vest
           cadence live on Investments, in{' '}
           {stockPlan ? (
             <Link className="scr-link" to={{ screen: 'invest', params: { d: 'account', acct: stockPlan.id, tab: 'grants' } }}>

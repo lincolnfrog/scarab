@@ -9,6 +9,7 @@ import { firstVestAfter, sharesText, validateTrade, vestOn } from './invest'
 import { deriveItemized } from './itemize'
 import { computePosition, isLongTerm, longTermOn, positionValueCents, saleRealized } from './lots'
 import { ADDL_MEDICARE_RATE_MICRO, computePayroll, listPaySources, PAYROLL_VINTAGE, type Payroll } from './paychecks'
+import { reportedTotals } from './realized-reported'
 
 /**
  * Tax intelligence. Same rules as the rest of engine/: isomorphic, synchronous,
@@ -456,6 +457,11 @@ export type TaxSettings = {
   qualifiedDividendShareMicro: number // share of 'Dividends & interest' that is qualified (0 = all ordinary)
   rsuWithholdFederalMicro: number // supplemental rate the employer withholds on vests (22% statutory)
   rsuWithholdStateMicro: number | null // null = the state's published supplemental rate (or flat rate)
+  // Capital loss carried into `carryInYear` from the return before it (Schedule D's carryover worksheet), by
+  // character, as positive cents. Applies only in that year: a new year wants the new return's figures.
+  carryInYear: number // 0 = none entered
+  carryInStCents: number
+  carryInLtCents: number
 }
 
 export const TAX_DEFAULTS: TaxSettings = {
@@ -476,6 +482,9 @@ export const TAX_DEFAULTS: TaxSettings = {
   qualifiedDividendShareMicro: 0,
   rsuWithholdFederalMicro: FEDERAL_SUPPLEMENTAL_MICRO,
   rsuWithholdStateMicro: null,
+  carryInYear: 0,
+  carryInStCents: 0,
+  carryInLtCents: 0,
 }
 
 const SETTINGS_KEY = 'tax'
@@ -512,6 +521,7 @@ export function putTaxSettings(db: DbLike, body: Partial<TaxSettings>) {
     'customStateRateMicro', 'wagesAnnualCents', 'otherIncomeCents', 'itemizedCents',
     'withheldFederalCents', 'withheldStateCents', 'estPaidFederalCents', 'estPaidStateCents',
     'priorYearTaxFederalCents', 'priorYearTaxStateCents', 'qualifiedDividendShareMicro', 'rsuWithholdFederalMicro',
+    'carryInYear', 'carryInStCents', 'carryInLtCents',
   ]
   for (const k of ints) {
     const v = body[k]
@@ -528,6 +538,10 @@ export function putTaxSettings(db: DbLike, body: Partial<TaxSettings>) {
   }
   if (next.rsuWithholdFederalMicro > 1_000_000 || (next.rsuWithholdStateMicro ?? 0) > 1_000_000)
     throw new ApiError(400, 'withholding rates must be at most 1000000 (100%)')
+  if (next.carryInYear !== 0 && (next.carryInYear < 1900 || next.carryInYear > 9999))
+    throw new ApiError(400, 'carryInYear must be a year (or 0 for none)')
+  if (next.carryInYear === 0 && (next.carryInStCents > 0 || next.carryInLtCents > 0))
+    throw new ApiError(400, 'a loss carryover needs carryInYear — the tax year it carries into')
   db.prepare(
     'INSERT INTO goal_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
   ).run(SETTINGS_KEY, JSON.stringify(next))
@@ -779,13 +793,16 @@ function dividendsYtd(db: DbLike, year: string): number {
 
 /**
  * Realized year-to-date short/long-term gains that reach the tax bill: lots
- * pooled per account, taxable accounts only. Sales inside an IRA, Roth or
- * 401(k) are summed separately as `shelteredCents` and never taxed here.
+ * pooled per account, taxable accounts only, plus what brokers report for
+ * accounts tracked by balance (engine/realized-reported.ts; `reported` is
+ * that part). Sales inside an IRA, Roth or 401(k) are summed separately as
+ * `shelteredCents` and never taxed here.
  */
-function realizedYtd(db: DbLike, today: string): { stCents: number; ltCents: number; shelteredCents: number } {
-  let st = 0
-  let lt = 0
-  let sheltered = 0
+function realizedYtd(db: DbLike, today: string) {
+  const rep = reportedTotals(db, Number(today.slice(0, 4)))
+  let st = rep.stCents
+  let lt = rep.ltCents
+  let sheltered = rep.shelteredCents
   for (const h of loadHoldings(db, today)) {
     if (h.sheltered) sheltered += h.pos.realized_ytd_st_cents + h.pos.realized_ytd_lt_cents
     else {
@@ -793,7 +810,12 @@ function realizedYtd(db: DbLike, today: string): { stCents: number; ltCents: num
       lt += h.pos.realized_ytd_lt_cents
     }
   }
-  return { stCents: st, ltCents: lt, shelteredCents: sheltered }
+  return { stCents: st, ltCents: lt, shelteredCents: sheltered, reported: { stCents: rep.stCents, ltCents: rep.ltCents, rows: rep.rows } }
+}
+
+/** The loss carried into this tax year from the last return, when one was entered for this year (positive cents). */
+export function carryIn(settings: TaxSettings, year: number): { stCents: number; ltCents: number } {
+  return settings.carryInYear === year ? { stCents: settings.carryInStCents, ltCents: settings.carryInLtCents } : { stCents: 0, ltCents: 0 }
 }
 
 /** Spread what's still owed over the due dates that haven't passed, in
@@ -885,6 +907,7 @@ export function taxYear(db: DbLike, today: string) {
   const settings = getTaxSettings(db)
   const year = today.slice(0, 4)
   const realized = realizedYtd(db, today)
+  const carried = carryIn(settings, Number(year))
   const rsuYtd = rsuIncomeYtd(db, year)
   const projected = projectVests(db, today)
   const divYtd = dividendsYtd(db, year)
@@ -930,8 +953,9 @@ export function taxYear(db: DbLike, today: string) {
   const inputs: TaxInputs = {
     filing: settings.filingStatus,
     ordinaryCents: wages + settings.otherIncomeCents + rsuYtd.cents + projected.cents + divOrdinary,
-    stGainCents: realized.stCents,
-    ltGainCents: realized.ltCents,
+    // A carryover keeps its character: short-term against Schedule D's short side, long-term against the long.
+    stGainCents: realized.stCents - carried.stCents,
+    ltGainCents: realized.ltCents - carried.ltCents,
     qualifiedDividendCents: divQualified,
     investmentIncomeCents: divYtd,
     deductionCents: deduction,
@@ -999,6 +1023,13 @@ export function taxYear(db: DbLike, today: string) {
       realizedLtCents: realized.ltCents,
       /** Realized this year inside tax-advantaged accounts — not income. */
       realizedShelteredCents: realized.shelteredCents,
+      /** The part of realizedSt/Lt that brokers reported for balance-tracked accounts, and those accounts. */
+      reportedStCents: realized.reported.stCents,
+      reportedLtCents: realized.reported.ltCents,
+      reported: realized.reported.rows,
+      /** Loss carried in from last year's return (positive cents), netted against this year's gains by character. */
+      carryInStCents: carried.stCents,
+      carryInLtCents: carried.ltCents,
       totalIncomeCents: totalIncome,
       deductionCents: inputs.deductionCents,
       deductionSource,
@@ -1472,6 +1503,7 @@ export function getRealizedReport(db: DbLike, yearRaw: unknown, today: string): 
   }
   const st = sum('st')
   const lt = sum('lt')
+  const reported = reportedTotals(db, year) // taxable accounts' rows; a sheltered one's never reach the return
   const years = new Set(
     (
       db
@@ -1483,6 +1515,7 @@ export function getRealizedReport(db: DbLike, yearRaw: unknown, today: string): 
         .all(today, RSU_WITHHOLDING_NOTE) as { y: string }[]
     ).map((r) => Number(r.y)),
   )
+  for (const r of db.prepare('SELECT DISTINCT tax_year AS y FROM realized_reported').all() as { y: number }[]) years.add(r.y)
   years.add(year)
   return {
     year,
@@ -1490,10 +1523,11 @@ export function getRealizedReport(db: DbLike, yearRaw: unknown, today: string): 
     lines,
     st,
     lt,
-    netted: netCapitalGains(st.gain_cents, lt.gain_cents),
+    netted: netCapitalGains(st.gain_cents + reported.stCents, lt.gain_cents + reported.ltCents),
     sheltered,
     withheld,
     flags: { no_basis: lines.filter((l) => l.basis === 'none').length, wash_risk: lines.filter((l) => l.wash_risk).length },
+    reported: reported.rows,
   }
 }
 

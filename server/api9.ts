@@ -13,6 +13,7 @@ import {
   setManualPrice,
   updateTrade,
 } from '../engine/invest'
+import { deleteReportedRealized, putReportedRealized } from '../engine/realized-reported'
 import { getRealizedReport, previewTrade } from '../engine/tax'
 import { handle } from './api'
 import { db as rawDb } from './db'
@@ -44,6 +45,15 @@ api9.get('/invest/checkin', (c) => handle(c, () => getCheckin(db, today())))
 api9.get('/invest/balances', (c) => handle(c, () => listBalanceSnapshots(db, { accountId: c.req.query('accountId') })))
 api9.delete('/invest/balances/:accountId/:date', (c) =>
   handle(c, () => deleteBalanceSnapshot(db, Number(c.req.param('accountId')), c.req.param('date'))),
+)
+
+// A balance account's realized gains for a tax year, as its broker reports them.
+api9.put('/invest/accounts/:id/realized/:year', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => putReportedRealized(db, Number(c.req.param('id')), c.req.param('year'), b, today()))
+})
+api9.delete('/invest/accounts/:id/realized/:year', (c) =>
+  handle(c, () => deleteReportedRealized(db, Number(c.req.param('id')), c.req.param('year'), today())),
 )
 
 // Starting positions: lots already held as of a statement date, all or none.

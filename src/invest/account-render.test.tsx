@@ -5,6 +5,7 @@ import AccountSettings from './AccountSettings'
 import AccountStrip from './AccountStrip'
 import AddAccountFlow from './AddAccountFlow'
 import GrantsPanel from './GrantsPanel'
+import ReportedPanel, { lastDayOf, reportYears } from './ReportedPanel'
 
 /**
  * The account strip, the drawer's Settings and Grants panels and the add
@@ -15,7 +16,7 @@ import GrantsPanel from './GrantsPanel'
 const text = (html: string) =>
   html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/\s+/g, ' ')
 const TODAY = '2026-09-22'
-const noCounts = { trades: 0, balances: 0, unvested: 0, paychecks: 0 }
+const noCounts = { trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 0 }
 const acct = (over: Partial<InvestAccountRow>): InvestAccountRow => ({
   id: 1, name: 'Schwab brokerage', kind: 'brokerage', tracking: 'lots', stock_plan: 0, subtype: 'taxable', institution: 'Schwab',
   owner: 'Max', mask: '1234', sort: 0, latest_snapshot: null, counts: noCounts, ...over,
@@ -119,5 +120,23 @@ describe('the guided add', () => {
     expect(t).toMatch(/Investing Brokerage Taxable · every sale shapes the tax bill Stock plan .* Crypto/)
     expect(t).toMatch(/Other Something else/)
     expect(html.match(/data-subtype=/g)).toHaveLength(9)
+  })
+})
+
+describe('the Realized tab (a balance account’s broker-reported gains)', () => {
+  const flex: InvestAccountRow = { ...accounts[0]!, id: 5, name: 'Flex 250', tracking: 'balance', kind: 'brokerage' }
+  const row = { invest_account_id: 5, account: 'Flex 250', tax_year: 2025, st_cents: -30_000_00, lt_cents: 1_200_00, as_of: '2025-12-31', sheltered: false }
+
+  it('opens on this year, empty, and lists the years reported', () => {
+    const t = text(renderToStaticMarkup(<ReportedPanel account={flex} rows={[row]} today="2026-10-01" onChanged={() => {}} />))
+    expect(t.trim()).toMatch(/^Report realized gains Scarab doesn’t see this account’s trades/)
+    expect(t).toContain('2025 through Dec 31, 2025 -$30,000.00 +$1,200.00')
+  })
+
+  it('offers this year and the five before it, plus any year already reported', () => {
+    expect(reportYears(2026, [])).toEqual([2026, 2025, 2024, 2023, 2022, 2021])
+    expect(reportYears(2026, [{ tax_year: 2018 }])).toEqual([2026, 2025, 2024, 2023, 2022, 2021, 2018])
+    expect(lastDayOf(2025, '2026-10-01')).toBe('2025-12-31')
+    expect(lastDayOf(2026, '2026-10-01')).toBe('2026-10-01')
   })
 })

@@ -177,6 +177,8 @@ export function trackingLock(a: InvestAccountRow): string | null {
     return `It has ${plural(a.counts.trades, 'trade')}. Tracking by balance would drop them — add a separate balance-tracked account instead.`
   if (a.tracking === 'balance' && a.counts.balances > 0)
     return `It has ${plural(a.counts.balances, 'balance update')}. Tracking trades would drop them from net worth — add a separate account instead.`
+  if (a.tracking === 'balance' && a.counts.reported > 0)
+    return `It has realized gains reported for ${plural(a.counts.reported, 'year')}. Tracking trades would count its sales from them instead — delete those first, or add a separate account.`
   return null
 }
 

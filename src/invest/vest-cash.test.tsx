@@ -20,7 +20,7 @@ import { fmvPrefill, vestBody, vestDateDefault, vestPlan, withheldValueCents, ty
 const text = (html: string) =>
   html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/\s+/g, ' ')
 const TODAY = '2026-09-22'
-const noCounts = { trades: 0, balances: 0, unvested: 0, paychecks: 0 }
+const noCounts = { trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 0 }
 const account: InvestAccountRow = {
   id: 1, name: 'Schwab', kind: 'brokerage', tracking: 'lots', stock_plan: 0, subtype: 'taxable', institution: null,
   owner: null, mask: null, sort: 0, latest_snapshot: null, counts: noCounts,
@@ -65,7 +65,7 @@ describe('cash, as the screens say it (B12)', () => {
   })
 
   it('holdings get a Cash row, and the Total includes it (cost and unrealized stay the holdings’)', () => {
-    const totals: PortfolioResponse['totals'] = { value: 900_00, cost: 600_00, unrealized: 300_00, cash: 1_100_00, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0 }
+    const totals: PortfolioResponse['totals'] = { value: 900_00, cost: 600_00, unrealized: 300_00, cash: 1_100_00, day_change: 0, day_base: 0, ytd_st: 0, ytd_lt: 0, ytd_sheltered: 0, ytd_reported_st: 0, ytd_reported_lt: 0 }
     const html = renderToStaticMarkup(
       <HoldingsTable positions={[]} totals={totals} marginal={null} today={TODAY} onSell={() => {}} cash={{ cents: 1_100_00, note: 'in 1 account' }} />,
     )

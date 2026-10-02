@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RealizedLine, RealizedReport } from '../../shared/invest-api'
-import { csvDollars, description, form8949Csv, form8949Filename, formDate, lineNote } from './form8949'
+import { csvDollars, description, form8949Csv, form8949Filename, formDate, lineNote, REPORTED_NOTE } from './form8949'
 
 const line = (over: Partial<RealizedLine>): RealizedLine => ({
   sale_trade_id: 7,
@@ -72,5 +72,16 @@ describe('the Form 8949 CSV', () => {
     expect(lineNote(line({ note: 'RSU withholding', basis: 'entered', wash_risk: true }))).toBe(
       'Basis entered on the sale; Recorded as shares withheld at a vest, but not at cost: shares withheld to pay the tax are not a sale, so check it; Possible wash sale: a buy within 30 days; check the 1099-B for code W',
     )
+  })
+
+  it('follows each part with the broker-reported figures, one row per account, gain only', () => {
+    const reported = [{ invest_account_id: 5, account: 'Flex 250', tax_year: 2026, st_cents: -40_000_00, lt_cents: 0, as_of: '2026-09-30', sheltered: false }]
+    const rows = form8949Csv({ ...report, reported }).split('\r\n')
+    expect(rows).toContain(`I (short-term) reported,Realized through 09/30/2026,,,,,,,-40000.00,Flex 250,"${REPORTED_NOTE}"`)
+    expect(rows.some((r) => r.startsWith('II (long-term) reported'))).toBe(false) // a zero side is left out
+    expect(rows.indexOf('I (short-term) total,,,,3700.00,3000.00,,,700.00,,')).toBeLessThan(rows.findIndex((r) => r.startsWith('I (short-term) reported')))
+    // Only reported figures: no lines, no totals.
+    const bare = form8949Csv({ lines: [], st: { proceeds_cents: 0, cost_cents: 0, gain_cents: 0, lines: 0 }, lt: { proceeds_cents: 0, cost_cents: 0, gain_cents: 0, lines: 0 }, reported })
+    expect(bare.split('\r\n').filter(Boolean)).toHaveLength(2)
   })
 })
