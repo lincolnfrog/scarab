@@ -465,3 +465,12 @@
 .ch-check.off { color: var(--ink-3); cursor: default; }
 .ch-perf-combine { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
 .ch-perf-err { color: var(--ink-2); margin-top: 0; }
+
+/* Dashboard allocation card: everything owed, itemized (OwedList). */
+.ch-owed { font-size: 12.5px; }
+.ch-owed-head { display: flex; justify-content: space-between; color: var(--ink-2); font-weight: 600; margin-bottom: 4px; }
+.ch-owed ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.ch-owed li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: baseline; }
+.ch-owed li > a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-owed li .muted { font-size: 11px; }
+.ch-owed .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }

@@ -98,13 +98,14 @@ describe('compositionLayers', () => {
     crypto: 0,
     property: 0,
     liabilities: 0,
+    credit: 0,
     total: 0,
     ...o,
   })
-  it('uses the fixed slots of the donut and tiles, with every debt as one s6 layer', () => {
+  it('uses the fixed slots of the donut and tiles, with every debt — loans and cards — as one s6 layer', () => {
     const pts = [
-      pt('2026-08', { brokerage: 100, retirement: 50, property: 900, cash: 10, liabilities: -600, total: 460 }),
-      pt('2026-09', { brokerage: 120, retirement: 55, property: 900, cash: -5, liabilities: -590, total: 480 }),
+      pt('2026-08', { brokerage: 100, retirement: 50, property: 900, cash: 10, liabilities: -600, credit: -30, total: 430 }),
+      pt('2026-09', { brokerage: 120, retirement: 55, property: 900, cash: -5, liabilities: -590, credit: 0, total: 480 }),
     ]
     const layers = compositionLayers(pts)
     expect(layers.map((l) => [l.id, l.label, l.slot])).toEqual([
@@ -112,10 +113,24 @@ describe('compositionLayers', () => {
       ['nw:retirement', 'Retirement', 2],
       ['nw:property', 'Property', 3],
       ['nw:cash', 'Cash', 5],
-      ['nw:liabilities', 'Liabilities', 6],
+      ['nw:debt', 'Debt', 6],
     ])
     expect(layers.find((l) => l.id === 'nw:cash')!.values).toEqual([10, -5])
+    expect(layers.find((l) => l.id === 'nw:debt')!.values).toEqual([-630, -590])
     // The layers add up to the Total line at every point.
+    const s = divergingStack(layers.map((l) => l.values))
+    pts.forEach((p, k) => expect(s.top[k]! + s.bottom[k]!).toBe(p.total))
+  })
+  it('stacks a card in credit with cash, so debt never rises above $0', () => {
+    const pts = [
+      pt('2026-08', { cash: 100, credit: -40, total: 60 }),
+      pt('2026-09', { cash: 100, credit: 25, total: 125 }), // a refund overpaid the card
+    ]
+    const layers = compositionLayers(pts)
+    expect(layers.map((l) => [l.id, l.values])).toEqual([
+      ['nw:cash', [100, 125]],
+      ['nw:debt', [-40, 0]],
+    ])
     const s = divergingStack(layers.map((l) => l.values))
     pts.forEach((p, k) => expect(s.top[k]! + s.bottom[k]!).toBe(p.total))
   })
@@ -123,5 +138,21 @@ describe('compositionLayers', () => {
     const layers = compositionLayers([pt('2026-08', { crypto: 30, cash: 5 }), pt('2026-09', { crypto: 0, cash: 5 })])
     expect(layers.map((l) => l.id)).toEqual(['nw:crypto', 'nw:cash'])
     expect(layers[0]!.slot).toBe(4)
+  })
+})
+
+describe('divergingStack zeros', () => {
+  it('puts a 0 on the side of its nearest non-zero value, so a paid-off month sits on the $0 line', () => {
+    // pile: an asset layer, then a debt layer that is 0 in the middle month and in the first.
+    const s = divergingStack([
+      [100, 100, 100, 100],
+      [0, -40, 0, -30],
+    ])
+    expect(s.lo[1]).toEqual([0, -40, 0, -30])
+    expect(s.hi[1]).toEqual([0, 0, 0, 0]) // every edge of the debt band is at or below $0
+    expect(s.top).toEqual([100, 100, 100, 100])
+    // A positive layer's 0 still sits on the positive pile.
+    const t = divergingStack([[50, 50], [0, 20]])
+    expect([t.lo[1], t.hi[1]]).toEqual([[50, 50], [50, 70]])
   })
 })

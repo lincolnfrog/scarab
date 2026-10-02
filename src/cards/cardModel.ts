@@ -10,7 +10,11 @@ import type { HoldingReturn, ReturnsResponse, SeriesPoint } from '../../shared/s
 import type { RouteTarget } from '../router'
 import { SLOT_VAR } from '../chart/palette'
 
-/** One month-end of GET /api/networth (the current month is as of today). Liabilities are negative. */
+/**
+ * One month-end of GET /api/networth (the current month is as of today).
+ * liabilities (loans) and credit (credit-card balances) are negative, as they
+ * enter the total; cash is the bank accounts alone.
+ */
 export type NetWorthPoint = {
   month: string
   cash: number
@@ -19,20 +23,29 @@ export type NetWorthPoint = {
   crypto: number
   property: number
   liabilities: number
+  credit: number
   total: number
 }
+
+/**
+ * Cash as the Dashboard's ring and tiles show it: the bank balances less what
+ * the cards owe — the way home equity is the house less its mortgage — so the
+ * slices still add up to net worth. The parts are spelled out beside it.
+ */
+export const cashNet = (p: NetWorthPoint) => p.cash + p.credit
 
 export type TileGroup = { key: string; label: string; color: string; to: RouteTarget; of: (p: NetWorthPoint) => number }
 
 /**
  * The Dashboard tiles, grouped as in the mockup: Brokerage s1, Retirement s2,
- * Home equity s3 (only with a property), Cash + crypto s5. A group that is $0
- * in every month of `recent` is left out (bug #69: $0 tiles), and Cash +
- * crypto names — and links to — only the half that exists.
+ * Home equity s3 (only with a property), Cash + crypto s5 — cash after card
+ * balances (cashNet). A group that is $0 in every month of `recent` is left
+ * out (bug #69: $0 tiles), and Cash + crypto names — and links to — only the
+ * half that exists.
  */
 export function tileGroups(recent: readonly NetWorthPoint[]): TileGroup[] {
   const any = (f: (p: NetWorthPoint) => number) => recent.some((p) => f(p) !== 0)
-  const hasCash = any((p) => p.cash)
+  const hasCash = any(cashNet)
   const hasCrypto = any((p) => p.crypto)
   const groups: TileGroup[] = [
     { key: 'brokerage', label: 'Brokerage', color: SLOT_VAR[1], to: { screen: 'invest' }, of: (p) => p.brokerage },
@@ -45,7 +58,7 @@ export function tileGroups(recent: readonly NetWorthPoint[]): TileGroup[] {
     label: hasCash && hasCrypto ? 'Cash + crypto' : hasCrypto ? 'Crypto' : 'Cash',
     color: SLOT_VAR[5],
     to: { screen: hasCash || !hasCrypto ? 'cash' : 'invest' },
-    of: (p) => p.cash + p.crypto,
+    of: (p) => cashNet(p) + p.crypto,
   })
   return groups.filter((g) => any(g.of))
 }

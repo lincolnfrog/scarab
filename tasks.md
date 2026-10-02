@@ -735,6 +735,41 @@ Decided against, with the reason (don't redo without a new one):
 - Incremental daily price fetch — the full refetch keeps split adjustment
   consistent.
 
+## Debt — spelled out (2026-10-01)
+
+Net worth used to keep debt in two places and never together: mortgages as
+liabilities tied to a property, and credit cards as ordinary bank accounts
+whose negative balance quietly lowered "Cash". One Debt view over both, each
+stored the way its facts arrive (card balances from the ledger, loans from
+statements).
+
+- [x] **Credit card account type** (migration 27). Cards are created — or
+      switched — as `credit` on Cash & budget, which now lists every account
+      with its balance, its type and a **Set balance** (a card's is entered as
+      the amount owed). Cards stay out of the dream-home fund picker and the
+      asset allocation.
+- [x] **Debt in net worth.** A `credit` part beside `liabilities` (loans), so
+      `cash` is the bank alone and home equity is unchanged; `getNetworth`
+      returns `debts`, one row per loan and card. Dashboard: an **Owed** list
+      under the ring, "Cash = in the bank − on cards" beside "Home equity =
+      value − mortgage" (ring and tiles show cash net of cards, so they still
+      sum to net worth), and the Breakdown chart's Debt layer covers loans and
+      cards. Compare gains `nw:credit` ("Credit cards") and `nw:debt`;
+      `nw:liabilities` is labelled "Loans". The digest names card balances as
+      a driver; Checkup's runway subtracts them; Future starts from cash net
+      of them.
+- [ ] **Loans not tied to a house** — car, student, personal, HELOC, a
+      401(k) loan. A liability with no property, entered from statements like
+      a mortgage: `liabilities.property_id` is already nullable and net worth
+      and `listDebts` already count such a row, so it is mostly UI — where
+      they're added and updated (today only Real estate, per property),
+      a kind (auto/student/personal/heloc/401k/other), the rate and term for
+      a payoff date, and an Owed row linking to it. Two things to fix with it:
+      the Dashboard's home equity is `property + liabilities`, which would
+      then subtract a car loan from the house (use property-linked loans
+      only), and Future's `liabilitiesCents` is described as mortgages.
+      Deferred: the household has no such loan (2026-10-01).
+
 ## Backlog: smaller, high leverage
 
 - [x] Performance attribution on Invest — shipped 2026-09-23 (above): a

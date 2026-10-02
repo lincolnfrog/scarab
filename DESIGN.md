@@ -397,7 +397,7 @@ specific lots, per-account pools), tax, money parsing, series and returns
 math, chart scales (including a non-vacuous America/Los_Angeles test), and
 simulation determinism.
 
-## 3. Data model (migrations 1–24)
+## 3. Data model (migrations 1–27)
 
 Ledger philosophy: **store dated facts, derive everything**. Transactions,
 trades, prices, valuations, balances are facts; balance sheets, charts, cost
@@ -473,6 +473,12 @@ number.
     year-to-date short- and long-term realized gain the broker reports, and
     the day it runs through. A fact off a statement; never on a lots account
     (its sales come from its trades) or a retirement one.
+27. accounts.kind gains `credit` (the table rebuilt; SQLite can't alter a
+    CHECK). A card's ledger imports like any bank account, but its balance is
+    owed: net worth's `credit` part, not `cash`; `liabilities` stays the
+    loans (mortgages), so home equity is unchanged. `getNetworth` itemizes
+    both as `debts`. Cards are left out of the dream-home fund and the asset
+    allocation; Future starts from cash net of them.
 
 **Server-only, never in a snapshot**: vault_blobs, vault_history,
 household_members, vault_invites, basket_quotes and the `basket:*` app_meta

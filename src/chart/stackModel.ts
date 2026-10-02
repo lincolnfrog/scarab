@@ -22,7 +22,10 @@ export type Stacked = {
  * point a positive value sits on the positives below it, a negative value
  * hangs under the negatives above it, so `top + bottom` is the sum of the
  * layers at that point (the net line). Missing values (a shorter layer, NaN)
- * count as 0.
+ * count as 0. A 0 sits, with no height, on the side of the layer's nearest
+ * non-zero value (the one before it, else after), so a debt layer that's paid
+ * off for a month dips to the $0 line instead of spiking up to the top of the
+ * positive pile.
  */
 export function divergingStack(layers: readonly (readonly number[])[]): Stacked {
   const n = Math.max(0, ...layers.map((l) => l.length))
@@ -33,10 +36,19 @@ export function divergingStack(layers: readonly (readonly number[])[]): Stacked 
   for (const layer of layers) {
     const L = new Array<number>(n)
     const H = new Array<number>(n)
-    for (let k = 0; k < n; k++) {
+    const vals = Array.from({ length: n }, (_, k) => {
       const raw = layer[k]
-      const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0
-      if (v >= 0) {
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : 0
+    })
+    // Which side each 0 belongs on: below when the nearest non-zero value (before it, else the first) is negative.
+    let last = vals.find((x) => x !== 0) ?? 0
+    const below = vals.map((v) => {
+      if (v !== 0) last = v
+      return last < 0
+    })
+    for (let k = 0; k < n; k++) {
+      const v = vals[k]!
+      if (!below[k]) {
         L[k] = top[k]!
         H[k] = top[k]! + v
         top[k] = H[k]!
@@ -107,20 +119,23 @@ export type CompositionLayer = { id: string; label: string; slot: Slot; values: 
 /**
  * Net worth's parts as stack layers, in the fixed slot order the Dashboard's
  * donut and tiles use: Brokerage s1, Retirement s2, Property s3 (its value —
- * the debt against it is its own layer), Crypto s4, Cash s5, and every debt
- * as one Liabilities layer in s6 below $0. A part that is $0 in every month
- * is left out, so the legend lists only what the household has.
+ * the debt against it is its own layer), Crypto s4, Cash s5 (the bank
+ * accounts), and every debt — loans and credit cards owed — as one Debt layer
+ * in s6 below $0. A part that is $0 in every month is left out, so the legend
+ * lists only what the household has. Ids are the Compare catalog's (nw:*).
  */
 export function compositionLayers(points: readonly NetWorthPoint[]): CompositionLayer[] {
-  const defs: { id: keyof Omit<NetWorthPoint, 'month' | 'total'>; label: string; slot: Slot }[] = [
-    { id: 'brokerage', label: 'Brokerage', slot: 1 },
-    { id: 'retirement', label: 'Retirement', slot: 2 },
-    { id: 'property', label: 'Property', slot: 3 },
-    { id: 'crypto', label: 'Crypto', slot: 4 },
-    { id: 'cash', label: 'Cash', slot: 5 },
-    { id: 'liabilities', label: 'Liabilities', slot: 6 },
+  const defs: { id: string; label: string; slot: Slot; of: (p: NetWorthPoint) => number }[] = [
+    { id: 'brokerage', label: 'Brokerage', slot: 1, of: (p) => p.brokerage },
+    { id: 'retirement', label: 'Retirement', slot: 2, of: (p) => p.retirement },
+    { id: 'property', label: 'Property', slot: 3, of: (p) => p.property },
+    { id: 'crypto', label: 'Crypto', slot: 4, of: (p) => p.crypto },
+    // A card in credit (a refund past its balance) is money held, not negative debt: it stacks with cash,
+    // so the Debt layer never pokes above $0 for a month. The layers still add up to the total.
+    { id: 'cash', label: 'Cash', slot: 5, of: (p) => p.cash + Math.max(0, p.credit) },
+    { id: 'debt', label: 'Debt', slot: 6, of: (p) => p.liabilities + Math.min(0, p.credit) },
   ]
   return defs
-    .map((d) => ({ id: `nw:${d.id}`, label: d.label, slot: d.slot, values: points.map((p) => p[d.id]) }))
+    .map((d) => ({ id: `nw:${d.id}`, label: d.label, slot: d.slot, values: points.map(d.of) }))
     .filter((l) => l.values.some((v) => v !== 0))
 }

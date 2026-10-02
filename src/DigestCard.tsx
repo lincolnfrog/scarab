@@ -39,14 +39,14 @@ const pct = (micro: number) => `${(micro / 10_000).toFixed(1)}%`
 const pp = (micro: number) => `${micro > 0 ? '+' : ''}${(micro / 10_000).toFixed(1)}pp`
 const CLASS_LABEL: Record<string, string> = {
   cash: 'Cash', brokerage: 'Brokerage', retirement: 'Retirement', crypto: 'Crypto',
-  property: 'Property', liabilities: 'Liabilities',
+  property: 'Property', liabilities: 'Loans', credit: 'Credit cards',
   // asset classes, when drift is against the target (engine/allocation.ts)
   us_stock: 'US stocks', intl_stock: 'International', bonds: 'Bonds', real_estate: 'REITs', other: 'Other',
 }
 /** Where each net-worth class lives, for the driver links. */
 const CLASS_SCREEN: Record<string, RouteTarget> = {
   cash: { screen: 'cash' }, brokerage: { screen: 'invest' }, retirement: { screen: 'invest' }, crypto: { screen: 'invest' },
-  property: { screen: 're' }, liabilities: { screen: 're' },
+  property: { screen: 're' }, liabilities: { screen: 're' }, credit: { screen: 'cash' },
 }
 
 /**

@@ -419,3 +419,20 @@ td.scr-none { padding: 18px 10px; text-align: center; }
 .scr-preview td.num { white-space: nowrap; }
 .scr-errlist { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 2px; }
 .scr-newtag { margin-left: 8px; }
+
+/* ---------- Cash: account balances & types ---------- */
+/* The Accounts & import card sits above the grid; like a grid card, it is a size container. */
+.card.scr-accounts { container: card / inline-size; }
+.scr-balances { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-width: 640px; font-size: 13px; }
+.scr-balances li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(9em, auto) auto; gap: 6px 12px; align-items: center; }
+.scr-bal-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scr-bal-amt { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.scr-bal-amt .muted { font-family: var(--sans); font-size: 11.5px; }
+@container card (width < 520px) {
+  /* The name on its own line; type, balance and the button under it. */
+  .scr-balances { gap: 10px; }
+  .scr-balances li { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .scr-bal-name { grid-column: 1 / -1; }
+  .scr-bal-amt { white-space: normal; line-height: 1.25; }
+  .scr-bal-amt .muted { display: inline-block; }
+}

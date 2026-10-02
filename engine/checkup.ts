@@ -168,14 +168,19 @@ function concentration(c: Ctx): Draft[] {
   return out
 }
 
-/** Cash on hand today: every bank account, plus the cash in brokerage accounts that record it. */
+/**
+ * Cash on hand today: every bank account, plus the cash in brokerage accounts
+ * that record it, less what the credit cards owe (their bills come out of it).
+ */
 function cashOnHand(db: DbLike, today: string) {
-  const banks = db
+  const accounts = db
     .prepare(
-      `SELECT a.id, a.name, a.opening_cents + COALESCE((SELECT SUM(amount_cents) FROM transactions t WHERE t.account_id = a.id AND t.posted_on <= ?), 0) AS cents
+      `SELECT a.id, a.name, a.kind, a.opening_cents + COALESCE((SELECT SUM(amount_cents) FROM transactions t WHERE t.account_id = a.id AND t.posted_on <= ?), 0) AS cents
        FROM accounts a ORDER BY a.id`,
     )
-    .all(today) as { id: number; name: string; cents: number }[]
+    .all(today) as { id: number; name: string; kind: string; cents: number }[]
+  const banks = accounts.filter((a) => a.kind !== 'credit')
+  const cardCents = accounts.filter((a) => a.kind === 'credit').reduce((s, a) => s + a.cents, 0)
   let brokerage = 0
   const anchored = db
     .prepare("SELECT DISTINCT ia.id FROM invest_accounts ia JOIN balance_snapshots s ON s.invest_account_id = ia.id WHERE ia.tracking = 'lots'")
@@ -190,7 +195,7 @@ function cashOnHand(db: DbLike, today: string) {
       .all(ia.id) as CashTrade[]
     brokerage += cashAt(anchors, trades, today)?.cents ?? 0
   }
-  return { banks, bankCents: banks.reduce((s, b) => s + b.cents, 0), brokerageCents: brokerage }
+  return { banks, bankCents: banks.reduce((s, b) => s + b.cents, 0), cardCents, brokerageCents: brokerage }
 }
 
 function runway(c: Ctx): Draft[] {
@@ -201,11 +206,12 @@ function runway(c: Ctx): Draft[] {
   const avg = Math.round(spent / months.length)
   if (avg <= 0) return []
   const cash = cashOnHand(c.db, c.today)
-  const total = cash.bankCents + cash.brokerageCents
+  const total = cash.bankCents + cash.cardCents + cash.brokerageCents
   const covered = total / avg
   const window = `${months[0]!.month} – ${months[months.length - 1]!.month}`
   const baseInputs = [
     { label: 'Bank accounts', value: $(cash.bankCents) },
+    ...(cash.cardCents !== 0 ? [{ label: 'Less credit card balances', value: $(cash.cardCents) }] : []),
     ...(cash.brokerageCents !== 0 ? [{ label: 'Cash in brokerage accounts', value: $(cash.brokerageCents) }] : []),
     { label: `Average monthly spending (${months.length} month${months.length > 1 ? 's' : ''}, ${window})`, value: $(avg) },
   ]

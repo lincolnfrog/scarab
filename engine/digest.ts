@@ -119,7 +119,8 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
       const base = comparable.find((p) => p.month === at)!
       const now = comparable[comparable.length - 1]!
       const drivers = [...ASSET_CLASSES.map((k) => ({ name: k as string, deltaCents: now[k] - base[k] })),
-        { name: 'liabilities', deltaCents: now.liabilities - base.liabilities }]
+        { name: 'liabilities', deltaCents: now.liabilities - base.liabilities },
+        { name: 'credit', deltaCents: now.credit - base.credit }]
         .filter((d) => d.deltaCents !== 0)
         .sort((a, b) => Math.abs(b.deltaCents) - Math.abs(a.deltaCents))
         .slice(0, 3)

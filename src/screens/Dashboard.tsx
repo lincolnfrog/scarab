@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatDollars } from '../../shared/money'
-import type { GoalDerived } from '../../shared/types'
+import type { Debt, GoalDerived } from '../../shared/types'
 import { get } from '../api'
 import ActivityCard, { type ActivityRow } from '../cards/ActivityCard'
 import CheckupCard from '../cards/CheckupCard'
 import DreamHomeTile from '../cards/DreamHomeTile'
-import { tileGroups, tileSpan, type NetWorthPoint } from '../cards/cardModel'
+import { cashNet, tileGroups, tileSpan, type NetWorthPoint } from '../cards/cardModel'
 import StatTile, { ChangeText } from '../cards/StatTile'
 import { CountUp } from '../chart/CountUpText'
 import { SLOT_VAR } from '../chart/palette'
@@ -21,13 +21,39 @@ import { Donut } from '../viz'
 import '../chart/chart.css'
 
 type Point = NetWorthPoint
-type NetWorth = { series: Point[]; current: Point | null; prev: Point | null }
+type NetWorth = { series: Point[]; current: Point | null; prev: Point | null; debts: Debt[] }
 type GoalResponse = { goal: { fundAccountIds: number[]; fundExtraCents: number }; derived?: GoalDerived }
 
 /** How many month-ends a tile's sparkline covers. */
 const SPARK_MONTHS = 12
 
 type NwView = 'total' | 'parts'
+
+/** Everything owed today, one row per loan and card, each linking to where it's kept. */
+function OwedList({ debts }: { debts: readonly Debt[] }) {
+  const owed = debts.filter((d) => d.owedCents > 0)
+  if (owed.length === 0) return null
+  const total = owed.reduce((s, d) => s + d.owedCents, 0)
+  return (
+    <div className="ch-owed topline">
+      <div className="ch-owed-head">
+        <span>Owed</span>
+        <span className="num">{formatDollars(total)}</span>
+      </div>
+      <ul>
+        {owed.map((d) => (
+          <li key={`${d.kind}:${d.id}`}>
+            <Link to={{ screen: d.kind === 'loan' ? 're' : 'cash' }} className="ch-a">
+              {d.name}
+            </Link>
+            <span className="muted">{d.kind === 'card' ? 'card' : d.property ? 'mortgage' : 'loan'}</span>
+            <span className="num">{formatDollars(d.owedCents)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 /**
  * The net-worth chart's two views. Total: one area. Breakdown (plan §C10): a
@@ -156,8 +182,9 @@ export default function Dashboard() {
   const groups = tileGroups(recent)
   const span = tileSpan(groups.length)
   const equity = current.property + current.liabilities
+  const cash = cashNet(current) // the bank less what the cards owe, as equity is the house less its mortgage
   // The donut can't draw a negative slice; when one is clamped to zero the ring no longer sums to net worth.
-  const clamped = equity < 0 || current.cash < 0
+  const clamped = equity < 0 || cash < 0
   const parts = view === 'parts' && nwSeries?.parts ? nwSeries.parts : null
   const hero = (
     <div className="ch-hero-row">
@@ -233,13 +260,23 @@ export default function Dashboard() {
               { name: 'Retirement', cents: current.retirement, color: SLOT_VAR[2] },
               { name: 'Home equity', cents: Math.max(0, equity), color: SLOT_VAR[3] },
               { name: 'Crypto', cents: current.crypto, color: SLOT_VAR[4] },
-              { name: 'Cash', cents: Math.max(0, current.cash), color: SLOT_VAR[5] },
+              { name: 'Cash', cents: Math.max(0, cash), color: SLOT_VAR[5] },
             ]}
           />
-          {current.property > 0 && (
+          {(current.property > 0 || current.credit !== 0) && (
             <div className="sub2 topline">
-              Home equity = {formatDollars(current.property)} value
-              {current.liabilities !== 0 ? ` − ${formatDollars(-current.liabilities)} debt` : ', nothing owed'}
+              {current.property > 0 && (
+                <div>
+                  Home equity = {formatDollars(current.property)} value
+                  {current.liabilities !== 0 ? ` − ${formatDollars(-current.liabilities)} mortgage` : ', nothing owed'}
+                </div>
+              )}
+              {current.credit !== 0 && (
+                <div>
+                  Cash = {formatDollars(current.cash)} in the bank {current.credit < 0 ? '−' : '+'} {formatDollars(Math.abs(current.credit))}{' '}
+                  {current.credit < 0 ? 'on cards' : 'card credit'}
+                </div>
+              )}
             </div>
           )}
           {clamped && (
@@ -247,6 +284,7 @@ export default function Dashboard() {
               {equity < 0 ? 'Home equity is under water' : 'Cash is overdrawn'}, so the ring shows assets, not net worth.
             </div>
           )}
+          <OwedList debts={nw.debts} />
         </div>
 
         {groups.map((g) => (

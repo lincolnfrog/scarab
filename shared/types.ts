@@ -1,5 +1,11 @@
 // Types shared between server responses and the client.
-export type Account = { id: number; name: string; kind: 'checking' | 'savings' }
+export type AccountKind = 'checking' | 'savings' | 'credit'
+/** A bank account; balance_cents is the ledger's balance today (opening + every transaction) — negative on a card while it's owed. */
+export type Account = { id: number; name: string; kind: AccountKind; balance_cents: number }
+/** One thing owed, as of today (GET /api/networth `debts`). owedCents is positive while owed; a card in credit is negative. */
+export type Debt =
+  | { kind: 'loan'; id: number; name: string; property: string | null; rateMicro: number | null; owedCents: number }
+  | { kind: 'card'; id: number; name: string; owedCents: number }
 export type Category = { id: number; name: string; kind: 'income' | 'expense' | 'transfer'; sort: number }
 
 export type Tx = {

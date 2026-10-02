@@ -197,11 +197,11 @@ function slicesOf(db: DbLike, today: string) {
   const accountClass = db.prepare('SELECT asset_class FROM invest_accounts WHERE id = ?')
   const bucketByAccount = new Map(accts.map((a) => [a.id, bucketOf(a.subtype, a.kind)]))
 
-  // Bank accounts are cash, held in taxable.
+  // Bank accounts are cash, held in taxable. A credit card is debt, not a holding: no slice.
   const banks = db
     .prepare(
       `SELECT a.name, a.opening_cents + COALESCE((SELECT SUM(amount_cents) FROM transactions t WHERE t.account_id = a.id AND t.posted_on <= ?), 0) AS cents
-       FROM accounts a ORDER BY a.id`,
+       FROM accounts a WHERE a.kind != 'credit' ORDER BY a.id`,
     )
     .all(today) as { name: string; cents: number }[]
   for (const b of banks) if (b.cents !== 0) slices.push({ cls: 'cash', cents: b.cents, bucket: 'taxable', accountId: null, accountName: b.name, assetId: null, symbol: null, sheltered: false })

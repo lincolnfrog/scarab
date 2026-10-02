@@ -375,7 +375,8 @@ export function resolveContext(db: DbLike, today: string): { balance: BalanceShe
   const nw = getNetworth(db, today).current
   const balance: BalanceSheet | null = nw
     ? {
-        cash: nw.cash,
+        // Card balances are paid out of cash: the simulation starts from cash net of them.
+        cash: nw.cash + nw.credit,
         brokerage: nw.brokerage,
         retirement: nw.retirement,
         crypto: nw.crypto,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { todayLocal } from '../../shared/dates'
 import { formatCents } from '../../shared/money'
-import type { Account, BudgetRow, Category, CategorySpend, ImportSummary, MonthlyFlow, Tx, TxPage } from '../../shared/types'
+import type { Account, AccountKind, BudgetRow, Category, CategorySpend, ImportSummary, MonthlyFlow, Tx, TxPage } from '../../shared/types'
 import { get, patch, post, put } from '../api'
 import { setParams, useRouteState } from '../router'
 import { Bullets, fmtMonth, fmtShort } from '../viz'
@@ -12,6 +12,7 @@ import RulesSheet from './RulesSheet'
 import { Button } from '../ui/Button'
 import { useDeepAction } from '../ui/CommandPalette'
 import { prompt } from '../ui/dialogs'
+import { Tooltip } from '../ui/Tooltip'
 import { EmptyState } from '../ui/EmptyState'
 import { MoneyInput, Select, TextInput } from '../ui/Field'
 import { HeaderSlot } from '../ui/HeaderSlot'
@@ -34,6 +35,13 @@ import {
 import './screens.css'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** Bank account types. A credit card's balance is money owed: net worth counts it as debt, not cash. */
+const KIND_OPTIONS: { value: AccountKind; label: string }[] = [
+  { value: 'checking', label: 'checking' },
+  { value: 'savings', label: 'savings' },
+  { value: 'credit', label: 'credit card' },
+]
 
 /**
  * One category's monthly budget in the "Set budgets" table: integer cents in
@@ -152,7 +160,7 @@ export default function Cash() {
   const [importAccount, setImportAccount] = useState<number | null>(null)
   const [editBudgets, setEditBudgets] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [newAccount, setNewAccount] = useState<{ name: string; kind: 'checking' | 'savings' } | null>(null)
+  const [newAccount, setNewAccount] = useState<{ name: string; kind: AccountKind } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const accountNameRef = useRef<HTMLInputElement>(null)
   const txAnchor = useAnchor('transactions')
@@ -294,7 +302,7 @@ export default function Cash() {
   }
 
   const addAccount = useAction(
-    (b: { name: string; kind: 'checking' | 'savings' }) => post<Account>('/api/accounts', { name: b.name.trim(), kind: b.kind }),
+    (b: { name: string; kind: AccountKind }) => post<Account>('/api/accounts', { name: b.name.trim(), kind: b.kind }),
     {
       success: (a) => `Added ${a.name} — imports go there now`,
       errorPrefix: "Couldn't add the account",
@@ -305,6 +313,39 @@ export default function Cash() {
       },
     },
   )
+  const anchor = useAction(
+    async (a: Account, cents: number) => {
+      await patch(`/api/accounts/${a.id}`, { currentBalanceCents: cents })
+      return a.kind === 'credit'
+        ? `${a.name}: ${formatCents(Math.max(0, -cents))} owed`
+        : `${a.name} anchored at ${formatCents(cents)}`
+    },
+    { success: (r) => r, errorPrefix: "Couldn't set the balance", onDone: () => void loadStatic().then(refreshAll, refreshAll) },
+  )
+  async function setBalance(a: Account) {
+    const card = a.kind === 'credit'
+    const v = await prompt<{ cents: number }>({
+      title: `Set ${a.name}'s balance`,
+      body: card
+        ? 'What the card owes right now, from the statement or the card’s site — after the latest transaction you imported. Scarab anchors the ledger to it.'
+        : 'The balance right now, from the bank’s site — after the latest transaction you imported. Scarab only knows the flows since your first import, and anchors them to it.',
+      fields: [
+        card
+          ? { key: 'cents', kind: 'money', label: 'Amount owed', initial: -a.balance_cents, allowNegative: true, hint: 'Negative if the card is in credit' }
+          : { key: 'cents', kind: 'money', label: 'Current balance', initial: a.balance_cents, allowNegative: true },
+      ],
+      submitLabel: 'Anchor balance',
+    })
+    if (v) void anchor.run(a, card ? -v.cents : v.cents)
+  }
+  const changeKind = useAction(
+    async (a: Account, kind: AccountKind) => {
+      await patch(`/api/accounts/${a.id}`, { kind })
+      return `${a.name} is a ${KIND_OPTIONS.find((k) => k.value === kind)!.label} account`
+    },
+    { success: (r) => r, errorPrefix: "Couldn't change the account type", onDone: () => void loadStatic().then(refreshAll, refreshAll) },
+  )
+
   function onAddAccount() {
     if (newAccount?.name.trim()) void addAccount.run(newAccount)
   }
@@ -483,7 +524,7 @@ export default function Cash() {
       />
 
       {/* ---------- accounts: where imports go ---------- */}
-      <div className="card wide" ref={importAnchor}>
+      <div className="card wide scr-accounts" ref={importAnchor}>
         <div className="h4row">
           <h2>Accounts &amp; import</h2>
           <div className="right muted">CSV or OFX/QFX download from the bank · duplicates are skipped automatically</div>
@@ -528,10 +569,13 @@ export default function Cash() {
               <Select
                 aria-label="Account type"
                 value={newAccount.kind}
-                onChange={(e) => setNewAccount({ ...newAccount, kind: e.target.value as 'checking' | 'savings' })}
+                onChange={(e) => setNewAccount({ ...newAccount, kind: e.target.value as AccountKind })}
               >
-                <option value="checking">checking</option>
-                <option value="savings">savings</option>
+                {KIND_OPTIONS.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
               </Select>
               <Button type="submit" busy={addAccount.busy} disabled={!newAccount.name.trim()}>
                 Add
@@ -548,6 +592,42 @@ export default function Cash() {
             </button>
           )}
         </div>
+        {!!accounts?.length && (
+          <ul className="scr-balances topline" aria-label="Account balances">
+            {accounts.map((a) => (
+              <li key={a.id}>
+                <span className="scr-bal-name">{a.name}</span>
+                <Select
+                  className="mini"
+                  aria-label={`${a.name}: account type`}
+                  value={a.kind}
+                  disabled={changeKind.busy}
+                  onChange={(e) => void changeKind.run(a, e.target.value as AccountKind)}
+                >
+                  {KIND_OPTIONS.map((k) => (
+                    <option key={k.value} value={k.value}>
+                      {k.label}
+                    </option>
+                  ))}
+                </Select>
+                <span className="scr-bal-amt">
+                  {a.kind === 'credit' ? (
+                    <>
+                      {formatCents(Math.abs(a.balance_cents))} <span className="muted">{a.balance_cents <= 0 ? 'owed' : 'credit'}</span>
+                    </>
+                  ) : (
+                    formatCents(a.balance_cents)
+                  )}
+                </span>
+                <Tooltip content="Set the real balance — the ledger only knows flows since your first import">
+                  <Button variant="ghost" size="mini" aria-label={`Set ${a.name}'s actual balance`} onClick={() => void setBalance(a)}>
+                    Set balance
+                  </Button>
+                </Tooltip>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {!hasData ? (

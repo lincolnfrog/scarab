@@ -18,8 +18,8 @@ import {
 } from './cardModel'
 
 const pt = (month: string, o: Partial<NetWorthPoint> = {}): NetWorthPoint => {
-  const p = { month, cash: 0, brokerage: 0, retirement: 0, crypto: 0, property: 0, liabilities: 0, ...o }
-  return { ...p, total: p.cash + p.brokerage + p.retirement + p.crypto + p.property + p.liabilities }
+  const p = { month, cash: 0, brokerage: 0, retirement: 0, crypto: 0, property: 0, liabilities: 0, credit: 0, ...o }
+  return { ...p, total: p.cash + p.brokerage + p.retirement + p.crypto + p.property + p.liabilities + p.credit }
 }
 
 describe('tileGroups (Dashboard tiles)', () => {
@@ -34,6 +34,8 @@ describe('tileGroups (Dashboard tiles)', () => {
     const p = pt('2026-09', { property: 900_000_00, liabilities: -500_000_00, cash: 10_00, crypto: 5_00 })
     expect(g[2]!.of(p)).toBe(400_000_00) // equity = value + (negative) debt
     expect(g[3]!.of(p)).toBe(15_00)
+    // Card balances come off cash, as the mortgage comes off the house.
+    expect(g[3]!.of({ ...p, credit: -4_00 })).toBe(11_00)
   })
 
   it('hides a class that was $0 all window (bug #69) and home equity without a property', () => {

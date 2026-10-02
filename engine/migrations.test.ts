@@ -145,3 +145,30 @@ describe('migration 21 over a v20 database', () => {
     }
   })
 })
+
+describe('migration 27 over a v26 database', () => {
+  it('rebuilds accounts to allow credit, keeping every row and every reference to it', async () => {
+    for (const [name, db] of await engines()) {
+      migrateTo(db, 26)
+      db.pragma('foreign_keys = ON')
+      db.prepare("INSERT INTO accounts (id, name, kind, opening_cents) VALUES (4, 'WF Checking', 'checking', 1234), (9, 'Marcus', 'savings', 0)").run()
+      db.prepare("INSERT INTO imports (id, account_id, filename, format, rows_total, rows_imported, rows_skipped, imported_by) VALUES (1, 4, 'a.csv', 'csv-wf', 1, 1, 0, 't')").run()
+      db.prepare("INSERT INTO transactions (account_id, posted_on, amount_cents, description, import_id, dedupe_hash) VALUES (4, '2026-09-01', -500, 'COFFEE', 1, 'h#0')").run()
+
+      migrate(db)
+
+      expect(db.prepare('SELECT id, name, kind, opening_cents FROM accounts ORDER BY id').all(), name).toEqual([
+        { id: 4, name: 'WF Checking', kind: 'checking', opening_cents: 1234 },
+        { id: 9, name: 'Marcus', kind: 'savings', opening_cents: 0 },
+      ])
+      expect(db.prepare('SELECT account_id FROM transactions').all(), name).toEqual([{ account_id: 4 }])
+      expect(db.prepare('PRAGMA foreign_key_check').all(), name).toEqual([])
+      db.prepare("INSERT INTO accounts (name, kind) VALUES ('Citi Card', 'credit')").run()
+      expect(() => db.prepare("INSERT INTO accounts (name, kind) VALUES ('X', 'loan')").run(), name).toThrow()
+      // The references still point at accounts and are still enforced.
+      expect(() => db.prepare("INSERT INTO transactions (account_id, posted_on, amount_cents, description, dedupe_hash) VALUES (77, '2026-09-02', 1, 'X', 'x#0')").run(), name).toThrow()
+      expect((db.prepare("SELECT sql FROM sqlite_master WHERE name = 'transactions'").get() as { sql: string }).sql, name).toContain('REFERENCES accounts(id)')
+      db.close()
+    }
+  })
+})

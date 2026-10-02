@@ -529,6 +529,30 @@ export const migrations: string[] = [
      as_of             TEXT NOT NULL,
      PRIMARY KEY (invest_account_id, tax_year)
    )`,
+
+  // 27 — credit cards are their own kind of bank account. A card's ledger is
+  // imported like any other, but its balance is money owed: net worth lists
+  // it as debt rather than netting it into cash. SQLite can't change a CHECK
+  // in place, so the table is rebuilt, every row kept. transactions and
+  // imports reference accounts(id), so the foreign-key check is deferred to
+  // commit, and the rows go back in by INSERT into the table of the same
+  // name — re-inserting a parent row is what clears the deferred violation
+  // its drop counted (a renamed table full of rows wouldn't). Every existing
+  // row is still valid, so a snapshot loads as-is (tier B).
+  `PRAGMA defer_foreign_keys = ON;
+   CREATE TABLE accounts_27 AS SELECT id, name, kind, external_id, created_at, opening_cents FROM accounts;
+   DROP TABLE accounts;
+   CREATE TABLE accounts (
+     id            INTEGER PRIMARY KEY,
+     name          TEXT NOT NULL,
+     kind          TEXT NOT NULL CHECK (kind IN ('checking','savings','credit')),
+     external_id   TEXT,
+     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+     opening_cents INTEGER NOT NULL DEFAULT 0
+   );
+   INSERT INTO accounts (id, name, kind, external_id, created_at, opening_cents)
+     SELECT id, name, kind, external_id, created_at, opening_cents FROM accounts_27;
+   DROP TABLE accounts_27`,
 ]
 
 export function migrate(db: DbLike): void {

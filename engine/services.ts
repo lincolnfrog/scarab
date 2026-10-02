@@ -1,6 +1,6 @@
 import { addMonthsIso, addMonthsToMonth, isRealIsoDay, monthsBetween, todayLocal } from '../shared/dates'
 import { OPENING_NOTE, RSU_VEST_NOTE, RSU_WITHHOLDING_NOTE } from '../shared/invest-api'
-import type { BudgetRow, CategorySpend, GoalDerived, MonthlyFlow, RulesImportResult, Tx, TxPage } from '../shared/types'
+import type { Account, AccountKind, BudgetRow, CategorySpend, Debt, GoalDerived, MonthlyFlow, RulesImportResult, Tx, TxPage } from '../shared/types'
 import type { DbLike } from './db'
 import { ApiError, bad, isoMonth, notFound } from './errors'
 import { cashEffectCents, type CashTrade } from './holdings'
@@ -31,23 +31,44 @@ export const health = () => ({ ok: true, db: 'ready', schemaVersion: migrations.
 
 /* ---------- accounts ---------- */
 
-export const listAccounts = (db: DbLike) => db.prepare('SELECT id, name, kind FROM accounts ORDER BY id').all()
+const ACCOUNT_KINDS: readonly AccountKind[] = ['checking', 'savings', 'credit']
+const isAccountKind = (k: unknown): k is AccountKind => ACCOUNT_KINDS.includes(k as AccountKind)
 
-export function createAccount(db: DbLike, b: { name?: string; kind?: string }) {
-  if (!b.name?.trim() || !['checking', 'savings'].includes(b.kind ?? ''))
-    bad('name and kind (checking|savings) required')
+/** Every bank account with its ledger balance: opening plus every transaction (negative on a card while it's owed). */
+export const listAccounts = (db: DbLike): Account[] =>
+  db
+    .prepare(
+      `SELECT a.id, a.name, a.kind,
+              a.opening_cents + COALESCE((SELECT SUM(t.amount_cents) FROM transactions t WHERE t.account_id = a.id), 0) AS balance_cents
+       FROM accounts a ORDER BY a.id`,
+    )
+    .all() as Account[]
+
+export function createAccount(db: DbLike, b: { name?: string; kind?: string }): Account {
+  if (!b.name?.trim() || !isAccountKind(b.kind)) bad('name and kind (checking|savings|credit) required')
   const r = db.prepare('INSERT INTO accounts (name, kind) VALUES (?, ?)').run(b.name!.trim(), b.kind)
-  return { id: Number(r.lastInsertRowid), name: b.name!.trim(), kind: b.kind }
+  return { id: Number(r.lastInsertRowid), name: b.name!.trim(), kind: b.kind as AccountKind, balance_cents: 0 }
 }
 
-export function anchorAccount(db: DbLike, id: number, b: { currentBalanceCents?: number }) {
-  if (!Number.isSafeInteger(b.currentBalanceCents)) bad('integer currentBalanceCents required')
+/**
+ * Change a bank account: its kind, and/or anchor its ledger to the real
+ * balance. Scarab only knows the flows since the first import, so the
+ * balance sets the opening balance that makes them add up to it. A card's
+ * balance is negative while it's owed.
+ */
+export function anchorAccount(db: DbLike, id: number, b: { currentBalanceCents?: number; kind?: string }) {
+  const anchoring = b.currentBalanceCents !== undefined
+  if (anchoring && !Number.isSafeInteger(b.currentBalanceCents)) bad('integer currentBalanceCents required')
+  if (b.kind !== undefined && !isAccountKind(b.kind)) bad('kind must be checking, savings or credit')
+  if (!anchoring && b.kind === undefined) bad('currentBalanceCents or kind required')
   if (!db.prepare('SELECT id FROM accounts WHERE id = ?').get(id)) notFound('no such account')
+  if (b.kind !== undefined) db.prepare('UPDATE accounts SET kind = ? WHERE id = ? AND kind != ?').run(b.kind, id, b.kind)
+  if (!anchoring) return { ok: true }
   const flow = db
     .prepare('SELECT COALESCE(SUM(amount_cents),0) AS s FROM transactions WHERE account_id = ?')
     .get(id) as { s: number }
   const opening = (b.currentBalanceCents as number) - flow.s
-  db.prepare('UPDATE accounts SET opening_cents = ? WHERE id = ?').run(opening, id)
+  db.prepare('UPDATE accounts SET opening_cents = ? WHERE id = ? AND opening_cents != ?').run(opening, id, opening)
   return { ok: true, openingCents: opening }
 }
 
@@ -560,7 +581,38 @@ export function putLiabilityBalance(db: DbLike, id: number, b: { balancedOn?: st
 
 export function getNetworth(db: DbLike, today: string) {
   const series = netWorthSeries(db, today)
-  return { series, current: series[series.length - 1] ?? null, prev: series[series.length - 2] ?? null }
+  return { series, current: series[series.length - 1] ?? null, prev: series[series.length - 2] ?? null, debts: listDebts(db, today) }
+}
+
+/**
+ * Everything owed as of today, one row per debt, largest first: each loan's
+ * latest recorded balance (a mortgage, from its statements) and each credit
+ * card's ledger balance. The itemized side of net worth's liabilities and
+ * credit parts — the same facts, so the rows add up to them.
+ */
+export function listDebts(db: DbLike, today: string): Debt[] {
+  const loans = db
+    .prepare(
+      `SELECT l.id, l.name, p.name AS property, l.rate_micro,
+              (SELECT b.balance_cents FROM liability_balances b WHERE b.liability_id = l.id AND b.balanced_on <= ?
+               ORDER BY b.balanced_on DESC LIMIT 1) AS owed
+       FROM liabilities l LEFT JOIN properties p ON p.id = l.property_id`,
+    )
+    .all(today) as { id: number; name: string; property: string | null; rate_micro: number | null; owed: number | null }[]
+  const cards = db
+    .prepare(
+      `SELECT a.id, a.name, a.opening_cents + COALESCE((SELECT SUM(t.amount_cents) FROM transactions t
+         WHERE t.account_id = a.id AND t.posted_on <= ?), 0) AS balance
+       FROM accounts a WHERE a.kind = 'credit'`,
+    )
+    .all(today) as { id: number; name: string; balance: number }[]
+  const out: Debt[] = [
+    ...loans
+      .filter((l) => l.owed !== null && l.owed !== 0)
+      .map((l): Debt => ({ kind: 'loan', id: l.id, name: l.name, property: l.property, rateMicro: l.rate_micro, owedCents: l.owed! })),
+    ...cards.filter((c) => c.balance !== 0).map((c): Debt => ({ kind: 'card', id: c.id, name: c.name, owedCents: -c.balance })),
+  ]
+  return out.sort((a, b) => b.owedCents - a.owedCents)
 }
 
 /** One row of GET /api/activity: a bank transaction (tag = its category, '—' when none) or a trade (tag = its account). */
@@ -711,8 +763,9 @@ export function getGoal(db: DbLike, today: string = todayLocal()) {
   const rental = readSetting(db, 'rental', RENTAL_DEFAULTS)
   const accounts = db
     .prepare(
+      // A credit card is money owed, never savings toward the house.
       `SELECT a.id, a.name, a.opening_cents + COALESCE((SELECT SUM(amount_cents) FROM transactions t WHERE t.account_id = a.id), 0) AS balance_cents
-       FROM accounts a ORDER BY a.id`,
+       FROM accounts a WHERE a.kind != 'credit' ORDER BY a.id`,
     )
     .all() as { id: number; name: string; balance_cents: number }[]
   const included = accounts.filter((a) => goal.fundAccountIds.includes(a.id))

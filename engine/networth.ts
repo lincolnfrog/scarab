@@ -9,12 +9,13 @@ export type NetWorthComponents = {
   retirement: number
   crypto: number
   property: number
-  liabilities: number // negative
+  liabilities: number // negative: loans against property (mortgages)
+  credit: number // negative while a card is owed: credit-card accounts' balances
 }
 export type NetWorthPoint = { month: string } & NetWorthComponents & { total: number }
 
 const sum = (o: NetWorthComponents) =>
-  o.cash + o.brokerage + o.retirement + o.crypto + o.property + o.liabilities
+  o.cash + o.brokerage + o.retirement + o.crypto + o.property + o.liabilities + o.credit
 
 const monthEnd = (month: string) => `${month}-99` // string-compare sentinel: after any day in month
 const LATEST = '9999-99-99' // string-compare sentinel: after any date at all
@@ -65,8 +66,9 @@ export function netWorthSeries(db: DbLike, today: string, opts: { knownBy?: stri
   const months = monthsBetween(first, thisMonth)
 
   // Pull everything once; derive per month in JS.
-  const accounts = db.prepare('SELECT id, opening_cents FROM accounts').all() as {
+  const accounts = db.prepare('SELECT id, kind, opening_cents FROM accounts').all() as {
     id: number
+    kind: 'checking' | 'savings' | 'credit'
     opening_cents: number
   }[]
   const txs = db
@@ -150,11 +152,13 @@ export function netWorthSeries(db: DbLike, today: string, opts: { knownBy?: stri
     const current = month === thisMonth
     const tradeCutoff = current ? today : cutoff
     const priceCutoff = current ? LATEST : cutoff
-    const c: NetWorthComponents = { cash: 0, brokerage: 0, retirement: 0, crypto: 0, property: 0, liabilities: 0 }
+    const c: NetWorthComponents = { cash: 0, brokerage: 0, retirement: 0, crypto: 0, property: 0, liabilities: 0, credit: 0 }
 
     for (const a of accounts) {
       const rows = txsBy.get(a.id)
-      c.cash += a.opening_cents + (rows ? txSums.get(a.id)![countOnOrBefore(rows, (t) => t.posted_on, cutoff)]! : 0)
+      const balance = a.opening_cents + (rows ? txSums.get(a.id)![countOnOrBefore(rows, (t) => t.posted_on, cutoff)]! : 0)
+      if (a.kind === 'credit') c.credit += balance
+      else c.cash += balance
     }
 
     for (const ia of investAccounts) {

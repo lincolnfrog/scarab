@@ -172,11 +172,11 @@ function meta(
 
 /* ---------- nw:* — net worth and its parts ---------- */
 
-type NwPart = 'total' | 'cash' | 'brokerage' | 'retirement' | 'crypto' | 'property' | 'liabilities' | 'equity'
+type NwPart = 'total' | 'cash' | 'brokerage' | 'retirement' | 'crypto' | 'property' | 'liabilities' | 'credit' | 'debt' | 'equity'
 
 // Catalog order. Values are exactly the netWorthSeries fields (liabilities
-// negative, as they enter the sum); equity is the Dashboard's home equity,
-// property value less every liability.
+// and credit negative, as they enter the sum); debt is both together;
+// equity is the Dashboard's home equity, property value less every loan.
 const NW_PARTS: Record<NwPart, { label: string; value: (p: NetWorthPoint) => number; none?: string }> = {
   total: { label: 'Net worth', value: (p) => p.total },
   cash: { label: 'Cash', value: (p) => p.cash, none: 'No bank balances recorded' },
@@ -184,7 +184,9 @@ const NW_PARTS: Record<NwPart, { label: string; value: (p: NetWorthPoint) => num
   retirement: { label: 'Retirement', value: (p) => p.retirement, none: 'Nothing held in retirement accounts' },
   crypto: { label: 'Crypto', value: (p) => p.crypto, none: 'No crypto holdings' },
   property: { label: 'Property value', value: (p) => p.property, none: 'No properties recorded' },
-  liabilities: { label: 'Liabilities', value: (p) => p.liabilities, none: 'No loan balances recorded' },
+  liabilities: { label: 'Loans', value: (p) => p.liabilities, none: 'No loan balances recorded' },
+  credit: { label: 'Credit cards', value: (p) => p.credit, none: 'No credit card balances' },
+  debt: { label: 'Debt', value: (p) => p.liabilities + p.credit, none: 'Nothing owed' },
   equity: { label: 'Home equity', value: (p) => p.property + p.liabilities, none: 'No properties recorded' },
 }
 const isNwPart = (s: string): s is NwPart => Object.hasOwn(NW_PARTS, s)

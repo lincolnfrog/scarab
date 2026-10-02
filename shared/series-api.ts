@@ -3,7 +3,7 @@
 // implements it; charts and Compare consume it and never re-declare these types.
 //
 // ID grammar:
-//   nw:<total|cash|brokerage|retirement|crypto|property|liabilities|equity>   — v0 (foundation)
+//   nw:<total|cash|brokerage|retirement|crypto|property|liabilities|credit|debt|equity>   — v0 (foundation; credit, debt since migration 27)
 //   inv:<all|accountId>:<value|cost|twr>  pos:<assetId>:<value|cost|twr>  set:<assetId>(+<assetId>)*:<value|cost|twr>
 //   px:<assetId>  bench:<SYMBOL>  cash:<accountId>  prop:<id>:<value|equity>  liab:<id>  goal:fund  cf:<income|spend|net>
 //

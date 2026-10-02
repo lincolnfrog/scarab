@@ -13,7 +13,7 @@ import { cashflowMonthly, getGoal } from './services'
 import { seedHousehold } from './test/household'
 
 const TODAY = '2026-09-22'
-const NW_IDS = ['nw:total', 'nw:cash', 'nw:brokerage', 'nw:retirement', 'nw:crypto', 'nw:property', 'nw:liabilities', 'nw:equity']
+const NW_IDS = ['nw:total', 'nw:cash', 'nw:brokerage', 'nw:retirement', 'nw:crypto', 'nw:property', 'nw:liabilities', 'nw:credit', 'nw:debt', 'nw:equity']
 const BENCH_IDS = ['bench:SPY', 'bench:QQQ', 'bench:VTI', 'bench:VXUS', 'bench:AGG', 'bench:BTC']
 
 const mem = () => openDb(':memory:') as unknown as DbLike
@@ -46,7 +46,9 @@ describe('series v0: the net-worth family', () => {
     expect(ids.slice(0, NW_IDS.length)).toEqual(NW_IDS) // net worth leads the catalog
     // Drift guard: a component added to netWorthSeries must get an id here.
     for (const field of Object.keys(nw[0]!).filter((k) => k !== 'month')) expect(ids).toContain(`nw:${field}`)
-    for (const e of catalog.entries.filter((x) => x.id.startsWith('nw:')))
+    // The seeded household has no credit card: that part alone is greyed out.
+    expect(catalog.entries.find((e) => e.id === 'nw:credit')).toMatchObject({ available: false, reason: 'No credit card balances' })
+    for (const e of catalog.entries.filter((x) => x.id.startsWith('nw:') && x.id !== 'nw:credit'))
       expect(e).toEqual({
         id: e.id,
         label: expect.any(String),
@@ -61,19 +63,24 @@ describe('series v0: the net-worth family', () => {
 
   it('each series equals its netWorthSeries component, month for month', () => {
     const db = seeded()
+    // A credit card owing $123.45 all along, so the credit and debt parts have something to show.
+    db.prepare("INSERT INTO accounts (name, kind, opening_cents) VALUES ('Card', 'credit', -12345)").run()
     const nw = netWorthSeries(db, TODAY)
     const byId = new Map(fetchAll(db).map((s) => [s.id, s]))
     const expected = (v: (p: NetWorthPoint) => number) => nw.map((p) => ({ t: p.month, v: v(p) }))
 
     expect([...byId.keys()]).toEqual(NW_IDS)
-    for (const field of ['total', 'cash', 'brokerage', 'retirement', 'crypto', 'property', 'liabilities'] as const)
+    for (const field of ['total', 'cash', 'brokerage', 'retirement', 'crypto', 'property', 'liabilities', 'credit'] as const)
       expect(byId.get(`nw:${field}`)!.points, field).toEqual(expected((p) => p[field]))
+    expect(byId.get('nw:debt')!.points).toEqual(expected((p) => p.liabilities + p.credit))
     expect(byId.get('nw:equity')!.points).toEqual(expected((p) => p.property + p.liabilities))
     for (const s of byId.values()) expect(s).toMatchObject({ unit: 'cents', kind: 'level' })
 
     // The seed exercises every part: nothing here is a flat zero line.
     for (const id of NW_IDS) expect(byId.get(id)!.points.some((p) => p.v !== 0), id).toBe(true)
     expect(byId.get('nw:liabilities')!.points.at(-1)!.v).toBe(-63_500_000) // as it enters the sum
+    expect(byId.get('nw:credit')!.points.at(-1)!.v).toBe(-12_345) // the card, kept out of cash
+    expect(byId.get('nw:debt')!.points.at(-1)!.v).toBe(-63_500_000 - 12_345)
     expect(byId.get('nw:equity')!.points.at(-1)!.v).toBe(85_000_000 - 63_500_000)
   })
 
@@ -145,7 +152,7 @@ describe('series v0: the net-worth family', () => {
 
     const meta = new Map(getSeriesCatalog(db, TODAY).entries.filter((e) => e.id.startsWith('nw:')).map((e) => [e.id, e]))
     const offered = [...meta.values()].filter((e) => e.available).map((e) => e.id)
-    expect(offered).toEqual(['nw:total', 'nw:cash', 'nw:liabilities'])
+    expect(offered).toEqual(['nw:total', 'nw:cash', 'nw:liabilities', 'nw:debt'])
     expect(meta.get('nw:crypto')).toMatchObject({ available: false, reason: 'No crypto holdings', firstMonth: '2026-06' })
     expect(meta.get('nw:equity')).toMatchObject({ available: false, reason: 'No properties recorded' })
     for (const e of meta.values()) expect('reason' in e).toBe(!e.available)
@@ -247,7 +254,7 @@ describe('series v1: the catalog', () => {
     expect(byId.get('px:3')!.points).toEqual([])
     // VTI and QQQ are held and priced, so their benchmarks have history; BTC is held but never priced.
     const benchUnavailable = BENCH_IDS.filter((id) => id !== 'bench:VTI' && id !== 'bench:QQQ')
-    expect(entries.filter((e) => !e.available).map((e) => e.id)).toEqual([...twrIds, 'px:3', ...benchUnavailable])
+    expect(entries.filter((e) => !e.available).map((e) => e.id)).toEqual(['nw:credit', ...twrIds, 'px:3', ...benchUnavailable]) // no card
     for (const id of twrIds) expect(entries.find((e) => e.id === id)!.reason, id).toMatch(/^Too little price history: only \d+% of the value had a market price; a time-weighted return needs 90%$/)
   })
 
