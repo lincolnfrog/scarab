@@ -4,7 +4,7 @@ import { getAllocation } from './allocation'
 import type { DbLike } from './db'
 import { netWorthSeries } from './networth'
 import { resolveContext } from './scenarios'
-import { anchorAccount, ApiError, createAccount, createLiability, createProperty, getGoal, getNetworth, listAccounts, listDebts, putGoal } from './services'
+import { anchorAccount, ApiError, cashflowByMonth, cashflowMonthly, createAccount, createLiability, createProperty, getGoal, getNetworth, listAccounts, listDebts, putGoal } from './services'
 import { onBothEngines } from './test/parity'
 
 /**
@@ -99,5 +99,42 @@ describe('credit card accounts', () => {
     )
     expect(server.debts).toHaveLength(2)
     expect(browser).toEqual(server)
+  })
+})
+
+describe('cash flow: tax payments and money moved out', () => {
+  function ledger() {
+    const db = mem()
+    const chk = createAccount(db, { name: 'Checking', kind: 'checking' }).id
+    const sav = createAccount(db, { name: 'Savings', kind: 'savings' }).id
+    const cat = (name: string) => (db.prepare('SELECT id FROM categories WHERE name = ?').get(name) as { id: number }).id
+    let n = 0
+    const tx = (acct: number, on: string, cents: number, category: string | null) =>
+      db
+        .prepare('INSERT INTO transactions (account_id, posted_on, amount_cents, description, category_id, dedupe_hash) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(acct, on, cents, 'X', category && cat(category), `h${n++}`)
+    tx(chk, '2026-04-01', 1_000_000, 'Salary')
+    tx(chk, '2026-04-10', -300_000, 'Groceries')
+    tx(chk, '2026-04-15', -500_000, 'Taxes') // the IRS
+    tx(chk, '2026-04-20', 20_000, 'Taxes') // a state refund nets against it
+    tx(chk, '2026-04-21', -100_000, 'Transfer') // checking → savings: inside the ledger
+    tx(sav, '2026-04-22', 100_000, 'Transfer')
+    tx(chk, '2026-04-25', -250_000, 'Transfer') // to a brokerage: leaves the ledger
+    tx(chk, '2026-04-28', 40_000, 'Transfer') // a stock sale lands
+    tx(chk, '2026-06-03', -60_000, 'Transfer') // a month with nothing but a transfer out
+    tx(chk, '2026-07-01', 1_000_000, 'Salary')
+    return db
+  }
+
+  it('sets tax payments apart within spending, and nets transfers to what left the bank accounts', () => {
+    const [apr, may, jun, jul] = cashflowMonthly(ledger())
+    expect(apr).toEqual({ month: '2026-04', income_cents: 1_000_000, spend_cents: 780_000, tax_cents: 480_000, moved_cents: 210_000 })
+    expect(may).toEqual({ month: '2026-05', income_cents: 0, spend_cents: 0, tax_cents: 0, moved_cents: 0 })
+    expect(jun!.moved_cents).toBe(60_000)
+    expect(jul).toMatchObject({ income_cents: 1_000_000, moved_cents: 0 })
+  })
+
+  it('leaves the months themselves as they were: a month of only transfers is not a month of spending', () => {
+    expect(cashflowByMonth(ledger()).map((m) => m.month)).toEqual(['2026-04', '2026-07'])
   })
 })

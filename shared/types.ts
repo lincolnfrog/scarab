@@ -20,7 +20,12 @@ export type Tx = {
   categorized_by: string | null
 }
 
-export type MonthlyFlow = { month: string; income_cents: number; spend_cents: number }
+/**
+ * One month of GET /api/cashflow/monthly. tax_cents is the part of spend_cents
+ * filed under Taxes; moved_cents is money moved out of the bank and card
+ * accounts to accounts outside them (net; negative when more came in).
+ */
+export type MonthlyFlow = { month: string; income_cents: number; spend_cents: number; tax_cents: number; moved_cents: number }
 export type CategorySpend = { category_id: number | null; name: string; spend_cents: number }
 export type BudgetRow = {
   category_id: number | null

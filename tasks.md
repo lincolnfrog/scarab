@@ -758,6 +758,17 @@ statements).
       `nw:liabilities` is labelled "Loans". The digest names card balances as
       a driver; Checkup's runway subtracts them; Future starts from cash net
       of them.
+- [x] **Where the rest of the money went** (2026-10-02). Cash & budget's
+      income-vs-spending is paychecks against spending, so a household whose
+      stock and crypto sales land as transfers — and whose tax bills on them
+      land as spending — looks like it spends what it makes. `MonthlyFlow`
+      gains `tax_cents` (spending filed under the built-in Taxes category) and
+      `moved_cents` (transfers out of the bank and card accounts net of
+      transfers in: in-ledger moves cancel, so it is what went to or came from
+      investments, crypto, people). The spending bar shows tax payments as a
+      lighter top with "Net before tax payments" in its tooltip; the Savings
+      card adds "Kept before tax payments", "Moved to investments & other
+      accounts" and a line over the months on screen.
 - [ ] **Loans not tied to a house** — car, student, personal, HELOC, a
       401(k) loan. A liability with no property, entered from statements like
       a mortgage: `liabilities.property_id` is already nullable and net worth

@@ -58,10 +58,14 @@ export function GroupedBars({
   onSelect,
   selectHint = { idle: 'Click to select', on: 'Selected' },
   ariaLabel,
+  part,
 }: {
-  data: { label: string; a: number; b: number }[]
+  /** bPart: how much of b is `part` (0 ≤ bPart ≤ b) — drawn as the top of b's bar in part.color. */
+  data: { label: string; a: number; b: number; bPart?: number }[]
   names: [string, string]
   colors: [string, string]
+  /** A named share of the second bar (Cash: the tax payments within spending). */
+  part?: { name: string; color: string; netName: string }
   /** The tooltip's title for group i (defaults to its axis label). */
   tipLabel?: (i: number) => string
   /** The group the rest of the screen is showing (Cash's month): a gold-dim column wash. */
@@ -76,12 +80,14 @@ export function GroupedBars({
   const n = data.length
   const sel = selected !== null && selected >= 0 && selected < n ? selected : null
   const title = (i: number) => (tipLabel ? tipLabel(i) : (data[i]?.label ?? ''))
+  const partOf = (d: { b: number; bPart?: number }) => (part && d.bPart && d.bPart > 0 && d.b > 0 ? Math.min(d.bPart, d.b) : 0)
   const nav = useBarNav({
     n,
     start: () => sel ?? n - 1,
     describe: (i) => {
       const d = data[i]!
-      return `${title(i)}: ${names[0]} ${formatCents(d.a)}, ${names[1]} ${formatCents(d.b)}${sel === i ? ', selected' : ''}`
+      const p = partOf(d)
+      return `${title(i)}: ${names[0]} ${formatCents(d.a)}, ${names[1]} ${formatCents(d.b)}${p ? ` (${part!.name} ${formatCents(p)})` : ''}${sel === i ? ', selected' : ''}`
     },
     onActivate: onSelect,
   })
@@ -147,6 +153,19 @@ export function GroupedBars({
                 {hover === i && <rect className="ch-wash" x={padL + gw * i + 2} y={padT} width={gw - 4} height={H - padT - padB} rx={4} fill={WASH} />}
                 {bar(cx - bw - 1, d.a, colors[0], i)}
                 {bar(cx + 1, d.b, colors[1], i)}
+                {partOf(d) > 0 && (
+                  // The share sits on top of the bar it belongs to, in its own shade.
+                  <rect
+                    className="ch-bar-v"
+                    style={growStyle(i)}
+                    x={cx + 1}
+                    y={y(d.b)}
+                    width={bw}
+                    height={Math.max(0, y(d.b - partOf(d)) - y(d.b))}
+                    rx={3}
+                    fill={part!.color}
+                  />
+                )}
                 {labelled.has(i) && (
                   <text x={cx} y={H - 7} textAnchor="middle" fill={sel === i ? 'var(--ink)' : ink3} fontWeight={sel === i ? 600 : undefined} fontSize={AXIS_FONT}>
                     {d.label}
@@ -173,7 +192,15 @@ export function GroupedBars({
             <div className="t">{title(hover)}</div>
             <TipRow color={colors[0]} name={names[0]} value={formatCents(h.a)} />
             <TipRow color={colors[1]} name={names[1]} value={formatCents(h.b)} />
+            {partOf(h) > 0 && <TipRow color={part!.color} name={`… ${part!.name}`} value={formatCents(partOf(h))} />}
             <TipRow name="Net" value={formatCents(h.a - h.b, { sign: true })} valueColor={h.a - h.b >= 0 ? UP_VAR : DOWN_VAR} />
+            {partOf(h) > 0 && (
+              <TipRow
+                name={part!.netName}
+                value={formatCents(h.a - h.b + partOf(h), { sign: true })}
+                valueColor={h.a - h.b + partOf(h) >= 0 ? UP_VAR : DOWN_VAR}
+              />
+            )}
             {onSelect && <div className="ch-note">{sel === hover ? selectHint.on : selectHint.idle}</div>}
           </>
         )}

@@ -425,10 +425,10 @@ describe('cashflowMonthly', () => {
   it('fills empty months with zero so the bars keep calendar spacing', () => {
     const db = seeded()
     expect(cashflowMonthly(db)).toEqual<MonthlyFlow[]>([
-      { month: '2026-05', income_cents: 800_000, spend_cents: 12_000 },
-      { month: '2026-06', income_cents: 0, spend_cents: 0 },
-      { month: '2026-07', income_cents: 0, spend_cents: 0 },
-      { month: '2026-08', income_cents: 802_500, spend_cents: 26_800 }, // $150 groceries + $41 dining + $77 uncategorized
+      { month: '2026-05', income_cents: 800_000, spend_cents: 12_000, tax_cents: 0, moved_cents: 0 },
+      { month: '2026-06', income_cents: 0, spend_cents: 0, tax_cents: 0, moved_cents: 0 },
+      { month: '2026-07', income_cents: 0, spend_cents: 0, tax_cents: 0, moved_cents: 0 },
+      { month: '2026-08', income_cents: 802_500, spend_cents: 26_800, tax_cents: 0, moved_cents: 0 }, // $150 groceries + $41 dining + $77 uncategorized
     ])
   })
 
@@ -441,7 +441,7 @@ describe('cashflowMonthly', () => {
     db.prepare("INSERT INTO transactions (account_id, posted_on, amount_cents, description, dedupe_hash) VALUES (1, '2024-11-30', -100, 'OLD', 'old')").run()
     const twelve = cashflowMonthly(db)
     expect(twelve.map((m) => m.month)).toEqual(monthsBetween('2025-09', '2026-08'))
-    expect(cashflowMonthly(db, { months: 24 })[0]).toEqual({ month: '2024-11', income_cents: 0, spend_cents: 100 })
+    expect(cashflowMonthly(db, { months: 24 })[0]).toEqual({ month: '2024-11', income_cents: 0, spend_cents: 100, tax_cents: 0, moved_cents: 0 })
   })
 
   it('an empty ledger is no months; transfers alone are not a month', () => {

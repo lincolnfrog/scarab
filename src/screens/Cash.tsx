@@ -496,6 +496,17 @@ export default function Cash() {
   const spendTotal = budget.filter((b) => b.kind === 'expense').reduce((s, b) => s + b.actual_cents, 0)
   const savings = incomeTotal - spendTotal
   const savingsRate = incomeTotal > 0 ? Math.round((savings / incomeTotal) * 100) : null // a display percentage
+  // The rest of the month's story, from the same ledger: tax payments within spending, and money moved out to
+  // accounts the ledger doesn't hold (investments, crypto, people) — and the same over the months on screen.
+  // A month linked to from outside the twelve loaded has no flow row: its tax comes from the budget's Taxes
+  // row (the same definition), and what moved goes unsaid.
+  const flow = monthly.find((m) => m.month === month)
+  const taxCents = flow ? flow.tax_cents : (budget.find((b) => b.kind === 'expense' && b.name === 'Taxes')?.actual_cents ?? 0)
+  const movedCents = flow?.moved_cents ?? 0
+  const span = monthly.reduce(
+    (t, m) => ({ kept: t.kept + m.income_cents - m.spend_cents, tax: t.tax + m.tax_cents, moved: t.moved + m.moved_cents }),
+    { kept: 0, tax: 0, moved: 0 },
+  )
 
   const months = monthly.map((m) => m.month)
   const hasData = monthly.length > 0
@@ -717,6 +728,40 @@ export default function Cash() {
             <div className="sub2">
               of income kept · <b className="inkstrong">{formatCents(savings, { sign: savings > 0 })}</b>
             </div>
+            {(taxCents > 0 || movedCents !== 0) && (
+              <dl className="scr-flowlist topline">
+                {taxCents > 0 && (
+                  <>
+                    <dt>Tax payments, in spending</dt>
+                    <dd>{formatCents(taxCents)}</dd>
+                    <dt>Kept before tax payments</dt>
+                    <dd>{formatCents(savings + taxCents, { sign: savings + taxCents > 0 })}</dd>
+                  </>
+                )}
+                {movedCents !== 0 && (
+                  <>
+                    <dt>
+                      <Tooltip content="Transfers out of your bank and card accounts, less transfers in. Moves between two of them cancel out, so this is what went to — or came from — accounts outside them: investments, crypto, other people.">
+                        <span className="scr-tipped">{movedCents > 0 ? 'Moved to investments & other accounts' : 'Came in from investments & other accounts'}</span>
+                      </Tooltip>
+                    </dt>
+                    <dd>{formatCents(Math.abs(movedCents))}</dd>
+                  </>
+                )}
+              </dl>
+            )}
+            {monthly.length > 1 && (span.tax > 0 || span.moved !== 0) && (
+              <div className="sub2 topline">
+                Last {monthly.length} months: kept {fmtShort(span.kept)}
+                {span.tax > 0 && <> after {fmtShort(span.tax)} of tax payments</>}
+                {span.moved !== 0 && (
+                  <>
+                    {' '}· {fmtShort(Math.abs(span.moved))} {span.moved > 0 ? 'moved to' : 'came in from'} investments &amp; other accounts
+                  </>
+                )}
+                .
+              </div>
+            )}
             <div className="sub2 topline">
               Income {fmtShort(incomeTotal)} − spending {fmtShort(spendTotal)}. Refunds lower their category's
               spending; transfers between your own accounts are excluded.

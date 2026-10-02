@@ -389,19 +389,48 @@ const flowSpend = (f: CategoryFlow) => (f.kind === 'expense' ? Math.max(0, -f.ne
 
 /**
  * Income and spending for every month that has a non-transfer transaction,
- * oldest first (months with none are absent — cashflowMonthly fills them).
- * Exported so other monthly cash-flow views can share the definition above.
+ * oldest first (months with none are absent — cashflowMonthly fills them). Exported so
+ * other monthly cash-flow views can share the definition above. Two more
+ * figures ride along:
+ *   - tax_cents: the part of spending filed under the built-in Taxes
+ *     category. A tax bill is real spending, but it follows income from a
+ *     sale or a vest that the bank ledger only sees as a transfer, so the
+ *     screen sets it apart from day-to-day spending.
+ *   - moved_cents: transfers out of the bank and card accounts, net of
+ *     transfers in. A transfer between two of them nets to zero, so what's
+ *     left is money that went to (positive) or came from (negative) accounts
+ *     outside the ledger — investment and crypto accounts, other people.
+ *     Neither income nor spending; it is where the rest of the money went.
+ *     The two halves of an in-ledger transfer posting either side of a month
+ *     end leave a little in each month.
  */
 export function cashflowByMonth(db: DbLike): MonthlyFlow[] {
   const out = new Map<string, MonthlyFlow>()
+  const moved = movedByMonth(db)
   for (const f of categoryFlows(db)) {
-    const m = out.get(f.month) ?? { month: f.month, income_cents: 0, spend_cents: 0 }
+    let m = out.get(f.month)
+    if (!m) out.set(f.month, (m = { month: f.month, income_cents: 0, spend_cents: 0, tax_cents: 0, moved_cents: moved.get(f.month) ?? 0 }))
     m.income_cents += flowIncome(f)
     m.spend_cents += flowSpend(f)
-    out.set(f.month, m)
+    if (f.kind === 'expense' && f.name === TAXES_CATEGORY) m.tax_cents += flowSpend(f)
   }
   return [...out.values()]
 }
+
+/** moved_cents for every month with a transfer (see cashflowByMonth). */
+function movedByMonth(db: DbLike): Map<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT substr(t.posted_on, 1, 7) AS month, -SUM(t.amount_cents) AS cents
+       FROM transactions t JOIN categories cat ON cat.id = t.category_id
+       WHERE cat.kind = 'transfer' GROUP BY month`,
+    )
+    .all() as { month: string; cents: number }[]
+  return new Map(rows.map((r) => [r.month, r.cents]))
+}
+
+/** The built-in category tax payments are filed under (migration 7), by name as the engine knows its seeded categories. */
+export const TAXES_CATEGORY = 'Taxes'
 
 export const CASHFLOW_MONTHS_DEFAULT = 12
 export const CASHFLOW_MONTHS_MAX = 120
@@ -420,8 +449,9 @@ export function cashflowMonthly(db: DbLike, o: { months?: string | number | null
   const first = flows[0]!.month
   const start = addMonthsToMonth(last, 1 - n)
   const byMonth = new Map(flows.map((f) => [f.month, f]))
+  const moved = movedByMonth(db) // a month with nothing but transfers still moved money
   return monthsBetween(start > first ? start : first, last).map(
-    (month) => byMonth.get(month) ?? { month, income_cents: 0, spend_cents: 0 },
+    (month) => byMonth.get(month) ?? { month, income_cents: 0, spend_cents: 0, tax_cents: 0, moved_cents: moved.get(month) ?? 0 },
   )
 }
 
