@@ -37,6 +37,8 @@ export type TradeSheetProps = {
   onRecorded: () => void
   /** "Already hold shares here?" — hands off to the starting-positions sheet. */
   onPasteOpening?: (accountId: number) => void
+  /** "Sold shares Scarab never tracked?" — hands off to the past-sales sheet. */
+  onPasteSales?: (accountId: number) => void
 }
 
 // The account the last trade went to, per data universe (household, or one tab session).
@@ -91,7 +93,7 @@ function initialForm(p: TradeSheetProps): TradeForm {
 
 export type PreviewState = { state: 'idle' } | { state: 'loading'; last: TradePreview | null } | { state: 'ok'; preview: TradePreview } | { state: 'error'; message: string }
 
-function Sheet({ accounts, positions, today, onClose, onRecorded, onPasteOpening, ...p }: TradeSheetProps) {
+function Sheet({ accounts, positions, today, onClose, onRecorded, onPasteOpening, onPasteSales, ...p }: TradeSheetProps) {
   const [form, setForm] = useState<TradeForm>(() => initialForm({ accounts, positions, today, onClose, onRecorded, ...p }))
   const [tried, setTried] = useState(false)
   const [preview, setPreview] = useState<PreviewState>({ state: 'idle' })
@@ -223,12 +225,21 @@ function Sheet({ accounts, positions, today, onClose, onRecorded, onPasteOpening
       subtitle={account ? `${account.name} · ${account.kind === 'retirement' ? 'tax-advantaged' : account.kind === 'crypto' ? 'crypto' : 'taxable'}` : undefined}
       footer={
         <>
-          {onPasteOpening && (
+          {/* Selling: shares sold before Scarab tracked them go in as past sales; buying: lots already held. */}
+          {form.side === 'sell' && onPasteSales ? (
             <span className="ui-foot-start">
-              <button type="button" className="inv-linkbtn" onClick={() => onPasteOpening(form.accountId)}>
-                Already hold shares? Paste starting positions
+              <button type="button" className="inv-linkbtn" onClick={() => onPasteSales(form.accountId)}>
+                Sold shares Scarab never tracked? Paste past sales
               </button>
             </span>
+          ) : (
+            onPasteOpening && (
+              <span className="ui-foot-start">
+                <button type="button" className="inv-linkbtn" onClick={() => onPasteOpening(form.accountId)}>
+                  Already hold shares? Paste starting positions
+                </button>
+              </span>
+            )
           )}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           {/* One line: in a 600px sheet the link beside it wraps instead. */}

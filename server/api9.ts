@@ -3,6 +3,7 @@ import { getAllocation, putAccountClass, putAssetClass, putTarget } from '../eng
 import type { DbLike } from '../engine/db'
 import {
   createOpeningPositions,
+  createPastSales,
   deleteBalanceSnapshot,
   deleteTrade,
   getCheckin,
@@ -60,6 +61,12 @@ api9.delete('/invest/accounts/:id/realized/:year', (c) =>
 api9.post('/trades/opening', async (c) => {
   const b = await c.req.json()
   return handle(c, () => createOpeningPositions(db, b, today()))
+})
+
+// Past sales: shares sold before Scarab tracked them, each with its lot's basis — all or none.
+api9.post('/trades/sales', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => createPastSales(db, b, today()))
 })
 
 // What recording a trade would do — realized gain, estimated tax, wash-sale

@@ -57,6 +57,8 @@ export type AccountDrawerProps = {
   onChanged: () => void
   onRecordTrade: (accountId: number, lot?: PortfolioLot) => void
   onPasteOpening: (accountId: number) => void
+  /** Shares sold before Scarab tracked them, each with its lot's basis. */
+  onPasteSales: (accountId: number) => void
   onDeleted: (r: AccountDeleted) => void
 }
 
@@ -164,6 +166,11 @@ export default function AccountDrawer(p: AccountDrawerProps) {
             <Tooltip content="Lots already held, each booked on the day it was acquired">
               <Button size="mini" onClick={() => p.onPasteOpening(a.id)}>
                 Paste starting positions
+              </Button>
+            </Tooltip>
+            <Tooltip content="Shares sold before Scarab tracked them, each with the lot it came from — the gain is realized, holdings stay as they are">
+              <Button size="mini" onClick={() => p.onPasteSales(a.id)}>
+                Paste past sales
               </Button>
             </Tooltip>
             <Button size="mini" variant="gold" onClick={() => p.onRecordTrade(a.id)}>

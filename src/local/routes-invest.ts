@@ -2,6 +2,7 @@ import { getAllocation, putAccountClass, putAssetClass, putTarget } from '../../
 import {
   createInvestAccount,
   createOpeningPositions,
+  createPastSales,
   createTrade,
   deleteBalanceSnapshot,
   deleteInvestAccount,
@@ -54,6 +55,7 @@ export const INVEST: LocalRoute[] = [
 
   r('POST', '/trades', (c) => createTrade(c.db, c.body, c.today)),
   r('POST', '/trades/opening', (c) => createOpeningPositions(c.db, c.body, c.today)),
+  r('POST', '/trades/sales', (c) => createPastSales(c.db, c.body, c.today)),
   r('GET', '/trades', (c) =>
     listTrades(c.db, { accountId: c.query.get('accountId'), symbol: c.query.get('symbol'), year: c.query.get('year') }),
   ),

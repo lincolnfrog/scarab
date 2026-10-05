@@ -121,7 +121,8 @@ function splitQuoted(line: string, d: string): string[] {
   return out
 }
 
-function splitLine(line: string, d: Delimiter): string[] {
+/** Split one pasted line into cells on a delimiter. Shared with engine/sales-paste.ts. */
+export function splitLine(line: string, d: Delimiter): string[] {
   if (d === 'tab') return splitQuoted(line, '\t')
   if (d === 'comma') return splitQuoted(line, ',')
   if (d === 'semicolon') return splitQuoted(line, ';')
@@ -132,7 +133,7 @@ function splitLine(line: string, d: Delimiter): string[] {
 }
 
 const SYMBOLISH = /^[A-Za-z][A-Za-z0-9.\-/]{0,14}$/
-const isSymbolish = (s: string) => SYMBOLISH.test(s.trim())
+export const isSymbolish = (s: string) => SYMBOLISH.test(s.trim())
 const qtyOf = (s: string): number | null => {
   try {
     return parseQtyMicro(s.replace(/\s/g, ''))

@@ -18,6 +18,7 @@ import HoldingDrawer from '../invest/HoldingDrawer'
 import HoldingsCard from '../invest/HoldingsCard'
 import InvestSummary from '../invest/InvestSummary'
 import OpeningPositionsSheet from '../invest/OpeningPositionsSheet'
+import PastSalesSheet from '../invest/PastSalesSheet'
 import { HOUSEHOLD, inScope, ownerGroups, scopePortfolio, scopeWords, type OwnerKey } from '../invest/ownerFilter'
 import OwnerPills from '../invest/OwnerPills'
 import { failedSymbols, priceClock, priceStale, refreshMemory, shouldRefresh } from '../invest/priceRefresh'
@@ -89,6 +90,7 @@ export default function Invest() {
   const allocationAnchor = useAnchor('allocation')
   // The starting-positions sheet, and the account it opens on.
   const [opening, setOpening] = useState<{ accountId: number | null } | null>(null)
+  const [pastSales, setPastSales] = useState<{ accountId: number | null } | null>(null)
   const [taxMarginal, setTaxMarginal] = useState<Marginal | null>(null)
   const [taxCarryIn, setTaxCarryIn] = useState<{ stCents: number; ltCents: number } | null>(null)
   // Return by holding and the sparklines' closes: the Holdings table's extra columns, which it can draw without.
@@ -504,6 +506,7 @@ export default function Invest() {
         onChanged={reloadAndPrice}
         onRecordTrade={(accountId, lot) => (lot ? sellLot(lot, 'account') : openTrade({ accountId, over: 'account' }))}
         onPasteOpening={(accountId) => openOpening(accountId)}
+        onPasteSales={(accountId) => setPastSales({ accountId })}
         onDeleted={() => {
           setParams(CLOSED)
           // Its tile (where focus would return) is gone: once the list reloads, land on the strip instead of the page.
@@ -523,6 +526,10 @@ export default function Invest() {
         onPasteOpening={(id) => {
           closeTrade()
           openOpening(id)
+        }}
+        onPasteSales={(id) => {
+          closeTrade()
+          setPastSales({ accountId: id })
         }}
       />
 
@@ -546,6 +553,14 @@ export default function Invest() {
         onClose={closeCheckin}
         onSaved={reload}
         onAddAccount={openAdd}
+      />
+
+      <PastSalesSheet
+        open={pastSales !== null}
+        accounts={lotAccounts}
+        initialAccountId={pastSales?.accountId ?? null}
+        onClose={() => setPastSales(null)}
+        onDone={reload}
       />
 
       <OpeningPositionsSheet

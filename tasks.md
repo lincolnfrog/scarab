@@ -781,6 +781,22 @@ statements).
       only), and Future's `liabilitiesCents` is described as mortgages.
       Deferred: the household has no such loan (2026-10-01).
 
+## Past sales, pasted (2026-10-02)
+
+- [x] **Paste past sales** — shares sold before Scarab tracked them, each
+      with its lot: `symbol, shares, cost basis, acquired, sale amount, sold`
+      (a realized gain/loss page's columns; a header may reorder them).
+      Cost basis and sale amount are each a total or per share (a toggle the
+      sheet remembers per viewer); extra decimals are kept until the one
+      rounding to cents. Every row is an explicit-basis sale
+      (`createPastSales`, `POST /api/trades/sales`, all or none): the gain
+      realizes with the lot's acquisition date setting the term, and the
+      holdings are untouched. A dry run previews the engine's errors and
+      warnings as you type — a lot of that symbol acquired that day already
+      on the books (sell that lot instead), or a sale already recorded.
+      Opened from the account drawer beside "Paste starting positions", and
+      from Record trade when Sell is chosen.
+
 ## Backlog: smaller, high leverage
 
 - [x] Performance attribution on Invest — shipped 2026-09-23 (above): a

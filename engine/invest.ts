@@ -17,6 +17,7 @@ import {
   type InvestKind,
   type InvestSubtype,
   type OpeningPositionsResult,
+  type PastSalesResult,
   type PortfolioAccount,
   type PortfolioPosition,
   type PortfolioResponse,
@@ -710,6 +711,81 @@ export function createOpeningPositions(
       return Number(insert.run(account!.id, asset.id, v.acquiredOn ?? asOf, v.qtyMicro, v.basisCents, v.acquiredOn, OPENING_NOTE).lastInsertRowid)
     }),
   )()
+  return { created: tradeIds.length, tradeIds, errors: [], warnings }
+}
+
+/**
+ * Past sales, pasted (engine/sales-paste.ts): shares sold before Scarab
+ * tracked them, each with the lot it came from. Every row is a sale with an
+ * explicit basis — the gain realizes on the sale date with the lot's
+ * acquisition date setting its term, and the account's holdings are left as
+ * they are. Each row meets validateTrade, as a sale recorded by hand does;
+ * all rows or none. Warnings, which don't block: a lot of that symbol
+ * acquired that day is already on the books here (selling it as untracked
+ * would count the gain while the lot stays held), and a sale that looks
+ * recorded already (a report pasted twice). With `dryRun` it only checks:
+ * the same errors and warnings, nothing written (the sheet previews with it).
+ */
+export function createPastSales(
+  db: DbLike,
+  b: {
+    dryRun?: boolean
+    investAccountId?: number
+    rows?: { symbol?: unknown; qty?: unknown; basisCents?: unknown; acquiredOn?: unknown; proceedsCents?: unknown; soldOn?: unknown }[]
+  },
+  today: string,
+): PastSalesResult {
+  if (!b.investAccountId || !Array.isArray(b.rows)) bad('investAccountId and rows[] required')
+  if (b.rows!.length === 0) bad('no rows — paste at least one sale')
+  if (b.rows!.length > MAX_OPENING_ROWS) bad(`at most ${MAX_OPENING_ROWS} rows at once`)
+  const account = db.prepare("SELECT id, name, kind FROM invest_accounts WHERE id = ? AND tracking = 'lots'").get(b.investAccountId) as
+    | { id: number; name: string; kind: InvestKind }
+    | undefined
+  if (!account) notFound('no such lots-tracked investment account')
+
+  const lotOnBooks = db.prepare(
+    `SELECT 1 FROM trades t JOIN assets a ON a.id = t.asset_id
+     WHERE t.invest_account_id = ? AND a.symbol = ? AND t.side = 'buy' AND COALESCE(t.acquired_on, t.traded_on) = ? AND t.traded_on <= ?`,
+  )
+  const recorded = db.prepare(
+    `SELECT 1 FROM trades t JOIN assets a ON a.id = t.asset_id
+     WHERE t.invest_account_id = ? AND a.symbol = ? AND t.side = 'sell' AND t.traded_on = ? AND t.qty_micro = ?
+       AND t.total_cents = ? AND t.acquired_on = ?`,
+  )
+  const errors: PastSalesResult['errors'] = []
+  const warnings: PastSalesResult['warnings'] = []
+  const bodies: Partial<Record<keyof TradeBody, unknown>>[] = []
+  b.rows!.forEach((r, row) => {
+    const typed = typeof r?.symbol === 'string' ? r.symbol.trim().toUpperCase() : ''
+    const existing = typed ? findAsset(db, typed) : undefined
+    const body: Partial<Record<keyof TradeBody, unknown>> = {
+      investAccountId: account!.id,
+      symbol: typed,
+      // A symbol new to Scarab takes the account's kind, as a starting position does.
+      assetKind: existing?.kind ?? (account!.kind === 'crypto' ? 'crypto' : 'stock'),
+      side: 'sell',
+      tradedOn: r?.soldOn,
+      qty: r?.qty,
+      totalCents: r?.proceedsCents,
+      acquiredOn: r?.acquiredOn,
+      basisCents: r?.basisCents,
+    }
+    try {
+      const v = validateTrade(db, body, today)
+      if (lotOnBooks.get(account!.id, v.symbol, v.acquiredOn, v.tradedOn))
+        warnings.push({
+          row,
+          message: `a ${v.symbol} lot acquired ${v.acquiredOn} is already in ${account!.name} — sell that lot instead (Record trade → Sell → choose the lot), or the gain counts while the lot stays held`,
+        })
+      if (recorded.get(account!.id, v.symbol, v.tradedOn, v.qtyMicro, v.totalCents, v.acquiredOn))
+        warnings.push({ row, message: `looks recorded already: ${account!.name} has this very sale on ${v.tradedOn}` })
+      bodies.push(body)
+    } catch (e) {
+      errors.push({ row, message: e instanceof Error ? e.message : String(e) })
+    }
+  })
+  if (errors.length > 0 || b.dryRun === true) return { created: 0, tradeIds: [], errors, warnings }
+  const tradeIds = db.transaction(() => bodies.map((body) => createTrade(db, body, today).id))()
   return { created: tradeIds.length, tradeIds, errors: [], warnings }
 }
 

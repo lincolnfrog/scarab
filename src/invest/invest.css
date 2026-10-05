@@ -687,3 +687,8 @@
 .inv-hd-h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .inv-paneltools .inv-hd-h3 { margin: 0; }
 .inv-hd-section .inv-paneltools { margin-bottom: 8px; }
+
+/* ---------- past sales: a sale's notes on their own line beneath it ---------- */
+.inv-preview tr.inv-hasnote td { border-bottom: 0; }
+.inv-preview tr.inv-noterow td { padding-top: 0; }
+.inv-preview tr.inv-noterow .inv-notes { min-width: 0; white-space: normal; }

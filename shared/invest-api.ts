@@ -449,6 +449,16 @@ export type OpeningPositionsResult = {
   warnings: { row: number; message: string }[]
 }
 
+/* ---------- past sales ---------- */
+
+/** One sale of shares Scarab never tracked, with the lot it came from. `qty` is text, as for trades. */
+export type PastSaleRow = { symbol: string; qty: string; basisCents: number; acquiredOn: string; proceedsCents: number; soldOn: string }
+// POST /api/trades/sales
+/** dryRun: check every row — the same errors and warnings — and write nothing. */
+export type PastSalesBody = { investAccountId: number; rows: PastSaleRow[]; dryRun?: boolean }
+/** All rows or none: any error means nothing was written. `row` indexes the request's rows. */
+export type PastSalesResult = OpeningPositionsResult
+
 /* ---------- prices ---------- */
 
 // POST /api/prices/manual — a price typed in by hand (mutual funds, CITs, private stock)
