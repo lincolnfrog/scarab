@@ -20,6 +20,20 @@ export type VestForm = {
   priceCents: number | null
   totalCents: number | null
   withheldMicro: number | null
+  /**
+   * How the withholding is given: the shares withheld (the default), or the
+   * shares received — what a portal's release shows — so withheld is gross
+   * less received.
+   */
+  withholdBy?: 'withheld' | 'received'
+  receivedMicro?: number | null
+}
+
+/** The shares withheld the form stands for: typed, or gross less received; null until it can be worked out. */
+export function withheldOf(f: Pick<VestForm, 'grossMicro' | 'withheldMicro' | 'withholdBy' | 'receivedMicro'>): number | null {
+  if (f.withholdBy !== 'received') return f.withheldMicro ?? 0
+  if (f.receivedMicro == null || f.grossMicro === null) return null
+  return f.grossMicro - f.receivedMicro
 }
 
 export type VestPlan = {
@@ -57,9 +71,10 @@ export function vestTotalCents(f: Pick<VestForm, 'grossMicro' | 'mode' | 'priceC
 export function vestPlan(f: VestForm, today: string): { plan: VestPlan } | { error: string | null } {
   if (f.date && f.date > today) return { error: 'A vest is recorded once it has happened — pick today or earlier.' }
   if (f.grossMicro !== null && f.grossMicro <= 0) return { error: 'The shares vested must be more than 0.' }
-  const withheld = f.withheldMicro ?? 0
-  if (f.grossMicro !== null && withheld > f.grossMicro) return { error: 'More shares withheld than vested — check the release.' }
-  if (!f.date || f.grossMicro === null) return { error: null }
+  const withheld = withheldOf(f)
+  if (withheld !== null && withheld < 0) return { error: 'More shares received than vested — check the release.' }
+  if (f.grossMicro !== null && withheld !== null && withheld > f.grossMicro) return { error: 'More shares withheld than vested — check the release.' }
+  if (!f.date || f.grossMicro === null || withheld === null) return { error: null }
   const total = vestTotalCents(f)
   if (total === null) return { error: null }
   if (total <= 0) return { error: 'The value at vest must be more than $0.' }

@@ -10,8 +10,25 @@ import { useAction } from '../ui/useAction'
 import { shortDay } from './balanceMath'
 import { unparsedField } from './formGuard'
 import { loadMarketSymbols, stockQuote } from './marketSymbols'
-import { vestBody, vestDateDefault, vestPlan, fmvPrefill, type Quote, type VestForm, type VestPlan } from './vestMath'
+import { vestBody, vestDateDefault, vestPlan, fmvPrefill, withheldOf, type Quote, type VestForm, type VestPlan } from './vestMath'
 import './invest.css'
+
+// Which withholding figure the last vest was entered with, per viewer: a portal shows the same one every time.
+const WITHHOLD_KEY = 'scarab:vest-withhold-by'
+function readWithholdBy(): 'withheld' | 'received' {
+  try {
+    return localStorage.getItem(WITHHOLD_KEY) === 'received' ? 'received' : 'withheld'
+  } catch {
+    return 'withheld'
+  }
+}
+function writeWithholdBy(v: 'withheld' | 'received') {
+  try {
+    localStorage.setItem(WITHHOLD_KEY, v)
+  } catch {
+    /* not remembered: fine */
+  }
+}
 
 /**
  * Record a vest from the release confirmation: the date, the gross shares,
@@ -40,6 +57,8 @@ export default function VestDialog({ open, grant, today, onClose, onDone }: {
     priceCents: null,
     totalCents: null,
     withheldMicro: null,
+    withholdBy: readWithholdBy(),
+    receivedMicro: null,
   }))
   const set = (patch: Partial<VestForm>) => setF((cur) => ({ ...cur, ...patch }))
   const [basket, setBasket] = useState<Quote | null>(null)
@@ -160,14 +179,46 @@ export default function VestDialog({ open, grant, today, onClose, onDone }: {
           )}
         </div>
 
-        <Field
-          label="Shares withheld for taxes"
-          hint="Net settlement: shares your employer kept to pay the withholding. Blank if you paid in cash, or they sold to cover — record that sale on its own."
-        >
-          <span className="inv-qtybox">
-            <QtyInput valueMicro={f.withheldMicro} placeholder="0" onChange={(withheldMicro) => set({ withheldMicro })} />
-          </span>
-        </Field>
+        <div className="inv-amounts">
+          <div className="ui-field">
+            <span className="ui-field-label">Tax withholding</span>
+            <Segmented
+              aria-label="Enter the shares withheld or the shares received"
+              value={f.withholdBy ?? 'withheld'}
+              options={[{ value: 'withheld', label: 'Shares withheld' }, { value: 'received', label: 'Shares received' }]}
+              onChange={(withholdBy) => {
+                writeWithholdBy(withholdBy)
+                // Carry what's known across: switching shouldn't lose a figure already worked out.
+                const w = withheldOf(f)
+                set(
+                  withholdBy === 'received'
+                    ? { withholdBy, receivedMicro: f.receivedMicro ?? (w !== null && f.grossMicro !== null && w > 0 ? f.grossMicro - w : null) }
+                    : { withholdBy, withheldMicro: w !== null && w >= 0 ? w || null : f.withheldMicro },
+                )
+              }}
+            />
+          </div>
+          {f.withholdBy === 'received' ? (
+            <Field
+              label="Shares received"
+              hint="Net: what landed in the account after the shares withheld for tax — the portal’s “shares released” or “net shares”."
+              error={missing(f.receivedMicro ?? null)}
+            >
+              <span className="inv-qtybox">
+                <QtyInput valueMicro={f.receivedMicro ?? null} onChange={(receivedMicro) => set({ receivedMicro })} />
+              </span>
+            </Field>
+          ) : (
+            <Field
+              label="Shares withheld for taxes"
+              hint="Net settlement: shares your employer kept to pay the withholding. Blank if you paid in cash, or they sold to cover — record that sale on its own."
+            >
+              <span className="inv-qtybox">
+                <QtyInput valueMicro={f.withheldMicro} placeholder="0" onChange={(withheldMicro) => set({ withheldMicro })} />
+              </span>
+            </Field>
+          )}
+        </div>
 
         {over > 0 && (
           <label className="checkline inv-check">
@@ -181,14 +232,22 @@ export default function VestDialog({ open, grant, today, onClose, onDone }: {
           </label>
         )}
 
-        <VestSummary plan={plan} complaint={complaint} grant={grant} grossMicro={f.grossMicro} />
+        <VestSummary plan={plan} complaint={complaint} grant={grant} grossMicro={f.grossMicro} waiting={waitingFor(f, plan)} />
       </form>
     </Dialog>
   )
 }
 
+/** What the summary is waiting for, when it is only the shares received (the rest is there). */
+function waitingFor(f: VestForm, plan: VestPlan | null): string | undefined {
+  if (plan || f.withholdBy !== 'received' || f.receivedMicro != null) return undefined
+  return f.grossMicro !== null && (f.mode === 'price' ? f.priceCents !== null : f.totalCents !== null)
+    ? 'Enter the shares received to see what gets recorded.'
+    : undefined
+}
+
 /** What recording it will do, live. Exported for the render test. */
-export function VestSummary({ plan, complaint, grant, grossMicro }: { plan: VestPlan | null; complaint: string | null; grant: UnvestedRow; grossMicro: number | null }) {
+export function VestSummary({ plan, complaint, grant, grossMicro, waiting }: { plan: VestPlan | null; complaint: string | null; grant: UnvestedRow; grossMicro: number | null; waiting?: string }) {
   if (complaint)
     return (
       <section className="inv-preview-pane" aria-live="polite">
@@ -198,7 +257,7 @@ export function VestSummary({ plan, complaint, grant, grossMicro }: { plan: Vest
   if (!plan || grossMicro === null)
     return (
       <section className="inv-preview-pane inv-quietpane" aria-live="polite">
-        <p className="inv-note">Enter the shares vested and their value to see what gets recorded.</p>
+        <p className="inv-note">{waiting ?? 'Enter the shares vested and their value to see what gets recorded.'}</p>
       </section>
     )
   const left = Math.max(0, grant.qty_micro - grossMicro)

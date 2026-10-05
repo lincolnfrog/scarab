@@ -1,5 +1,6 @@
 import { getAllocation, getTarget } from './allocation'
 import type { DbLike } from './db'
+import { getUnvested } from './invest'
 import { netWorthSeries, type NetWorthPoint } from './networth'
 import { detectRecurring, type Recurrence } from './recurring'
 
@@ -60,7 +61,28 @@ export type Digest = {
     bestLoanRateMicro: number
     triggered: boolean // market is ≥ 25bp below your best saved option
   }
+  /**
+   * Scheduled vests whose day has come and that aren't recorded yet — a
+   * to-do rather than news, so listed whatever the digest's window, until
+   * Vest… records them (the schedule then moves on to the next).
+   */
+  vestsDue: { grantId: number; accountId: number; accountName: string; symbol: string; dueOn: string; qtyMicro: number | null }[]
   notable: boolean
+}
+
+/** Grants whose next unrecorded vest (engine/invest.ts getUnvested) is on or before today. */
+export function vestsDue(db: DbLike, today: string): Digest['vestsDue'] {
+  return getUnvested(db)
+    .rows.filter((g) => g.next_vest_on !== null && g.next_vest_on <= today && g.qty_micro > 0)
+    .map((g) => ({
+      grantId: g.id,
+      accountId: g.invest_account_id,
+      accountName: g.account_name,
+      symbol: g.symbol,
+      dueOn: g.next_vest_on!,
+      qtyMicro: g.vest_qty_micro,
+    }))
+    .sort((a, b) => (a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : a.grantId - b.grantId))
 }
 
 function meta(db: DbLike, key: string): string | null {
@@ -195,7 +217,8 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
     } catch { /* stale/garbled cache — omit the section */ }
   }
 
-  const notable = sameDay
+  const due = vestsDue(db, today)
+  const notable = due.length > 0 || (sameDay
     ? newTx.n > 0 || newRecurring.length > 0
     : (netWorth !== null && netWorth.deltaCents !== 0) ||
       newTx.n > 0 ||
@@ -204,7 +227,7 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
       lapsed.length > 0 ||
       allocationDrift.length > 0 ||
       budgetOverruns.length > 0 ||
-      (mortgage?.triggered ?? false)
+      (mortgage?.triggered ?? false))
 
   return {
     since,
@@ -218,6 +241,7 @@ export function getDigest(db: DbLike, email: string, today: string): Digest {
     allocationVsTarget: vsTarget,
     budgetOverruns,
     mortgage,
+    vestsDue: due,
     notable,
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { formatCents, formatDollars } from '../shared/money'
+import { formatCents, formatDollars, formatQtyMicro } from '../shared/money'
 import { get, post } from './api'
 import { DriverBars, type DriverRow } from './chart/DriverBars'
 import { monthLong, shortDay } from './chart/format'
@@ -31,6 +31,7 @@ type Digest = {
   allocationVsTarget?: boolean
   budgetOverruns: { name: string; budgetCents: number; actualCents: number }[]
   mortgage: null | { marketRateMicro: number; marketOn: string; bestLoanName: string; bestLoanRateMicro: number; triggered: boolean }
+  vestsDue?: { grantId: number; accountId: number; accountName: string; symbol: string; dueOn: string; qtyMicro: number | null }[]
   notable: boolean
   errors: string[]
 }
@@ -120,6 +121,21 @@ export default function DigestCard() {
           </div>
         )}
         <div className="ch-digest-list">
+          {(d.vestsDue ?? []).length > 0 && (
+            <div className="sub2">
+              Vest{d.vestsDue!.length > 1 ? 's' : ''} to record:{' '}
+              {d.vestsDue!.map((v, i) => (
+                <span key={v.grantId}>
+                  {i > 0 && ' · '}
+                  {/* The account's Grants tab, where Vest… records it from the release. */}
+                  <Link to={{ screen: 'invest', params: { d: 'account', acct: v.accountId, tab: 'grants' } }} className="ch-a">
+                    <b className="inkstrong">{v.symbol}</b>
+                    {v.qtyMicro !== null && <> {formatQtyMicro(v.qtyMicro)} sh</>} vested {shortDay(v.dueOn, todayLocal())} in {v.accountName} →
+                  </Link>
+                </span>
+              ))}
+            </div>
+          )}
           {d.newTx.count > 0 && (
             <div className="sub2">
               <b className="inkstrong">{d.newTx.count}</b> new transaction{d.newTx.count > 1 ? 's' : ''} imported

@@ -9,7 +9,7 @@ import { cashView, portfolioCash } from './cashMath'
 import { grantEditBody } from './GrantsPanel'
 import HoldingsTable from './HoldingsTable'
 import { VestSummary } from './VestDialog'
-import { fmvPrefill, vestBody, vestDateDefault, vestPlan, withheldValueCents, type VestForm } from './vestMath'
+import { fmvPrefill, vestBody, vestDateDefault, vestPlan, withheldOf, withheldValueCents, type VestForm } from './vestMath'
 
 /**
  * The cash anchor (B12) and the vest flow (B9) as the screens word them:
@@ -94,6 +94,16 @@ describe('the vest flow (B9)', () => {
       const total = 1 + rnd(5_000_000_00)
       expect(withheldValueCents(total, withheld, gross)).toBe(lotCostShare(total, withheld, gross))
     }
+  })
+
+  it('takes the shares received instead: withheld is gross less received', () => {
+    const received = form({ withholdBy: 'received', receivedMicro: 16_000_000, withheldMicro: null })
+    expect(vestPlan(received, TODAY)).toEqual(vestPlan(form(), TODAY)) // 25 vested, 16 received ≡ 9 withheld
+    expect(withheldOf(received)).toBe(9_000_000)
+    // All of it received: nothing withheld. Not filled in yet: quiet. More than vested: a complaint.
+    expect(vestPlan(form({ withholdBy: 'received', receivedMicro: 25_000_000 }), TODAY)).toMatchObject({ plan: { withheldMicro: 0, netMicro: 25_000_000 } })
+    expect(vestPlan(form({ withholdBy: 'received', receivedMicro: null }), TODAY)).toEqual({ error: null })
+    expect(vestPlan(form({ withholdBy: 'received', receivedMicro: 26_000_000 }), TODAY)).toEqual({ error: expect.stringMatching(/More shares received than vested/) })
   })
 
   it('stays quiet while incomplete, and names what to fix', () => {

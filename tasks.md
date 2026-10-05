@@ -797,6 +797,19 @@ statements).
       Opened from the account drawer beside "Paste starting positions", and
       from Record trade when Sell is chosen.
 
+## Vests: what the portal shows, and a reminder (2026-10-05)
+
+- [x] **Vest… takes the shares received.** A "Tax withholding: Shares
+      withheld / Shares received" toggle (remembered per viewer); with
+      received, withheld = gross − received (`vestMath.withheldOf`), so a
+      portal that shows only the net shares needs no calculator.
+- [x] **Vests to record, in the digest.** `vestsDue` lists every grant whose
+      next scheduled vest has passed unrecorded — a to-do, so it shows
+      whatever the digest's window and "Caught up" doesn't clear it; it
+      links to the account's Grants tab, and goes once Vest… records it.
+      Vests are still never recorded automatically: the release's FMV and
+      withholding are the facts the basis and the tax are computed from.
+
 ## Backlog: smaller, high leverage
 
 - [x] Performance attribution on Invest — shipped 2026-09-23 (above): a
