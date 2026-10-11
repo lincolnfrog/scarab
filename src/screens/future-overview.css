@@ -1,0 +1,10 @@
+/* The Future screen's overview (src/screens/Future.tsx): the scenario picker and the answer card. Tokens only. */
+
+.card.fo-picker { padding-top: 12px; padding-bottom: 12px; }
+.fo-running { margin-left: auto; }
+
+.heronum.fo-crossing { font-size: 36px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.fo-answer .ui-stats { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+
+/* A scenario's colour key beside its name in the side-by-side preview. */
+.fo-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; }

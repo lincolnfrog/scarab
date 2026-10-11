@@ -10,24 +10,36 @@ import { Skeleton } from '../ui/Skeleton'
 import { toast } from '../ui/Toast'
 import { Tooltip } from '../ui/Tooltip'
 
-export type RealizedCardProps = { year: number }
+export type RealizedState = {
+  /** The year showing: the one picked, else this tax year. */
+  year: number
+  years: number[]
+  setYear: (y: number) => void
+  /** The report for `year`, or null while it loads. */
+  report: RealizedReport | null
+  error: string | null
+  all: boolean
+  showAll: () => void
+  reload: () => void
+}
 
 const SHOWN = 8
 
 /**
- * The year's realized gains (Taxes), sale by sale and lot by lot, from
- * taxable accounts: the totals Schedule D takes by term, the netting, what
- * needs checking before filing (shares with no basis, possible wash sales),
- * and a CSV shaped like Form 8949. Any year with sales can be picked — the
- * spring return wants last year's.
+ * The realized-gains report and what the card has picked (year, "show all"),
+ * held by the Taxes screen so its overview can summarize the report and the
+ * pick survives a trip between views. `thisYear` is null until the tax
+ * picture has loaded; nothing is fetched before then.
  */
-export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
-  const [year, setYear] = useState(thisYear)
+export function useRealized(thisYear: number | null): RealizedState {
+  const [picked, setPicked] = useState<number | null>(null)
   const [report, setReport] = useState<RealizedReport | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [all, setAll] = useState(false)
+  const year = picked ?? thisYear
 
   const load = useCallback(() => {
+    if (year === null) return
     let live = true
     setError(null)
     get<RealizedReport>(`/api/invest/realized?year=${year}`)
@@ -39,7 +51,36 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
   }, [year])
   useEffect(() => load(), [load])
 
-  const r = report?.year === year ? report : null
+  const setYear = useCallback((y: number) => {
+    setPicked(y)
+    setAll(false)
+  }, [])
+  const showAll = useCallback(() => setAll(true), [])
+  const y = year ?? new Date().getFullYear()
+  return {
+    year: y,
+    years: report?.years ?? [y],
+    setYear,
+    report: report?.year === y ? report : null,
+    error,
+    all,
+    showAll,
+    reload: load,
+  }
+}
+
+export type RealizedCardProps = { rz: RealizedState; /** Grid span class; half width by default. */ span?: string }
+
+/**
+ * The year's realized gains (Taxes), sale by sale and lot by lot, from
+ * taxable accounts: the totals Schedule D takes by term, the netting, what
+ * needs checking before filing (shares with no basis, possible wash sales),
+ * and a CSV shaped like Form 8949. Any year with sales can be picked — the
+ * spring return wants last year's.
+ */
+export default function RealizedCard({ rz, span = 'c6' }: RealizedCardProps) {
+  const { year, years, error, all } = rz
+  const r = rz.report
   const anything = !!r && (r.lines.length > 0 || r.reported.length > 0)
   const download = () => {
     if (!r) return
@@ -57,14 +98,13 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
     }
   }
 
-  const years = report?.years ?? [thisYear]
   return (
-    <div className="card c6 inv-taxcard inv-rz" style={!anything ? { alignSelf: 'start' } : undefined}>
+    <div className={`card ${span} inv-taxcard inv-rz`} style={!anything ? { alignSelf: 'start' } : undefined}>
       <div className="h4row">
         <h2>Realized gains</h2>
         <div className="right">
           {years.length > 1 && (
-            <Select aria-label="Tax year" className="inv-rz-year" value={year} onChange={(e) => { setYear(Number(e.target.value)); setAll(false) }}>
+            <Select aria-label="Tax year" className="inv-rz-year" value={year} onChange={(e) => rz.setYear(Number(e.target.value))}>
               {years.map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
@@ -78,7 +118,7 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
       {error ? (
         <div className="inv-loaderr" role="alert">
           <span>Couldn’t load the report: {error}</span>
-          <Button size="mini" onClick={load}>Retry</Button>
+          <Button size="mini" onClick={rz.reload}>Retry</Button>
         </div>
       ) : !r ? (
         <div className="inv-skel" aria-busy="true" aria-label="Loading the report">
@@ -87,7 +127,7 @@ export default function RealizedCard({ year: thisYear }: RealizedCardProps) {
           <Skeleton h={14} />
         </div>
       ) : (
-        <RealizedBody r={r} all={all} onAll={() => setAll(true)} />
+        <RealizedBody r={r} all={all} onAll={rz.showAll} />
       )}
     </div>
   )

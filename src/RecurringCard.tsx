@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatCents } from '../shared/money'
 import { get } from './api'
+import { EmptyState } from './ui/EmptyState'
+import { Skeleton } from './ui/Skeleton'
 import { Tooltip } from './ui/Tooltip'
 import './screens/screens.css'
 
@@ -27,37 +29,81 @@ type SafeToSpend = {
   bills: { merchant: string; cents: number; due: string }[]
 }
 
+export type RecurringData = { recurring: Rec[]; safeToSpend: SafeToSpend }
+
 /**
- * Recurring charges and "left to spend", on the Cash screen. The merchant and
- * category link into the screen's transaction list and the left-to-spend line
- * into the budget; Cash owns those filters, so the jumps are callbacks.
+ * The household's recurring charges and "left to spend", read once for the
+ * Cash screen: its overview summarises them and its Recurring view lists them.
  * `refreshKey` changes after a write that can move the rhythm (an import, a
- * re-categorization), so the card re-reads.
+ * re-categorization), so it re-reads. Null until loaded; on failure it stays
+ * as it was.
+ */
+export function useRecurring(refreshKey?: number): RecurringData | null {
+  const [data, setData] = useState<RecurringData | null>(null)
+  useEffect(() => {
+    let live = true
+    get<RecurringData>('/api/recurring')
+      .then((d) => live && setData(d))
+      .catch(console.error)
+    return () => {
+      live = false
+    }
+  }, [refreshKey])
+  return data
+}
+
+/**
+ * The overview's line on recurring charges: how many are active, the next few
+ * expected (soonest first), and what's left to spend when a budget is set.
+ */
+export function recurringSummary(data: RecurringData, today: string) {
+  const active = data.recurring.filter((r) => r.kind === 'expense' && !r.lapsed)
+  const upcoming = active
+    .filter((r) => r.nextExpectedOn >= today)
+    .sort((a, b) => (a.nextExpectedOn < b.nextExpectedOn ? -1 : a.nextExpectedOn > b.nextExpectedOn ? 1 : 0))
+  const s = data.safeToSpend
+  return {
+    active: active.length,
+    upcoming,
+    priceUp: active.filter((r) => r.priceCreepMicro > 0).length,
+    safe: s.budgetCents > 0 ? { cents: s.safeCents, billsCents: s.upcomingBillsCents } : null,
+  }
+}
+
+/**
+ * Recurring charges and "left to spend", the Cash screen's Recurring view.
+ * The merchant and category link into the screen's transaction list and the
+ * left-to-spend line into the budget; Cash owns those filters, so the jumps
+ * are callbacks.
  */
 export default function RecurringCard(p: {
-  refreshKey?: number
+  data: RecurringData | null
   onMerchant?: (merchant: string) => void
   onCategory?: (name: string) => void
   onBudget?: (month: string) => void
 }) {
-  const [data, setData] = useState<{ recurring: Rec[]; safeToSpend: SafeToSpend } | null>(null)
+  const { data } = p
   const [showAll, setShowAll] = useState(false)
 
-  useEffect(() => {
-    let live = true
-    get<{ recurring: Rec[]; safeToSpend: SafeToSpend }>('/api/recurring')
-      .then((d) => live && setData(d))
-      .catch(console.error) // an extra card: on failure it stays as it was (or absent)
-    return () => {
-      live = false
-    }
-  }, [p.refreshKey])
-
-  if (!data) return null
+  if (!data)
+    return (
+      <div className="card c12" aria-busy="true">
+        <Skeleton h={18} w={220} />
+        <Skeleton h={160} style={{ marginTop: 12 }} />
+      </div>
+    )
   const s = data.safeToSpend
   const expenses = data.recurring.filter((r) => r.kind === 'expense')
   const rows = showAll ? expenses : expenses.filter((r) => !r.lapsed).slice(0, 12)
-  if (expenses.length === 0) return null
+  if (expenses.length === 0)
+    return (
+      <div className="card c12">
+        <EmptyState
+          title="No recurring charges yet"
+          body="A merchant is listed here once its charges keep a steady rhythm — a few months of imports is usually enough."
+        />
+      </div>
+    )
 
   return (
     <div className="card c12">

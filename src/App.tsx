@@ -15,7 +15,7 @@ import {
   type UIEvent,
 } from 'react'
 import { exitToHousehold, localMode, takeHouseholdChoice } from './local'
-import { lastRoute, navigate, parseHash, SCREENS, useRoute, type ScreenId } from './router'
+import { lastRoute, Link, navigate, parseHash, SCREENS, useRoute, type ScreenId } from './router'
 import type { Mode } from './session'
 import { Button } from './ui/Button'
 import { CommandPalette, PaletteHint } from './ui/CommandPalette'
@@ -316,26 +316,35 @@ function Shell({ me }: { me: Me | null }) {
     }
   }, [])
 
-  // Scroll position per screen: recorded as it scrolls, restored when the screen comes back.
-  // (A section anchor in the route scrolls afterwards and wins — see useAnchor.)
+  // The detail view each screen is showing, by its title (DetailView reports it): the heading's crumb.
+  const [crumbs, setCrumbs] = useState<Partial<Record<ScreenId, string>>>({})
+  const onCrumb = useCallback(
+    (id: ScreenId, title: string | null) => setCrumbs((c) => (c[id] === (title ?? undefined) ? c : { ...c, [id]: title ?? undefined })),
+    [],
+  )
+  const crumb = crumbs[active]
+
+  // Scroll position per view — a screen's overview and each of its detail views: recorded as it scrolls,
+  // restored when the view comes back. (A section anchor in the route scrolls afterwards and wins — see useAnchor.)
+  const view = `${active}/${route.rest[0] ?? ''}`
   const scroller = useRef<HTMLElement>(null)
-  const scrollTops = useRef(new Map<ScreenId, number>())
+  const scrollTops = useRef(new Map<string, number>())
   useLayoutEffect(() => {
-    if (scroller.current) scroller.current.scrollTop = scrollTops.current.get(active) ?? 0
-  }, [active])
-  const onScroll = (e: UIEvent<HTMLElement>) => scrollTops.current.set(active, e.currentTarget.scrollTop)
+    if (scroller.current) scroller.current.scrollTop = scrollTops.current.get(view) ?? 0
+  }, [view])
+  const onScroll = (e: UIEvent<HTMLElement>) => scrollTops.current.set(view, e.currentTarget.scrollTop)
 
   // After a navigation (not the first screen of the visit): focus the new heading and say where we are.
   const h1 = useRef<HTMLHeadingElement>(null)
   const lastShown = useRef<ScreenId | null>(null)
   useEffect(() => {
-    document.title = `${label} · Scarab`
+    document.title = `${crumb ? `${crumb} · ` : ''}${label} · Scarab`
     const prev = lastShown.current
     lastShown.current = active
     if (prev === null || prev === active) return
     h1.current?.focus({ preventScroll: true })
     announce(label)
-  }, [active, label])
+  }, [active, label, crumb])
 
   // The gold indicator slides between nav items; it appears without sliding the first time.
   const nav = useRef<HTMLElement>(null)
@@ -422,7 +431,7 @@ function Shell({ me }: { me: Me | null }) {
             <ScarabMark size={24} />
             <span className="topbar-names">
               <span className="topbar-word">SCARAB</span>
-              <span className="topbar-title">{label}</span>
+              <span className="topbar-title">{crumb ?? label}</span>
             </span>
           </span>
           <span className="where">
@@ -436,14 +445,27 @@ function Shell({ me }: { me: Me | null }) {
         <main id="main" className="screens" ref={scroller} onScroll={onScroll}>
           <div className="shead">
             <h1 ref={h1} tabIndex={-1}>
-              {label}
+              {crumb ? (
+                <>
+                  {/* In a detail view the screen's name is the way back to its overview. */}
+                  <Link to={{ screen: active }} className="shead-up">
+                    {label}
+                  </Link>
+                  <span className="shead-sep" aria-hidden="true">
+                    ›
+                  </span>
+                  <span className="shead-here">{crumb}</span>
+                </>
+              ) : (
+                label
+              )}
             </h1>
             {shown.map((s) => (
               <div key={s.id} className="shead-slot" hidden={s.id !== active} ref={hostRef(s.id)} />
             ))}
           </div>
           {shown.map((s) => (
-            <ScreenSlot key={s.id} id={s.id} label={s.label} active={s.id === active} data={data} headerHost={hosts[s.id] ?? null} />
+            <ScreenSlot key={s.id} id={s.id} label={s.label} active={s.id === active} data={data} headerHost={hosts[s.id] ?? null} onCrumb={onCrumb} />
           ))}
         </main>
 
@@ -545,7 +567,14 @@ function MoreSheet({ open, onClose, active, me }: { open: boolean; onClose: () =
  * yet, a placeholder stands in; code that fails to load is a crash like any
  * other (Retry loads it again).
  */
-const ScreenSlot = memo(function ScreenSlot(p: { id: ScreenId; label: string; active: boolean; data: string; headerHost: HTMLElement | null }) {
+const ScreenSlot = memo(function ScreenSlot(p: {
+  id: ScreenId
+  label: string
+  active: boolean
+  data: string
+  headerHost: HTMLElement | null
+  onCrumb: (id: ScreenId, title: string | null) => void
+}) {
   // The same element across reveals, so only what reads useScreen() re-renders when the screen shows or hides.
   const content = useMemo(
     () => (
@@ -559,7 +588,7 @@ const ScreenSlot = memo(function ScreenSlot(p: { id: ScreenId; label: string; ac
   )
   return (
     <Activity mode={p.active ? 'visible' : 'hidden'} name={p.id}>
-      <ScreenProvider id={p.id} active={p.active} headerHost={p.headerHost}>
+      <ScreenProvider id={p.id} active={p.active} headerHost={p.headerHost} onCrumb={p.onCrumb}>
         {content}
       </ScreenProvider>
     </Activity>

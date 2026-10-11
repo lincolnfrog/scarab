@@ -70,6 +70,23 @@ describe('the holdings card', () => {
   })
 })
 
+describe('the holdings card, capped for the overview', () => {
+  it('lists the largest few by value, folds the rest into one line and keeps the whole total', () => {
+    const html = renderToStaticMarkup(
+      <HoldingsCard positions={[fund, vti]} totals={totals} returns={returns} sparks={sparks} today={TODAY} onOpen={() => {}} onPriceSaved={() => {}} limit={1} more={<a href="#/invest/holdings">All 2 holdings</a>} />,
+    )
+    const t = text(html)
+    expect(t).toMatch(/Holdings All 2 holdings/)
+    expect(t).toMatch(/VTI 15 · 2 accounts/)
+    expect(t).not.toMatch(/FUND/)
+    expect(t).toMatch(/1 more holding \$1,000\.00 18\.2%/)
+    expect(t).toMatch(/Total ▲ \$30\.00 0\.67% \$5,500\.00/)
+    // Sorting belongs to the full view: plain headers here.
+    expect(html).not.toContain('inv-sortbtn')
+    expect(html).not.toContain('aria-sort')
+  })
+})
+
 describe('the investments headline', () => {
   const render = (over: Partial<Parameters<typeof InvestSummary>[0]> = {}) =>
     text(

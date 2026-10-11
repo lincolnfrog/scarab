@@ -17,22 +17,22 @@ import CheckinDrawer from '../invest/CheckinDrawer'
 import HoldingDrawer from '../invest/HoldingDrawer'
 import HoldingsCard from '../invest/HoldingsCard'
 import InvestSummary from '../invest/InvestSummary'
+import { AccountsDrill, ActivityDrill, AllocationDrill, TaxDrill } from '../invest/OverviewCards'
 import OpeningPositionsSheet from '../invest/OpeningPositionsSheet'
 import PastSalesSheet from '../invest/PastSalesSheet'
 import { HOUSEHOLD, inScope, ownerGroups, scopePortfolio, scopeWords, type OwnerKey } from '../invest/ownerFilter'
 import OwnerPills from '../invest/OwnerPills'
 import { failedSymbols, priceClock, priceStale, refreshMemory, shouldRefresh } from '../invest/priceRefresh'
-import TaxPictureCard from '../invest/TaxPictureCard'
-import { accountsLine } from '../invest/tradeMath'
 import TradeSheet from '../invest/TradeSheet'
 import '../invest/invest.css'
 import { localMode } from '../local'
 import { setParams, useRouteState } from '../router'
 import { Button } from '../ui/Button'
+import { DetailView, DrillMore, useDetail } from '../ui/Drill'
 import { EmptyState } from '../ui/EmptyState'
 import { BASKET_EVENT } from '../ui/syncStatus'
 import { HeaderSlot } from '../ui/HeaderSlot'
-import { useAnchor, useScreen, useScreenRoute } from '../ui/screen'
+import { useScreen, useScreenRoute } from '../ui/screen'
 import { toast } from '../ui/Toast'
 import { Tooltip } from '../ui/Tooltip'
 import { useAction } from '../ui/useAction'
@@ -43,6 +43,12 @@ type Marginal = { ordinaryMicro: number; stMicro: number; ltMicro: number }
 const NO_POSITIONS: PortfolioPosition[] = []
 const NO_OWNERS: string[] = []
 const plural = (n: number, noun: string) => (n === 0 ? '' : `${n} ${noun}${n === 1 ? '' : 's'}`)
+/** The detail views under the overview: '#/invest/holdings', '#/invest/allocation' (the Checkup's and the digest's link), … */
+const DETAILS = ['holdings', 'accounts', 'allocation', 'activity'] as const
+/** How many holdings the overview lists before "All N holdings". */
+const TOP_HOLDINGS = 6
+/** The overview's summary cards share one row: 4 → quarters, 3 → thirds, … */
+const drillSpan = (n: number) => (n >= 4 ? 'c3' : n === 3 ? 'c4' : n === 2 ? 'c6' : 'c12')
 /** A monthly-history import's errors as one quiet line — just the symbols, when all they say is that the history lacks them. */
 function historyLine(errors: readonly string[]): string {
   const missing = errors.map((e) => /^(.+): not in the shared market history$/.exec(e)?.[1])
@@ -77,6 +83,11 @@ const idParam = (v: string | undefined): number | null => {
  *   ?d=trade[&acct=3][&lot=41][&via=account] the record-trade sheet (via=account|holding: over that drawer, back to it on close)
  *   ?d=checkin                              the balance check-in
  * so a link or a reload opens the same thing, and ⌘K can send people there.
+ *
+ * '#/invest' is the overview — the headline, the value chart, the largest
+ * holdings and one summary card per section; '#/invest/holdings', '/accounts',
+ * '/allocation' and '/activity' are the full views behind them (src/ui/Drill.tsx).
+ * The drawers and sheets above open over whichever view is showing.
  */
 export default function Invest() {
   const [accounts, setAccounts] = useState<InvestAccountRow[]>([])
@@ -86,8 +97,8 @@ export default function Invest() {
   const [loaded, setLoaded] = useState(false)
   // Bumped on every load so the activity ledger and the open drawer refetch alongside the portfolio.
   const [rev, setRev] = useState(0)
-  // '#/invest/allocation' (the Checkup's drift findings, the digest, ⌘K) scrolls to the allocation card.
-  const allocationAnchor = useAnchor('allocation')
+  // '#/invest/allocation' (the Checkup's drift findings, the digest, ⌘K) is the allocation view.
+  const detail = useDetail(DETAILS)
   // The starting-positions sheet, and the account it opens on.
   const [opening, setOpening] = useState<{ accountId: number | null } | null>(null)
   const [pastSales, setPastSales] = useState<{ accountId: number | null } | null>(null)
@@ -347,6 +358,22 @@ export default function Invest() {
 
   const pricedOn = portfolio?.positions.reduce<string | null>((m, p) => (p.priced_on && (!m || p.priced_on > m) ? p.priced_on : m), null)
   const hasHoldings = (portfolio?.positions.length ?? 0) > 0
+  const priceActions = loaded && hasHoldings && (
+    <>
+      {pricedOn && <span className="muted">prices as of {shortDay(pricedOn, today)}</span>}
+      {historyErrors.length > 0 && (
+        <Tooltip content={historyErrors.join(' · ')}>
+          <span className="muted inv-hist-errs">{historyLine(historyErrors)}</span>
+        </Tooltip>
+      )}
+      <Button size="mini" busy={refresh.busy} onClick={() => void refresh.run(false)}>
+        Refresh prices
+      </Button>
+    </>
+  )
+  const pills = <OwnerPills groups={groups} value={group?.key ?? HOUSEHOLD} onChange={setOwnerPick} />
+  /** The owner pills above a detail view's card: the views narrow as the overview does. */
+  const detailPills = loaded && groups.length > 0 && <div className="c12 inv-detail-owners">{pills}</div>
   const strip = (
     <AccountStrip
       accounts={shownAccounts}
@@ -358,6 +385,7 @@ export default function Invest() {
       loaded={loaded}
       onOpen={(id) => openAccount(id)}
       onAdd={openAdd}
+      filter={detail === 'accounts' ? pills : undefined}
       actions={
         loaded &&
         accounts.length > 0 && (
@@ -370,11 +398,163 @@ export default function Invest() {
       }
     />
   )
+  const holdingsCard = (limit?: number) =>
+    portfolio &&
+    view &&
+    view.positions.length > 0 && (
+      <HoldingsCard
+        positions={view.positions}
+        totals={view.totals}
+        returns={viewReturns}
+        sparks={sparks}
+        today={today}
+        onOpen={openHolding}
+        onPriceSaved={reload}
+        cash={cash && { cents: cash.cents, note: `in ${cash.accounts} account${cash.accounts === 1 ? '' : 's'}` }}
+        scopeLabel={scopeLabel}
+        limit={limit}
+        more={
+          limit !== undefined ? (
+            <DrillMore to="holdings">{view.positions.length > limit ? `All ${view.positions.length} holdings` : 'Sort and compare'}</DrillMore>
+          ) : (
+            priceActions || undefined
+          )
+        }
+      />
+    )
+  // Nothing held yet: bring it in (the household's view only — an owner's empty slice isn't a first run).
+  const bringIn = loaded && lotAccounts.length > 0 && portfolio !== null && portfolio.positions.length === 0 && !scoped && (
+    <div className="card c12">
+      <EmptyState
+        title="Bring in what you already hold"
+        body="Paste each account’s lots as of a statement date — symbol, shares, cost basis, acquired. Scarab keeps the true acquisition dates, so holding periods and tax come out right. New trades go in with Record trade."
+        action={{ label: 'Paste starting positions', onClick: () => openOpening() }}
+      />
+    </div>
+  )
+  const showTax = !!portfolio && (hasHoldings || portfolio.totals.ytd_reported_st !== 0 || portfolio.totals.ytd_reported_lt !== 0)
+  const showAllocation = loaded && accounts.length > 0
+  const showActivity = lotAccounts.length > 0 && (!scoped || shownAccounts.some((a) => a.tracking === 'lots'))
+  const showAccounts = loaded && accounts.length > 0
+  const span = drillSpan([showAccounts, showAllocation, showTax, showActivity].filter(Boolean).length)
+  const holdingCount = portfolio?.positions.length ?? 0
+
+  let body
+  if (detail === 'holdings')
+    body = (
+      <DetailView title="Holdings">
+        {detailPills}
+        {holdingsCard() ||
+          bringIn ||
+          (loaded && (
+            <div className="card c12">
+              <EmptyState
+                title={scoped ? 'Nothing held in these accounts' : 'No holdings yet'}
+                body={
+                  scoped
+                    ? 'Pick another owner above, or record a trade in one of these accounts.'
+                    : 'Holdings come from trades in a brokerage or crypto account. Accounts tracked by balance show under Accounts.'
+                }
+                action={lotAccounts.length > 0 ? { label: 'Record a trade', onClick: () => openTrade() } : { label: 'Add an account', onClick: openAdd }}
+              />
+            </div>
+          ))}
+      </DetailView>
+    )
+  else if (detail === 'accounts') body = <DetailView title="Accounts">{strip}</DetailView>
+  else if (detail === 'allocation')
+    body = (
+      <DetailView title="Allocation">
+        {/* Household-wide: the owner filter doesn't narrow it. The plan opens with the view — the Checkup's findings point at it. */}
+        {showAllocation ? (
+          <AllocationCard rev={rev} planOpen />
+        ) : (
+          loaded && (
+            <div className="card c12">
+              <EmptyState title="Nothing to allocate yet" body="Add an account first — its holdings or balance are what a target is set against." action={{ label: 'Add an account', onClick: openAdd }} />
+            </div>
+          )
+        )}
+      </DetailView>
+    )
+  else if (detail === 'activity')
+    body = (
+      <DetailView title="Activity">
+        {lotAccounts.length > 0 && detailPills}
+        {showActivity ? (
+          <ActivityTable accounts={accounts} rev={rev} today={today} onChanged={reloadAndPrice} onRecord={() => openTrade()} scope={scopeIds} />
+        ) : (
+          loaded && (
+            <div className="card c12">
+              {lotAccounts.length > 0 ? (
+                <EmptyState title="No trades in these accounts" body="They are tracked by balance. Pick another owner above to see trades." />
+              ) : (
+                <EmptyState
+                  title="No trades yet"
+                  body="Trades are recorded in a brokerage or crypto account that follows each lot. Add one to start the ledger."
+                  action={{ label: 'Add an account', onClick: openAdd }}
+                />
+              )}
+            </div>
+          )
+        )}
+      </DetailView>
+    )
+  else
+    body = (
+      <div className="grid12">
+        {/* ---------- the headline: worth, today, overall ---------- */}
+        {(!loaded || accounts.length > 0) && (
+          <InvestSummary
+            loaded={loaded}
+            valueCents={worth.value}
+            totals={view?.totals ?? null}
+            positions={view?.positions ?? NO_POSITIONS}
+            cashCents={cash ? cash.cents : null}
+            balanceCents={worth.byBalance}
+            rate={viewReturns?.totals ?? null}
+            today={today}
+            scopeLabel={scopeLabel}
+            filter={pills}
+            actions={priceActions}
+          />
+        )}
+
+        {/* No account yet: the strip is the first-run card (its empty state starts the guided add). */}
+        {loaded && accounts.length === 0 && strip}
+
+        {bringIn}
+
+        {/* ---------- warnings ---------- */}
+        {portfolio && portfolio.warnings.length > 0 && (
+          <div className="card c12 warncard">
+            <h2>Data warnings</h2>
+            {portfolio.warnings.map((w, i) => (
+              <p key={i} className="sub2">{w}</p>
+            ))}
+          </div>
+        )}
+
+        <PortfolioValueCard rev={rev} accountIds={scopeLotIds} scopeLabel={scopeLabel} />
+
+        {/* ---------- the largest holdings; the full, sortable table is a view down ---------- */}
+        {holdingsCard(TOP_HOLDINGS)}
+
+        {/* ---------- one card per section, each a link to its full view ---------- */}
+        {showAccounts && (
+          <AccountsDrill accounts={shownAccounts} positions={portfolio?.positions ?? NO_POSITIONS} cash={cashByAccount} valueCents={worth.value} today={today} span={span} />
+        )}
+        {/* Allocation and tax are the household's: the owner filter doesn't narrow them, and they say so. */}
+        {showAllocation && <AllocationDrill rev={rev} span={span} household={scoped} />}
+        {showTax && <TaxDrill totals={portfolio.totals} marginal={taxMarginal} carryIn={taxCarryIn} year={today.slice(0, 4)} span={span} household={scoped} />}
+        {showActivity && <ActivityDrill rev={rev} scope={scopeIds} today={today} span={span} />}
+      </div>
+    )
 
   return (
-    <div className="grid12">
+    <>
       <HeaderSlot
-        sub={accounts.length > 0 ? accountsLine(accounts.map((a) => a.name)) : undefined}
+        sub={accounts.length > 0 ? [plural(accounts.length, 'account'), plural(holdingCount, 'holding')].filter(Boolean).join(' · ') : undefined}
         actions={
           lotAccounts.length > 0 ? (
             <Button variant="gold" onClick={() => openTrade()}>
@@ -388,94 +568,7 @@ export default function Invest() {
         }
       />
 
-      {/* ---------- the headline: worth, today, overall ---------- */}
-      {(!loaded || accounts.length > 0) && (
-        <InvestSummary
-          loaded={loaded}
-          valueCents={worth.value}
-          totals={view?.totals ?? null}
-          positions={view?.positions ?? NO_POSITIONS}
-          cashCents={cash ? cash.cents : null}
-          balanceCents={worth.byBalance}
-          rate={viewReturns?.totals ?? null}
-          today={today}
-          scopeLabel={scopeLabel}
-          filter={<OwnerPills groups={groups} value={group?.key ?? HOUSEHOLD} onChange={setOwnerPick} />}
-          actions={
-            loaded &&
-            hasHoldings && (
-              <>
-                {pricedOn && <span className="muted">prices as of {shortDay(pricedOn, today)}</span>}
-                {historyErrors.length > 0 && (
-                  <Tooltip content={historyErrors.join(' · ')}>
-                    <span className="muted inv-hist-errs">{historyLine(historyErrors)}</span>
-                  </Tooltip>
-                )}
-                <Button size="mini" busy={refresh.busy} onClick={() => void refresh.run(false)}>
-                  Refresh prices
-                </Button>
-              </>
-            )
-          }
-        />
-      )}
-
-      {/* Until something is held, the accounts come first: they are what there is to set up. */}
-      {!hasHoldings && strip}
-
-      {/* ---------- nothing held yet: bring it in ---------- */}
-      {loaded && lotAccounts.length > 0 && portfolio !== null && portfolio.positions.length === 0 && !scoped && (
-        <div className="card c12">
-          <EmptyState
-            title="Bring in what you already hold"
-            body="Paste each account’s lots as of a statement date — symbol, shares, cost basis, acquired. Scarab keeps the true acquisition dates, so holding periods and tax come out right. New trades go in with Record trade."
-            action={{ label: 'Paste starting positions', onClick: () => openOpening() }}
-          />
-        </div>
-      )}
-
-      {/* ---------- warnings ---------- */}
-      {portfolio && portfolio.warnings.length > 0 && (
-        <div className="card c12 warncard">
-          <h2>Data warnings</h2>
-          {portfolio.warnings.map((w, i) => (
-            <p key={i} className="sub2">{w}</p>
-          ))}
-        </div>
-      )}
-
-      <PortfolioValueCard rev={rev} accountIds={scopeLotIds} scopeLabel={scopeLabel} />
-
-      {/* ---------- holdings ---------- */}
-      {portfolio && view && view.positions.length > 0 && (
-        <HoldingsCard
-          positions={view.positions}
-          totals={view.totals}
-          returns={viewReturns}
-          sparks={sparks}
-          today={today}
-          onOpen={openHolding}
-          onPriceSaved={reload}
-          cash={cash && { cents: cash.cents, note: `in ${cash.accounts} account${cash.accounts === 1 ? '' : 's'}` }}
-          scopeLabel={scopeLabel}
-        />
-      )}
-
-      {/* ---------- accounts ---------- */}
-      {hasHoldings && strip}
-
-      {/* ---------- tax (household-wide: one return) ---------- */}
-      {portfolio && (hasHoldings || portfolio.totals.ytd_reported_st !== 0 || portfolio.totals.ytd_reported_lt !== 0) && (
-        <TaxPictureCard totals={portfolio.totals} marginal={taxMarginal} year={today.slice(0, 4)} scope={scopeLabel ?? null} carryIn={taxCarryIn} />
-      )}
-
-      {/* ---------- target allocation (household-wide: the owner filter doesn't narrow it) ---------- */}
-      {loaded && accounts.length > 0 && <AllocationCard rev={rev} anchor={allocationAnchor} planOpen={route.rest[0] === 'allocation'} />}
-
-      {/* ---------- the activity ledger ---------- */}
-      {lotAccounts.length > 0 && (!scoped || shownAccounts.some((a) => a.tracking === 'lots')) && (
-        <ActivityTable accounts={accounts} rev={rev} today={today} onChanged={reloadAndPrice} onRecord={() => openTrade()} scope={scopeIds} />
-      )}
+      {body}
 
       {/* The drawers render before the trade sheet: opened together from a link, the sheet stacks on top. */}
       <HoldingDrawer
@@ -573,6 +666,6 @@ export default function Invest() {
         // New symbols arrive unpriced: fetch their quotes now.
         onDone={reloadAndPrice}
       />
-    </div>
+    </>
   )
 }

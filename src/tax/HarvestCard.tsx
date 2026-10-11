@@ -8,8 +8,10 @@ export type HarvestCardProps = {
   harvest: TaxResponse['harvest']
   /** Marginal short- and long-term rates: what waiting for long-term saves on a gain. */
   marginal: Pick<TaxResponse['marginal'], 'stMicro' | 'ltMicro'>
-  /** The screen's section anchor ('#/tax/harvest'), when it has one. */
+  /** The screen's section anchor, when it has one. */
   anchor?: RefCallback<HTMLElement>
+  /** Grid span class; half width by default. */
+  span?: string
 }
 
 type HarvestRow = TaxResponse['harvest']['rows'][number]
@@ -28,12 +30,12 @@ const washUpcoming = (r: HarvestRow) =>
  * short-term gain lots close enough to long-term that waiting pays. IRA,
  * Roth and 401(k) lots never appear: a sale inside them isn't taxed.
  */
-export default function HarvestCard({ harvest, marginal, anchor }: HarvestCardProps) {
+export default function HarvestCard({ harvest, marginal, anchor, span = 'c6' }: HarvestCardProps) {
   const losses = harvest.rows.filter((r) => r.gain_cents < 0)
   const nearLt = harvest.rows.filter((r) => r.gain_cents > 0 && r.term === 'st' && r.days_to_lt <= 90)
   const upcoming = losses.filter((r) => r.wash_upcoming)
   return (
-    <div ref={anchor} className="card c6 inv-taxcard" style={losses.length === 0 ? { alignSelf: 'start' } : undefined}>
+    <div ref={anchor} className={`card ${span} inv-taxcard`} style={losses.length === 0 ? { alignSelf: 'start' } : undefined}>
       <h2>Loss harvesting</h2>
       {losses.length === 0 ? (
         <p className="sub2">

@@ -6,6 +6,7 @@ import { monthLong, shortDay } from './chart/format'
 import { todayLocal } from '../shared/dates'
 import { Link, type RouteTarget } from './router'
 import { Button } from './ui/Button'
+import { DrillCard } from './ui/Drill'
 import { useAction } from './ui/useAction'
 import './chart/chart.css'
 
@@ -58,10 +59,8 @@ const CLASS_SCREEN: Record<string, RouteTarget> = {
  * mortgage-rate trigger (linked to the loan sheets). Renders nothing unless
  * something is notable.
  */
-export default function DigestCard() {
+function useDigest(): Digest | null {
   const [digest, setDigest] = useState<Digest | null>(null)
-  const [gone, setGone] = useState(false)
-
   useEffect(() => {
     let live = true
     // Optional: a failed digest just stays out of the way.
@@ -72,10 +71,68 @@ export default function DigestCard() {
       live = false
     }
   }, [])
+  return digest
+}
+
+const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * The digest in one card, for the Dashboard's overview: how far net worth
+ * moved, and a count of everything else worth a look. The card opens the
+ * whole digest (`to`, a detail view). Renders nothing unless something is notable.
+ */
+export function DigestSummary({ to, span }: { to: string; span?: string }) {
+  const d = useDigest()
+  if (!d || !d.notable) return null
+  const nw = d.netWorth && d.netWorth.deltaCents !== 0 ? d.netWorth : null
+  const bits = [
+    (d.vestsDue ?? []).length > 0 && count(d.vestsDue!.length, 'vest') + ' to record',
+    d.newTx.count > 0 && count(d.newTx.count, 'new transaction'),
+    d.newTx.uncategorized > 0 && `${d.newTx.uncategorized} uncategorized`,
+    d.newRecurring.length > 0 && count(d.newRecurring.length, 'new recurring charge'),
+    d.priceCreep.length > 0 && count(d.priceCreep.length, 'price increase'),
+    d.lapsed.length > 0 && count(d.lapsed.length, 'missed charge'),
+    d.allocationDrift.length > 0 && (d.allocationVsTarget ? count(d.allocationDrift.length, 'class', 'classes') + ' off target' : 'allocation drift'),
+    d.budgetOverruns.length > 0 && count(d.budgetOverruns.length, 'budget') + ' over',
+    d.mortgage?.triggered && 'mortgage rates dipped',
+  ].filter((x): x is string => typeof x === 'string')
+  return (
+    <DrillCard
+      to={to}
+      span={span}
+      title="Since you were last here"
+      badge={shortDay(d.sinceDay, todayLocal())}
+      tone={nw ? (nw.deltaCents >= 0 ? 'pos' : 'neg') : undefined}
+      value={
+        nw ? (
+          <>
+            <span aria-hidden="true">{nw.deltaCents >= 0 ? '▲' : '▼'} </span>
+            <span className="ui-sr">{nw.deltaCents >= 0 ? 'Net worth up' : 'Net worth down'} </span>
+            {formatDollars(Math.abs(nw.deltaCents))}
+          </>
+        ) : undefined
+      }
+      note={
+        <>
+          {nw && <>net worth since {monthLong(nw.baselineMonth)}</>}
+          {nw && bits.length > 0 && <br />}
+          {bits.join(' · ')}
+        </>
+      }
+    />
+  )
+}
+
+export default function DigestCard({ onCaughtUp }: { onCaughtUp?: () => void } = {}) {
+  const digest = useDigest()
+  const [gone, setGone] = useState(false)
 
   const ack = useAction(() => post('/api/digest/ack', {}), {
     errorPrefix: "Couldn't mark the digest as caught up",
-    onDone: () => setGone(true),
+    onDone: () => {
+      setGone(true)
+      onCaughtUp?.()
+    },
   })
 
   if (gone || !digest || !digest.notable) return null

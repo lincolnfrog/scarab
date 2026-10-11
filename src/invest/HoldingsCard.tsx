@@ -26,6 +26,13 @@ export type HoldingsCardProps = {
   /** A Cash row under the holdings, which the Total then includes. */
   cash?: { cents: number; note?: string } | null
   scopeLabel?: string
+  /**
+   * The overview's short form: only the largest `limit` holdings by value, the
+   * rest folded into one line, and plain column headers (sorting lives in the full view).
+   */
+  limit?: number
+  /** The header's right side — the overview's way into the full table. */
+  more?: ReactNode
 }
 
 /** The money-weighted rate, worded by what it is: '+6.4%/yr' once held a year, else '+0.4%' over its months. */
@@ -57,14 +64,15 @@ const COLUMNS: { key: HoldingSortKey; label: string; sub?: string; className: st
  * return, beside a 90-day sparkline. Any column sorts. A row opens the
  * holding's drawer — its price chart, accounts, lots and trades.
  */
-export default function HoldingsCard({ positions, totals, returns, sparks, today, onOpen, onPriceSaved, cash, scopeLabel }: HoldingsCardProps) {
+export default function HoldingsCard({ positions, totals, returns, sparks, today, onOpen, onPriceSaved, cash, scopeLabel, limit, more }: HoldingsCardProps) {
   // An enum, but it stays in route state with the screen's other view choices.
   const [sortKey, setSortKey] = useRouteState<string>('holdSort', formatSort(DEFAULT_SORT))
-  const sort = parseSort(sortKey)
+  const capped = limit !== undefined
+  const sort = capped ? DEFAULT_SORT : parseSort(sortKey)
   const retOf = new Map((returns?.rows ?? []).map((r) => [r.asset_id, r]))
   const sparkOf = new Map((sparks?.series ?? []).map((s) => [s.asset_id, s.closes]))
   const total = totals.value
-  const rows = sortHoldings(
+  const all = sortHoldings(
     positions.map((p) => {
       const day = dayChange(p.day_change_cents, p.value_cents)
       const ret = retOf.get(p.asset_id)
@@ -72,6 +80,9 @@ export default function HoldingsCard({ positions, totals, returns, sparks, today
     }),
     sort,
   )
+  const rows = capped ? all.slice(0, limit) : all
+  const rest = all.slice(rows.length)
+  const restCents = rest.reduce((s, p) => s + p.value_cents, 0)
   const dayTotal = totalDay(totals)
   const rate = returns && returns.totals.irr_micro !== null ? returns.totals : null
 
@@ -89,7 +100,7 @@ export default function HoldingsCard({ positions, totals, returns, sparks, today
         <h2>
           Holdings{scopeLabel && <span className="muted"> · {scopeLabel}</span>}
         </h2>
-        <span className="sub2">Select a holding for its chart, lots and trades</span>
+        {more != null ? <div className="right">{more}</div> : <span className="sub2">Select a holding for its chart, lots and trades</span>}
       </div>
       <div className="inv-tablewrap">
         <table className="inv-hold">
@@ -97,15 +108,17 @@ export default function HoldingsCard({ positions, totals, returns, sparks, today
             <tr>
               {COLUMNS.map((c, i) => {
                 const on = sort.key === c.key
-                const button = (
+                const button = capped ? (
+                  <span>{c.label}</span>
+                ) : (
                   <button type="button" className={`inv-sortbtn${on ? ' on' : ''}`} onClick={() => setSortKey(formatSort(nextSort(sort, c.key)))}>
                     {c.label}
                     <span className="inv-sortmark" aria-hidden="true">{on ? (sort.dir === 'asc' ? '▴' : '▾') : ''}</span>
                   </button>
                 )
                 return [
-                  <th key={c.key} className={c.className} aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    {c.tip ? <Tooltip content={c.tip}>{button}</Tooltip> : button}
+                  <th key={c.key} className={c.className} aria-sort={capped ? undefined : on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    {c.tip && !capped ? <Tooltip content={c.tip}>{button}</Tooltip> : button}
                     {c.sub && <span className="inv-thsub">{c.sub}</span>}
                   </th>,
                   // The sparkline sits between the name and the numbers; it has nothing to sort by.
@@ -160,6 +173,22 @@ export default function HoldingsCard({ positions, totals, returns, sparks, today
                 </tr>
               )
             })}
+            {rest.length > 0 && (
+              <tr className="inv-cashrow inv-restrow">
+                <td className="h-asset">
+                  <span className="inv-cashlabel">
+                    {rest.length} more holding{rest.length === 1 ? '' : 's'}
+                  </span>
+                </td>
+                <td className="h-spark" />
+                <td className="h-price" />
+                <td className="h-day" />
+                <td className="r num h-value">{formatCents(restCents)}</td>
+                <td className="h-unr" />
+                <td className="h-ret" />
+                <td className="r num h-share">{total > 0 ? formatPercentMicro(Math.round((restCents * 1_000_000) / total), 1) : ''}</td>
+              </tr>
+            )}
             {cash && (
               <tr className="inv-cashrow">
                 <td className="h-asset">

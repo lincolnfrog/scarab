@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { formatCents, formatCentsPlain, formatDollars, formatQtyMicro } from '../../shared/money'
 import { del, get, post, put } from '../api'
-import { Link } from '../router'
-import ContributionsCard from '../tax/ContributionsCard'
+import { Link, navigate } from '../router'
+import ContributionsCard, { useContributions } from '../tax/ContributionsCard'
 import HarvestCard from '../tax/HarvestCard'
 import { gapLine, scheduleNote } from '../tax/copy'
-import RealizedCard from '../tax/RealizedCard'
-import TwoYearCard from '../tax/TwoYearCard'
+import RealizedCard, { useRealized } from '../tax/RealizedCard'
+import TwoYearCard, { useTwoYear } from '../tax/TwoYearCard'
 import type { TaxResponse } from '../tax/types'
 import { Button } from '../ui/Button'
 import { useDeepAction } from '../ui/CommandPalette'
 import { confirm } from '../ui/dialogs'
+import { DetailView, DrillCard, DrillMore, MiniRows, Stats, useDetail, type MiniRow } from '../ui/Drill'
 import { DateInput, Field, FieldGrid, MoneyInput, PercentInput, Select, TextInput } from '../ui/Field'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { Menu } from '../ui/Menu'
 import { prefersReducedMotion } from '../ui/motion'
-import { useAnchor } from '../ui/screen'
 import { Skeleton } from '../ui/Skeleton'
 import { toast } from '../ui/Toast'
 import { Tooltip } from '../ui/Tooltip'
 import { useAction } from '../ui/useAction'
 import './screens.css'
+import './tax-overview.css'
 
 type FilingStatus = 'single' | 'mfj' | 'mfs' | 'hoh'
 type StateInfo = {
@@ -195,6 +196,16 @@ const pct = (micro: number) => `${(micro / 10_000).toFixed(1)}%`
 const pct2 = (micro: number) => `${(micro / 10_000).toFixed(2).replace(/\.?0+$/, '')}%`
 const CADENCE_LABEL: Record<PayCadence, string> = { weekly: 'weekly', biweekly: 'every 2 weeks', semimonthly: 'twice a month', monthly: 'monthly' }
 const FILING_LABEL: Record<FilingStatus, string> = { mfj: 'married filing jointly', single: 'single', mfs: 'married filing separately', hoh: 'head of household' }
+const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+const signedDollars = (c: number) => formatDollars(c, { sign: c > 0 })
+
+/**
+ * The Taxes detail views. The overview ('#/tax') is the projected bill and one
+ * card per question; each id here is the full card behind one of them. The
+ * Dashboard, the Checkup's findings and other screens link to 'paychecks',
+ * 'settings', 'safe-harbor', 'harvest', 'contributions' and 'two-year'.
+ */
+const DETAILS = ['projection', 'safe-harbor', 'harvest', 'realized', 'two-year', 'contributions', 'paychecks', 'settings'] as const
 
 /** A row note behind a dotted underline: hover or focus shows it (Tooltip), one line per entry. */
 function Note(p: { tip: string | string[]; children: ReactNode }) {
@@ -442,14 +453,12 @@ export default function Taxes() {
   const settingsRef = useRef<HTMLDivElement>(null)
   const payRef = useRef<HTMLDivElement>(null)
   const earnersListId = useId()
-  // '#/tax/paychecks', '#/tax/settings', '#/tax/safe-harbor', '#/tax/harvest' and '#/tax/contributions' scroll to these cards (the Dashboard, the Checkup and other screens link here).
-  const paychecksAnchor = useAnchor('paychecks')
-  const settingsAnchor = useAnchor('settings')
-  const safeHarborAnchor = useAnchor('safe-harbor')
-  const harvestAnchor = useAnchor('harvest')
-  const contributionsAnchor = useAnchor('contributions')
-  const twoYearAnchor = useAnchor('two-year')
+  const detail = useDetail(DETAILS)
   const [loads, setLoads] = useState(0) // bumps on every load, so the contribution pace follows a saved paycheck
+  // The cards with data of their own load it here, so the overview can summarize them and what's typed into one survives a change of view.
+  const rz = useRealized(tax?.year ?? null)
+  const ty = useTwoYear(loads)
+  const ct = useContributions(loads)
   const [opened, setOpened] = useState(0) // bumps on every "+ Paycheck", so a second click scrolls back to the editor
 
   /** The stored settings the form was last filled from: an unedited form follows the store, an edited one is kept. */
@@ -490,12 +499,16 @@ export default function Taxes() {
     shownFor.current = opening
     payRef.current.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
     payRef.current.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true })
-  }, [payKey, opened])
-  /** "+ Paycheck": a blank editor in view with the cursor in it. An edit already open stays — it's brought back into view, never discarded. */
+  }, [payKey, opened, detail]) // `detail`: the editor only exists on the Paychecks view, so an opening from elsewhere waits for it
+  /**
+   * "+ Paycheck", from any view: the Paychecks view with a blank editor in it and the cursor there.
+   * An edit already open stays — it's brought back into view, never discarded.
+   */
   const newPaycheck = () => {
     if (pay && pay.id !== null) toast.info(`Save or cancel the edit to ${pay.earner || 'this paycheck'} first`)
     else if (!pay) setPay(emptyPay())
     setOpened((n) => n + 1)
+    if (detail !== 'paychecks') navigate({ screen: 'tax', rest: ['paychecks'] })
   }
 
   // '#/tax?d=add-paycheck' (the ⌘K palette): "+ Paycheck" on arrival, once the editor has its data.
@@ -609,13 +622,15 @@ export default function Taxes() {
     if (pay && !refuseIfInvalid(payRef.current)) void savePay.run(pay)
   }
 
-  return (
-    <div className="grid12">
-      <HeaderSlot
-        sub={`${tax.year} projection · ${FILING_LABEL[tax.settings.filingStatus]} · ${tax.states.find((s) => s.code === tax.settings.state)?.name ?? tax.settings.state}`}
-        actions={<Button variant="gold" onClick={newPaycheck}>+ Paycheck</Button>}
-      />
-      {/* ---------- headline ---------- */}
+  const header = (
+    <HeaderSlot
+      sub={`${tax.year} projection · ${FILING_LABEL[tax.settings.filingStatus]} · ${tax.states.find((s) => s.code === tax.settings.state)?.name ?? tax.settings.state}`}
+      actions={<Button variant="gold" onClick={newPaycheck}>+ Paycheck</Button>}
+    />
+  )
+
+  /* ---------- the full cards: each is (part of) a detail view ---------- */
+  const projectionCard = (
       <div className="card c8">
         <h2>Projected {tax.year} tax</h2>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
@@ -640,15 +655,15 @@ export default function Taxes() {
           <b className="inkstrong">{pct(tax.marginal.ltMicro)}</b>
         </div>
       </div>
-
-      {/* ---------- income picture ---------- */}
+  )
+  const incomeCard = (
       <div className="card c4">
         <h2>Income this year</h2>
         <table>
           <tbody>
             <tr>
               <td className="muted">
-                <Note tip={hasPaychecks ? payroll.earners.map((e) => `${e.earner}: ${formatCents(e.wagesCents)} taxable wages`) : 'From the salary setting below — add paychecks to derive it'}>
+                <Note tip={hasPaychecks ? payroll.earners.map((e) => `${e.earner}: ${formatCents(e.wagesCents)} taxable wages`) : 'From the salary in Tax settings — add paychecks to derive it'}>
                   Salary ({hasPaychecks ? `from ${payroll.sources.length} paycheck${payroll.sources.length > 1 ? 's' : ''}` : 'projected'})
                 </Note>
                 {payroll.stale > 0 && <> <Warn tip="A paystub is from last year — every pay date this year is projected from it" /></>}
@@ -702,7 +717,7 @@ export default function Taxes() {
                     tip={[
                       incomes.carryInStCents ? `${formatCents(incomes.carryInStCents)} short-term — nets against short-term gains first` : '',
                       incomes.carryInLtCents ? `${formatCents(incomes.carryInLtCents)} long-term — nets against long-term gains first` : '',
-                      'From the settings below',
+                      'From Tax settings',
                     ].filter(Boolean)}
                   >
                     Loss carried in from {tax.year - 1}
@@ -729,16 +744,16 @@ export default function Taxes() {
           </tbody>
         </table>
       </div>
-
-      {/* ---------- withholding & quarterlies ---------- */}
-      <div className="card c6" ref={safeHarborAnchor}>
+  )
+  const safeHarborCard = (
+      <div className="card c8">
         <h2>Withholding gap &amp; safe harbor</h2>
         <table>
           <tbody>
             <tr><td className="muted">Federal liability (projected)</td><td className="r num">{formatCents(t.fedTotalCents)}</td></tr>
             <tr>
               <td className="muted">
-                <Note tip={hasPaychecks ? `${formatCents(payroll.fedWithheldCents)} on paychecks · ${formatCents(rsuW.federalCents)} on ${formatCents(rsuW.baseCents)} of vests at ${pct(rsuW.federalMicro)}` : 'From the withholding setting below'}>
+                <Note tip={hasPaychecks ? `${formatCents(payroll.fedWithheldCents)} on paychecks · ${formatCents(rsuW.federalCents)} on ${formatCents(rsuW.baseCents)} of vests at ${pct(rsuW.federalMicro)}` : 'From the withholding in Tax settings'}>
                   Federal withholding{hasPaychecks ? ' (paychecks + vests)' : ''}
                 </Note>
               </td>
@@ -766,14 +781,9 @@ export default function Taxes() {
           <p className="sub2" style={{ marginTop: 8 }}>No state income tax — no state estimated payments.</p>
         )}
       </div>
-
-      {/* ---------- harvesting ---------- */}
-      <HarvestCard harvest={harvest} marginal={tax.marginal} anchor={harvestAnchor} />
-      <RealizedCard year={tax.year} />
-      <TwoYearCard anchor={twoYearAnchor} version={loads} />
-
-      {/* ---------- paychecks ---------- */}
-      <div className="card c12" ref={paychecksAnchor}>
+  )
+  const paychecksCard = (
+      <div className="card c12">
         <div className="h4row">
           <h2>Paychecks</h2>
           <div className="right">
@@ -847,7 +857,8 @@ export default function Taxes() {
           <p className="sub2">
             No paychecks yet. Add the latest paystub for each earner — a regular check's gross and withholding,
             and the year-to-date column if it's handy — and salary, withholding and payroll taxes derive from it
-            instead of the full-year guesses below.
+            instead of the full-year guesses in{' '}
+            <Link className="scr-link" to={{ screen: 'tax', rest: ['settings'] }}>Tax settings</Link>.
           </p>
         )}
         {hasPaychecks && (
@@ -969,11 +980,9 @@ export default function Taxes() {
           </div>
         )}
       </div>
-
-      <ContributionsCard anchor={contributionsAnchor} version={loads} />
-
-      {/* ---------- settings ---------- */}
-      <div className="card c12" ref={settingsAnchor}>
+  )
+  const settingsCard = (
+      <div className="card c12">
         <div className="h4row">
           <h2>Tax settings</h2>
           <div className="right">
@@ -1029,7 +1038,7 @@ export default function Taxes() {
           </Group>
           <Group
             title="Income & payments"
-            note={hasPaychecks ? <>salary and withholding come from the <Link className="scr-link" to={{ screen: 'tax', rest: ['paychecks'] }}>paychecks</Link> above</> : undefined}
+            note={hasPaychecks ? <>salary and withholding come from the <Link className="scr-link" to={{ screen: 'tax', rest: ['paychecks'] }}>paychecks</Link></> : undefined}
           >
             <FieldGrid min={180}>
               {!hasPaychecks && (
@@ -1126,6 +1135,238 @@ export default function Taxes() {
           Washington's capital-gains excise and Massachusetts's millionaire surtax are not modeled. Verify with a professional before acting.
         </p>
       </div>
-    </div>
+  )
+
+  if (detail === 'projection')
+    return (
+      <>
+        {header}
+        <DetailView title={`Projected ${tax.year} tax`}>
+          {projectionCard}
+          {incomeCard}
+        </DetailView>
+      </>
+    )
+  if (detail === 'safe-harbor')
+    return (
+      <>
+        {header}
+        <DetailView title="Withholding gap & safe harbor" lead="What the year's tax comes to against what paychecks, vests and estimated payments will have covered — and the installments that keep the IRS and the state from charging a penalty.">
+          {safeHarborCard}
+        </DetailView>
+      </>
+    )
+  if (detail === 'harvest')
+    return (
+      <>
+        {header}
+        <DetailView title="Loss harvesting">
+          <HarvestCard harvest={harvest} marginal={tax.marginal} span="c8" />
+        </DetailView>
+      </>
+    )
+  if (detail === 'realized')
+    return (
+      <>
+        {header}
+        <DetailView title="Realized gains">
+          <RealizedCard rz={rz} span="c8" />
+        </DetailView>
+      </>
+    )
+  if (detail === 'two-year')
+    return (
+      <>
+        {header}
+        <DetailView title="This year and next">
+          <TwoYearCard ty={ty} />
+        </DetailView>
+      </>
+    )
+  if (detail === 'contributions')
+    return (
+      <>
+        {header}
+        <DetailView title="Contribution pace">
+          <ContributionsCard ct={ct} />
+        </DetailView>
+      </>
+    )
+  if (detail === 'paychecks')
+    return (
+      <>
+        {header}
+        <DetailView title="Paychecks">{paychecksCard}</DetailView>
+      </>
+    )
+  if (detail === 'settings')
+    return (
+      <>
+        {header}
+        <DetailView title="Tax settings">{settingsCard}</DetailView>
+      </>
+    )
+
+  /* ---------- the overview: the bill, and one card per question ---------- */
+  const headline = gapLine(gap)
+
+  // Withholding: the next installment still due on each schedule, if any.
+  const nextDue = (x: SafeHarbor | null) => (x && x.remainingCents > 0 ? (x.quarters.find((q) => !q.past && q.cents > 0) ?? null) : null)
+  const fedDue = nextDue(sh)
+  const stateDue = nextDue(ssh)
+  const dueRows: MiniRow[] = [
+    ...(fedDue ? [{ key: 'fed', label: 'Next federal payment', sub: fedDue.due, value: formatDollars(fedDue.cents) }] : []),
+    ...(stateDue ? [{ key: 'state', label: `Next ${stateName} payment`, sub: stateDue.due, value: formatDollars(stateDue.cents) }] : []),
+  ]
+
+  // Harvesting: the same lots and totals the harvest table shows.
+  const lossLots = harvest.rows.filter((r) => r.gain_cents < 0).length
+  const harvestable = harvest.totals.harvestableStCents + harvest.totals.harvestableLtCents
+
+  // Realized: the year's figures from the income picture; the wash-sale count from the report, once it's in for this year.
+  const realized = incomes.realizedStCents + incomes.realizedLtCents
+  const washes = rz.report?.year === tax.year ? rz.report.flags.wash_risk : 0
+
+  // Contributions: 401(k)/403(b) room left by Dec 31, across the earners with a paycheck.
+  const paced = ct.c ? ct.c.people.filter((p) => p.deferral) : []
+  const room = paced.reduce((n, p) => n + p.deferral!.roomCents, 0)
+  const excess = paced.reduce((n, p) => n + p.deferral!.excessCents, 0)
+  const onPace = paced.filter((p) => p.deferral!.roomCents === 0 && p.deferral!.excessCents === 0).length
+
+  // Paychecks: how many stubs, and how fresh.
+  const latestStub = payroll.sources.reduce((d, p) => (p.paidOn > d ? p.paidOn : d), '')
+  const nextYear = ty.v?.nextYear ?? null
+  const yearDiff = ty.v ? ty.v.nextYear.tax.totalCents - ty.v.thisYear.tax.totalCents : 0
+
+  return (
+    <>
+      {header}
+      <div className="grid12">
+        <div className="card c8 tx-hero">
+          <div className="h4row">
+            <h2>Projected {tax.year} tax</h2>
+            <div className="right">
+              <DrillMore to="projection">Breakdown</DrillMore>
+            </div>
+          </div>
+          <div className="tx-hero-row">
+            <div className="heronum tx-hero-num">{formatCents(t.totalCents)}</div>
+            <span className={`delta ${headline.tone} tx-hero-delta`}>{headline.text}</span>
+          </div>
+          <Stats
+            items={[
+              { label: 'Federal', value: formatDollars(t.fedTotalCents) },
+              { label: stateName, value: stateTaxed ? formatDollars(t.stateCents) : 'No income tax' },
+              { label: 'Effective rate', value: pct(tax.effRateMicro), note: `next dollar of pay at ${pct(tax.marginal.ordinaryMicro)}` },
+              { label: 'Taxable income', value: formatDollars(t.taxableOrdinaryCents + t.taxableLtCents), note: `of ${formatDollars(incomes.totalIncomeCents)} income` },
+            ]}
+          />
+        </div>
+
+        <DrillCard
+          to="safe-harbor"
+          title="Withholding gap"
+          value={signedDollars(tax.fedGapCents)}
+          tone={tax.fedGapCents > 0 ? 'neg' : tax.fedGapCents < 0 ? 'pos' : undefined}
+          note={
+            <>
+              Federal{tax.fedGapCents > 0 ? ', still to pay' : tax.fedGapCents < 0 ? ', over-withheld' : ', on track'}
+              {stateTaxed && <> · {stateName} {signedDollars(tax.stateGapCents)}</>}
+              {dueRows.length === 0 && ' · no estimated payments due'}
+            </>
+          }
+        >
+          {dueRows.length > 0 ? <MiniRows rows={dueRows} /> : null}
+        </DrillCard>
+
+        <DrillCard
+          to="harvest"
+          title="Loss harvesting"
+          value={lossLots > 0 ? formatDollars(harvestable) : 'Nothing to harvest'}
+          note={
+            lossLots > 0 ? (
+              <>
+                in losses across {lossLots} lot{lossLots === 1 ? '' : 's'} · est. tax saved <b>{formatDollars(harvest.totals.estTaxSavedCents)}</b>
+                {harvest.totals.washFlagged > 0 && <> · {harvest.totals.washFlagged} wash-sale risk{harvest.totals.washFlagged > 1 ? 's' : ''}</>}
+              </>
+            ) : (
+              'No taxable lot is under water at today’s prices'
+            )
+          }
+        />
+
+        <DrillCard
+          to="realized"
+          title="Realized gains"
+          value={formatDollars(realized, { sign: realized !== 0 })}
+          tone={realized > 0 ? 'pos' : realized < 0 ? 'neg' : undefined}
+          note={
+            <>
+              {tax.year} · short-term {signedDollars(incomes.realizedStCents)} · long-term {signedDollars(incomes.realizedLtCents)}
+              {washes > 0 && <> · {washes} possible wash sale{washes === 1 ? '' : 's'}</>}
+            </>
+          }
+        />
+
+        <DrillCard
+          to="two-year"
+          title="This year and next"
+          value={nextYear ? formatDollars(nextYear.tax.totalCents) : undefined}
+          note={
+            nextYear
+              ? `projected for ${nextYear.year} — ${yearDiff === 0 ? `the same as ${tax.year}` : `${formatDollars(Math.abs(yearDiff))} ${yearDiff > 0 ? 'more' : 'less'} than ${tax.year}`} · price a sale now or in January`
+              : ty.err
+                ? 'Couldn’t project next year'
+                : 'Projecting next year…'
+          }
+        />
+
+        <DrillCard
+          to="contributions"
+          title="Contribution pace"
+          badge={ct.dirty ? 'Unsaved' : undefined}
+          value={!ct.c || paced.length === 0 ? undefined : excess > 0 ? `${formatDollars(excess)} over` : room > 0 ? `${formatDollars(room)} of room` : 'At the limit'}
+          note={
+            !ct.c
+              ? ct.error
+                ? 'Couldn’t work out the pace'
+                : 'Working out the pace…'
+              : paced.length === 0
+                ? 'Add a paycheck to pace 401(k) deferrals against the limits'
+                : `401(k) / 403(b) by Dec 31 · ${onPace} of ${paced.length} earner${paced.length === 1 ? '' : 's'} at the limit`
+          }
+        >
+          {paced.length > 0 ? (
+            <MiniRows
+              rows={paced.slice(0, 3).map((p) => ({
+                key: p.name,
+                label: p.name,
+                value: `${formatDollars(p.deferral!.projectedCents)} of ${formatDollars(p.deferral!.limitCents)}`,
+              }))}
+            />
+          ) : null}
+        </DrillCard>
+
+        <DrillCard
+          to="paychecks"
+          title="Paychecks"
+          badge={pay ? 'Editing' : undefined}
+          value={hasPaychecks ? `${payroll.sources.length} on file` : 'None yet'}
+          note={
+            hasPaychecks
+              ? `latest stub ${latestStub}${payroll.stale > 0 ? ` · ${payroll.stale} from last year` : ''} · wages ${formatDollars(payroll.wagesCents)}`
+              : 'Add the latest paystub and salary, withholding and payroll taxes derive from it'
+          }
+        />
+
+        <DrillCard
+          to="settings"
+          title="Tax settings"
+          badge={settingsDirty ? 'Unsaved' : undefined}
+          value={sentence(FILING_LABEL[tax.settings.filingStatus])}
+          note={`${tax.states.find((x) => x.code === tax.settings.state)?.name ?? tax.settings.state} · ${incomes.deductionSource === 'standard' ? 'standard' : 'itemized'} deduction`}
+        />
+      </div>
+    </>
   )
 }

@@ -13,7 +13,7 @@
  *   cancels, so an edit made just before leaving is saved.
  * - parseThreshold / compareKey / dataVersionOf: the odds threshold as typed,
  *   and the key a compare result is cached under.
- * - assumptionPills: the header's summary of a scenario's knobs.
+ * - assumptionSummary: the overview's one-line summary of a scenario's knobs.
  */
 
 import type { ScenarioParams } from '../../engine/scenarios'
@@ -168,24 +168,28 @@ export function dataVersionOf(v: { session: true; revision: number } | { session
 const knobPercent = (micro: number) => `${formatPercentField(micro)}%`
 
 /**
- * The mockup's assumption pills: the scenario's knobs as it was last
- * simulated. The return reads to a tenth like the mockup's 'Real return
- * 5.0%'; volatility reads as typed (13.5 stays 13.5, not 14). The purchase
- * shows only when one is modelled — `homeModelled` is false when the Dream
- * Home has no loan options, and the engine then buys nothing.
+ * A scenario's knobs in one line, for the overview's Assumptions card: the
+ * real return as the headline (to a tenth: '5.0% real return'), then the rest
+ * as it was last simulated. Volatility reads as typed (13.5 stays 13.5, not
+ * 14). The purchase shows only when one is modelled — `homeModelled` is false
+ * when the Dream Home has no loan options, and the engine then buys nothing.
  */
-export function assumptionPills(
+export function assumptionSummary(
   p: Pick<ScenarioParams, 'meanReturnMicro' | 'volMicro' | 'saveBeforeBuyCents' | 'buyEnabled' | 'buyYear' | 'retireYear'> &
     Partial<Pick<ScenarioParams, 'taxModel' | 'conversion'>>,
   homeModelled: boolean,
-): string[] {
-  return [
-    `Real return ${formatPercentMicro(p.meanReturnMicro, 1)}`,
-    `σ ${knobPercent(p.volMicro)}`,
-    `Save ${fmtShort(p.saveBeforeBuyCents)}/yr`,
-    p.buyEnabled && homeModelled ? `Buy house ${p.buyYear}` : null,
-    `Retire ${p.retireYear}`,
-    p.taxModel ? 'Taxed' : null,
-    p.taxModel && p.conversion ? `Convert ${p.conversion.fromYear}–${p.conversion.toYear}` : null,
-  ].filter((x): x is string => x !== null)
+): { value: string; note: string } {
+  return {
+    value: `${formatPercentMicro(p.meanReturnMicro, 1)} real return`,
+    note: [
+      `σ ${knobPercent(p.volMicro)}`,
+      `save ${fmtShort(p.saveBeforeBuyCents)}/yr`,
+      p.buyEnabled && homeModelled ? `buy house ${p.buyYear}` : null,
+      `retire ${p.retireYear}`,
+      p.taxModel ? 'taxed' : null,
+      p.taxModel && p.conversion ? `convert ${p.conversion.fromYear}–${p.conversion.toYear}` : null,
+    ]
+      .filter((x): x is string => x !== null)
+      .join(' · '),
+  }
 }

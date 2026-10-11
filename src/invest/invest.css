@@ -692,3 +692,10 @@
 .inv-preview tr.inv-hasnote td { border-bottom: 0; }
 .inv-preview tr.inv-noterow td { padding-top: 0; }
 .inv-preview tr.inv-noterow .inv-notes { min-width: 0; white-space: normal; }
+
+/* ---------- overview → detail (src/ui/Drill.tsx) ---------- */
+/* The owner pills above a detail view's card (the overview keeps them in the headline). */
+.inv-detail-owners { min-width: 0; }
+.inv-detail-owners .inv-owners { margin: 0; }
+/* The overview's short holdings table: "8 more holdings" under the largest few. */
+.inv-restrow .inv-cashlabel { color: var(--ink-2); }

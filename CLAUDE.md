@@ -52,6 +52,13 @@ Match it when building screens (layout, copy tone, chart anatomy).
   native `confirm`/`prompt`/`alert`, explanations in Tooltip rather than
   `title=`, and no mutation without `useAction` (busy state + toast). Motion
   uses the `--dur-*`/`--ease-*` tokens and honours reduced motion.
+- **Overview first, detail one level down.** A screen's `#/<screen>` is a short
+  overview — a hero figure and a handful of `DrillCard`s, each one number and
+  one line — with no inputs, settings, full tables or explanatory prose. Those
+  live in detail views (`#/<screen>/<detail>`, `useDetail` + `DetailView` in
+  `src/ui/Drill.tsx`). A new feature adds a card and a detail view; it does not
+  add height to an overview. Detail ids are URLs: never rename one that the
+  engine's findings or the palette link to.
 - **Derived numbers come from the ledger.** Store facts (transactions, lots,
   valuations); compute charts/balances from them, never store both.
 

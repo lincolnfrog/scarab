@@ -18,6 +18,23 @@ export type TaxPictureProps = {
 const rate = (cents: number, micro: number) => Math.round((cents * micro) / 1_000_000)
 
 /**
+ * The year's realized gains netted the way the return nets them, and the
+ * estimated tax at the household's marginal rates (null while they're unknown).
+ * One sum for this card and for Investments' one-figure summary of it.
+ */
+export function taxPicture(totals: PortfolioResponse['totals'], marginal: TaxPictureProps['marginal'], carryIn?: TaxPictureProps['carryIn']) {
+  const cSt = carryIn?.stCents ?? 0
+  const cLt = carryIn?.ltCents ?? 0
+  const st = totals.ytd_st - cSt
+  const lt = totals.ytd_lt - cLt
+  const n = netCapitalGains(st, lt)
+  const estTax = marginal
+    ? rate(n.netStCents, marginal.stMicro) + rate(n.netLtCents, marginal.ltMicro) - rate(n.capLossUsedCents, marginal.ordinaryMicro)
+    : null
+  return { cSt, cLt, st, lt, n, estTax }
+}
+
+/**
  * This year's realized gains from taxable accounts, netted the way the return
  * nets them (short against long, then up to $3,000 of a net loss against
  * ordinary income), with the estimated tax at the household's marginal rates.
@@ -27,17 +44,10 @@ const rate = (cents: number, micro: number) => Math.round((cents * micro) / 1_00
  * A strip of figures across the screen — Taxes has the detail.
  */
 export default function TaxPictureCard({ totals, marginal, year, scope, carryIn }: TaxPictureProps) {
-  const cSt = carryIn?.stCents ?? 0
-  const cLt = carryIn?.ltCents ?? 0
-  const st = totals.ytd_st - cSt
-  const lt = totals.ytd_lt - cLt
-  const n = netCapitalGains(st, lt)
+  const { cSt, cLt, st, lt, n, estTax } = taxPicture(totals, marginal, carryIn)
   const netted = n.netStCents !== st || n.netLtCents !== lt
   const reported = (c: number) => (c !== 0 ? ` · incl. ${formatCents(c, { sign: c > 0 })} reported by the broker` : '')
   const netLoss = n.capLossUsedCents + n.capLossCarryCents
-  const estTax = marginal
-    ? rate(n.netStCents, marginal.stMicro) + rate(n.netLtCents, marginal.ltMicro) - rate(n.capLossUsedCents, marginal.ordinaryMicro)
-    : null
 
   return (
     <div className="card c12 inv-taxcard">

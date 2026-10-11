@@ -12,13 +12,25 @@ import './ui.css'
  * (scroll to a section, write the URL).
  */
 
-type ScreenCtx = { id: ScreenId; active: boolean; headerHost: HTMLElement | null }
+type ScreenCtx = { id: ScreenId; active: boolean; headerHost: HTMLElement | null; setCrumb: (title: string | null) => void }
 const ScreenContext = createContext<ScreenCtx | null>(null)
 
-/** App wraps each screen in one. `headerHost` is that screen's slot in the page header (see HeaderSlot). */
-export function ScreenProvider(p: { id: ScreenId; active: boolean; headerHost: HTMLElement | null; children: ReactNode }) {
-  const { id, active, headerHost } = p
-  const value = useMemo(() => ({ id, active, headerHost }), [id, active, headerHost])
+const noCrumb = () => {}
+
+/**
+ * App wraps each screen in one. `headerHost` is that screen's slot in the page header (see HeaderSlot);
+ * `onCrumb` hears the title of the detail view the screen is showing, or null on its overview (see Drill).
+ */
+export function ScreenProvider(p: {
+  id: ScreenId
+  active: boolean
+  headerHost: HTMLElement | null
+  onCrumb?: (id: ScreenId, title: string | null) => void
+  children: ReactNode
+}) {
+  const { id, active, headerHost, onCrumb } = p
+  const setCrumb = useMemo(() => (onCrumb ? (title: string | null) => onCrumb(id, title) : noCrumb), [onCrumb, id])
+  const value = useMemo(() => ({ id, active, headerHost, setCrumb }), [id, active, headerHost, setCrumb])
   return (
     <RouteScope.Provider value={id}>
       <ScreenContext.Provider value={value}>{p.children}</ScreenContext.Provider>
@@ -41,6 +53,11 @@ export function useScreen(): { id: ScreenId; active: boolean } {
 /** This screen's header slot element, or null before App has rendered it. For HeaderSlot. */
 export function useHeaderHost(): HTMLElement | null {
   return useScreenContext().headerHost
+}
+
+/** Name the detail view this screen is showing in the page heading; null clears it. For DetailView. */
+export function useCrumb(): (title: string | null) => void {
+  return useScreenContext().setCrumb
 }
 
 const blank = (id: ScreenId): Route => ({ screen: id, rest: [], params: {}, state: {} })

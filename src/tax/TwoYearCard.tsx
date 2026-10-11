@@ -30,14 +30,24 @@ const ROWS: { label: string; of: (y: YearView) => number; show?: (a: YearView, b
   { label: 'State tax', of: (y) => y.tax.stateCents, show: (a, b) => a.tax.stateCents + b.tax.stateCents > 0 },
 ]
 
+export type TwoYearState = {
+  v: TwoYear | null
+  err: string | null
+  kind: TimingKind
+  setKind: (k: TimingKind) => void
+  amount: number | null
+  setAmount: (c: number | null) => void
+  timing: Timing | null
+  setTiming: (t: Timing | null) => void
+}
+
 /**
- * This year and next, side by side (copilot §4e): next year on the same
- * settings — the paychecks for a full year, the grants' scheduled vests, a
- * year of dividends, this year's loss carryforward — on this year's tables;
- * and a timing question priced over both years: the same amount now or in
- * January. `version` bumps when the Taxes screen reloads.
+ * The two-year projection and the timing question being asked, held by the
+ * Taxes screen: its overview summarizes next year, and the question survives
+ * a trip between views. `version` bumps when the screen reloads; 0 means the
+ * tax picture hasn't loaded yet, and nothing is fetched.
  */
-export default function TwoYearCard({ anchor, version }: { anchor?: RefCallback<HTMLElement>; version: number }) {
+export function useTwoYear(version: number): TwoYearState {
   const [v, setV] = useState<TwoYear | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [kind, setKind] = useState<TimingKind>('lt-gain')
@@ -48,9 +58,22 @@ export default function TwoYearCard({ anchor, version }: { anchor?: RefCallback<
     setErr(null)
   }, [])
   useEffect(() => {
+    if (version === 0) return
     load().catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
     setTiming(null) // priced against the old numbers
   }, [load, version])
+  return { v, err, kind, setKind, amount, setAmount, timing, setTiming }
+}
+
+/**
+ * This year and next, side by side (copilot §4e): next year on the same
+ * settings — the paychecks for a full year, the grants' scheduled vests, a
+ * year of dividends, this year's loss carryforward — on this year's tables;
+ * and a timing question priced over both years: the same amount now or in
+ * January.
+ */
+export default function TwoYearCard({ anchor, ty }: { anchor?: RefCallback<HTMLElement>; ty: TwoYearState }) {
+  const { v, err, kind, setKind, amount, setAmount, timing, setTiming } = ty
   const price = useAction((k: TimingKind, cents: number) => post<Timing>('/api/tax/timing', { kind: k, amountCents: cents }), {
     errorPrefix: "Couldn't price the timing",
     onDone: setTiming,

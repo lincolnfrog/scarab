@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { assumptionPills, compareKey, createFlushable, createLatest, dataVersionOf, editGeneration, parseThreshold, saveStatus } from './future-sync'
+import { assumptionSummary, compareKey, createFlushable, createLatest, dataVersionOf, editGeneration, parseThreshold, saveStatus } from './future-sync'
 
 describe('createLatest', () => {
   it('only the newest request may land', () => {
@@ -183,14 +183,21 @@ describe('dataVersionOf', () => {
   })
 })
 
-describe('assumptionPills', () => {
+describe('assumptionSummary', () => {
   const p = { meanReturnMicro: 55_000, volMicro: 135_000, saveBeforeBuyCents: 150_000_00, buyEnabled: true, buyYear: 2027, retireYear: 2048 }
   it('reads volatility as typed, not rounded to a whole percent (F31)', () => {
-    expect(assumptionPills(p, true)).toEqual(['Real return 5.5%', 'σ 13.5%', 'Save $150K/yr', 'Buy house 2027', 'Retire 2048'])
-    expect(assumptionPills({ ...p, volMicro: 120_000, meanReturnMicro: 50_000 }, true).slice(0, 2)).toEqual(['Real return 5.0%', 'σ 12%'])
+    expect(assumptionSummary(p, true)).toEqual({ value: '5.5% real return', note: 'σ 13.5% · save $150K/yr · buy house 2027 · retire 2048' })
+    const q = assumptionSummary({ ...p, volMicro: 120_000, meanReturnMicro: 50_000 }, true)
+    expect(q.value).toBe('5.0% real return')
+    expect(q.note.startsWith('σ 12% ·')).toBe(true)
   })
   it('names the purchase only when one is modelled', () => {
-    expect(assumptionPills(p, false)).not.toContain('Buy house 2027')
-    expect(assumptionPills({ ...p, buyEnabled: false }, true)).not.toContain('Buy house 2027')
+    expect(assumptionSummary(p, false).note).not.toContain('buy house')
+    expect(assumptionSummary({ ...p, buyEnabled: false }, true).note).not.toContain('buy house')
+  })
+  it('says when taxes and conversions are modelled', () => {
+    const conversion = { fromYear: 2049, toYear: 2058, amountCents: 5_000_000, fillBracketMicro: null }
+    expect(assumptionSummary({ ...p, taxModel: true, conversion }, true).note).toBe('σ 13.5% · save $150K/yr · buy house 2027 · retire 2048 · taxed · convert 2049–2058')
+    expect(assumptionSummary({ ...p, taxModel: false, conversion }, true).note).not.toContain('convert')
   })
 })

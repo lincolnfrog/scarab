@@ -774,6 +774,26 @@ are reserved for gains/losses, never series. Marcellus (bundled woff2, OFL)
 for display; ui-monospace tabular-nums for number columns. One control
 height: `--control-h` 34px, `--control-h-mini` 28px (40 and 32 on touch).
 
+**Hierarchy** (2026-10-05). Every screen is two levels. `#/<screen>` is the
+overview: a hero figure, its main chart if it has one, and a handful of
+`DrillCard`s — one number and one line each — sized to fit about a screen
+(Taxes went from 4,052px to 847, Cash from 6,835 to 919 at 1440×900).
+`#/<screen>/<detail>` is a detail view (`useDetail` + `DetailView`,
+`src/ui/Drill.tsx`): the tables, forms, settings and prose that used to sit
+on the screen, unchanged. The heading becomes a crumb ("Taxes › Realized
+gains", the screen's name linking back up), App keeps a scroll position per
+view, Back works, and the old section anchors are detail ids so the engine's
+findings, the digest and the palette land on the evidence itself. Details:
+dash `news` `balance` · invest `holdings` `accounts` `allocation` `activity` ·
+cash `spending` `budget` `recurring` `import` `transactions` · tax
+`projection` `safe-harbor` `harvest` `realized` `two-year` `contributions`
+`paychecks` `settings` · goal `setup` `loans` `funding` `rental` · future
+`assumptions` `results` `compare` `events` `guide` · checkup `assumptions`
+(= `settings`) · re `exclusion`. Screen state stays in the screen component,
+so an unsaved edit survives a trip to the overview; dialogs and drawers mount
+outside the view switch. The mockup artifact predates this and still shows
+the single-level screens.
+
 **Motion** is CSS-first. Tokens on `:root`: `--ease-out`, `--ease-io`,
 `--dur-1` 90ms (hover, press), `--dur-2` 180ms (popovers, dialogs, toasts),
 `--dur-3` 280ms (drawers), `--dur-4` 600ms (chart reveals); `src/ui/motion.ts`

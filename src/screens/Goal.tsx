@@ -10,12 +10,13 @@ import type { GoalDerived } from '../../shared/types'
 import { Button } from '../ui/Button'
 import { confirm, prompt } from '../ui/dialogs'
 import { Field, MoneyInput, PercentInput, Select, TextInput } from '../ui/Field'
+import { DetailView, DrillCard, Stats, useDetail } from '../ui/Drill'
 import { HeaderSlot } from '../ui/HeaderSlot'
-import { useAnchor } from '../ui/screen'
 import { Skeleton } from '../ui/Skeleton'
 import { Tooltip } from '../ui/Tooltip'
 import { useAction } from '../ui/useAction'
 import './screens.css'
+import './goal-overview.css'
 
 type Goal = {
   targetPriceCents: number
@@ -147,14 +148,24 @@ type LoanForm = { name: string; rateMicro: number | null; termYears: string; poi
 const EMPTY_LOAN: LoanForm = { name: '', rateMicro: null, termYears: '30', pointsMicro: null, note: '' }
 const MAX_LOAN_RATE = 250_000 // 25%: anything above is a typo, not a mortgage
 
+/**
+ * The detail views behind the overview's cards. 'loans' and 'rental' are also
+ * the section links other screens, the digest and the checkup point at.
+ */
+const DETAILS = ['setup', 'loans', 'funding', 'rental'] as const
+const DETAIL_TITLE: Record<(typeof DETAILS)[number], string> = {
+  setup: 'Target & fund setup',
+  loans: 'Loan options',
+  funding: 'Funding the gap',
+  rental: 'Rent out the current home',
+}
+
 export default function Goal() {
   const [data, setData] = useState<GoalData | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [loanForm, setLoanForm] = useState<LoanForm>(EMPTY_LOAN)
   const [loanErr, setLoanErr] = useState<{ field: 'name' | 'rate'; msg: string } | null>(null)
-  // '#/goal/loans' and '#/goal/rental' land on these cards (Future and Real estate link to them).
-  const loansAnchor = useAnchor('loans')
-  const rentalAnchor = useAnchor('rental')
+  const detail = useDetail(DETAILS)
 
   // A failed first load says so (with a retry) instead of "Loading…" forever; a failed refresh keeps the last data.
   // The loss Taxes carries out of this year (recorded sales, broker-reported figures and last year's carryover):
@@ -225,7 +236,7 @@ export default function Goal() {
     { success: (name) => `Removed ${name}`, errorPrefix: "Couldn't remove the loan option", onDone: () => void load() },
   )
 
-  const loadingHeader = <HeaderSlot sub="The down-payment fund, the loan options and what the house costs to carry" />
+  const loadingHeader = <HeaderSlot sub="The down-payment fund and how to pay for the house" />
   if (!data)
     return loadErr ? (
       <div className="card wide" role="alert">
@@ -257,7 +268,7 @@ export default function Goal() {
   async function askRemoveLoan(l: Loan) {
     const ok = await confirm({
       title: `Remove ${l.name}?`,
-      body: `${pct(l.rate_micro)} over ${Math.round(l.term_months / 12)} years. The payment tables below stop using it.`,
+      body: `${pct(l.rate_micro)} over ${Math.round(l.term_months / 12)} years. The payment tables stop using it.`,
       confirmLabel: 'Remove',
       danger: true,
     })
@@ -293,19 +304,23 @@ export default function Goal() {
   const loanAmtAtTarget = goal.targetPriceCents - downCents
 
   const funded = Math.floor(derived.pctMicro / 10_000) // whole percent, floored: 100 only once funded
-  return (
-    <div className="grid12">
-      <HeaderSlot
-        sub={
-          `Target ≈ ${fmtShort(goal.targetPriceCents)} · ${funded}% funded` +
-          (remaining === 0 ? '' : eta ? ` · on pace for ${fmtMonth(eta, true)}` : derived.monthlyPlanCents > 0 ? '' : ' · no monthly plan yet')
-        }
-      />
+  // What selling assets to close the gap would take, as the Funding view works it out.
+  const gapSale =
+    remaining > 0
+      ? grossSaleForNet(remaining, goal.saleBasisPctMicro, goal.capGainsRateMicro, goal.lossCarryforwardCents || (taxCarry ?? 0))
+      : null
+  const counted = accounts.filter((a) => goal.fundAccountIds.includes(a.id)).length
+  const rentalProperty = properties.find((p) => p.id === rental.propertyId)?.name
+
+  const body = (
+    <>
+      <HeaderSlot sub={`Target ≈ ${fmtShort(goal.targetPriceCents)} · ${funded}% funded`} />
       {/* ---------- target ---------- */}
-      <div className="card c12">
+      {detail === 'setup' && (
+      <div className="card c6">
         <div className="h4row">
           <h2>The target</h2>
-          <div className="right muted">everything below recalculates from these three numbers</div>
+          <div className="right muted">everything recalculates from these three numbers</div>
         </div>
         <div className="scr-fields">
           <div className="scr-f lg">
@@ -339,9 +354,11 @@ export default function Goal() {
           </span>
         </div>
       </div>
+      )}
 
-      {/* ---------- fund ---------- */}
-      <div className="card c8">
+      {/* ---------- fund (the overview's hero) ---------- */}
+      {detail === null && (
+      <div className="card c12 goal-hero">
         <h2>Down payment fund</h2>
         <div className="scr-fundhead">
           <div className="heronum" style={{ fontSize: 36 }}>
@@ -368,9 +385,87 @@ export default function Goal() {
         >
           <i style={{ width: `${progress}%` }} />
         </div>
+        <Stats
+          items={[
+            { label: 'Target price', value: formatDollars(goal.targetPriceCents), note: `${pct(goal.downPctMicro, 1)} down` },
+            {
+              label: 'Cash to close',
+              value: formatDollars(target),
+              note: `${fmtShort(downCents)} down + ${fmtShort(goal.closingCents)} closing`,
+            },
+            remaining > 0
+              ? { label: 'Still to save', value: formatDollars(remaining) }
+              : { label: 'Still to save', value: '$0', note: 'the cash to close is in hand' },
+            {
+              label: 'Plan per month',
+              value: derived.monthlyPlanCents > 0 ? formatDollars(derived.monthlyPlanCents) : '—',
+              note: derived.monthlyPlanCents > 0 ? undefined : 'no monthly plan yet',
+            },
+          ]}
+        />
         <GoalFundChart series={series} derived={derived} />
       </div>
-      <div className="card c4">
+      )}
+      {detail === null && (
+        <>
+          <DrillCard
+            to="setup"
+            span="c3"
+            title="Target & fund setup"
+            value={counted === 0 ? 'No accounts' : `${counted} account${counted === 1 ? '' : 's'}`}
+            note={
+              counted === 0
+                ? 'Pick the accounts that hold the down payment'
+                : goal.fundExtraCents > 0
+                  ? `counted toward the fund, plus ${fmtShort(goal.fundExtraCents)} earmarked elsewhere`
+                  : 'counted toward the fund'
+            }
+          />
+          <DrillCard
+            to="loans"
+            span="c3"
+            title="Loan options"
+            value={
+              selectedLoan
+                ? `${formatDollars(pmt(loanAmtAtTarget, selectedLoan.rate_micro, selectedLoan.term_months))}/mo`
+                : 'None yet'
+            }
+            note={
+              selectedLoan
+                ? `P&I · ${selectedLoan.name} · ${pct(selectedLoan.rate_micro)} · ${Math.round(selectedLoan.term_months / 12)} yr`
+                : "Add an option from a loan officer's term sheet"
+            }
+            badge={loans.length > 1 ? `${loans.length} options` : undefined}
+          />
+          <DrillCard
+            to="funding"
+            span="c3"
+            title="Funding the gap"
+            value={gapSale ? formatDollars(remaining) : 'Funded'}
+            note={
+              gapSale
+                ? gapSale.taxCents === 0
+                  ? `a ${fmtShort(gapSale.grossCents)} asset sale covers it, tax fully shielded`
+                  : `a ${fmtShort(gapSale.grossCents)} asset sale nets it after ≈ ${fmtShort(gapSale.taxCents)} tax`
+                : 'The fund covers the cash to close'
+            }
+          />
+          <DrillCard
+            to="rental"
+            span="c3"
+            title="Rent out the current home"
+            value={rental.rentCents > 0 ? `${formatDollars(rentalNet, { sign: rentalNet > 0 })}/mo` : 'Not modelled'}
+            tone={rental.rentCents > 0 ? (rentalNet >= 0 ? 'pos' : 'neg') : undefined}
+            note={
+              rental.rentCents > 0
+                ? `net cash flow${rentalProperty ? ` · ${rentalProperty}` : ''}`
+                : 'Enter a market rent to see the cash flow'
+            }
+          />
+        </>
+      )}
+      {detail === 'setup' && (
+      <div className="card c6">
         <h2>What counts as the fund</h2>
         <div style={{ display: 'grid', gap: 6 }}>
           {accounts.map((a) => (
@@ -424,12 +519,14 @@ export default function Goal() {
           )}
         </div>
       </div>
+      )}
 
       {/* ---------- loan options ---------- */}
-      <div className="card c12" ref={loansAnchor}>
+      {detail === 'loans' && (
+      <div className="card c12">
         <div className="h4row">
           <h2>Loan options</h2>
-          <div className="right muted">from the loan officer's term sheets · click a row to project payments below</div>
+          <div className="right muted">from the loan officer's term sheets · click a row to project payments</div>
         </div>
         {loans.length > 0 && (
           <div className="ui-tablewrap">
@@ -550,9 +647,10 @@ export default function Goal() {
           </Button>
         </form>
       </div>
+      )}
 
       {/* ---------- payment matrix ---------- */}
-      {selectedLoan && (
+      {detail === 'loans' && selectedLoan && (
         <div className="card c12">
           <div className="h4row">
             <h2>
@@ -599,6 +697,7 @@ export default function Goal() {
       )}
 
       {/* ---------- funding & taxes (full width when there's no loan to set carry vs. payoff beside it) ---------- */}
+      {detail === 'funding' && (
       <div className={`card ${selectedLoan ? 'c6' : 'c12'}`}>
         <div className="h4row">
           <h2>Funding the gap with asset sales</h2>
@@ -641,9 +740,8 @@ export default function Goal() {
             />
           </div>
         </div>
-        {remaining > 0 ? (
-          (() => {
-            const g = grossSaleForNet(remaining, goal.saleBasisPctMicro, goal.capGainsRateMicro, goal.lossCarryforwardCents || (taxCarry ?? 0))
+        {gapSale ? (
+          ((g) => {
             return (
               <table style={{ marginTop: 10, maxWidth: 440 }}>
                 <tbody>
@@ -658,7 +756,7 @@ export default function Goal() {
                 </tbody>
               </table>
             )
-          })()
+          })(gapSale)
         ) : (
           <p className="sub2" style={{ marginTop: 8 }}>The fund already covers the target — nothing to gross up.</p>
         )}
@@ -666,9 +764,10 @@ export default function Goal() {
           A calculator, not tax advice — carryforward mechanics and state conformity are CPA territory.
         </p>
       </div>
+      )}
 
       {/* ---------- carry vs payoff ---------- */}
-      {selectedLoan && (
+      {detail === 'funding' && selectedLoan && (
         <div className="card c6">
           <div className="h4row">
             <h2>Carry vs. payoff</h2>
@@ -702,7 +801,8 @@ export default function Goal() {
       )}
 
       {/* ---------- rental scenario ---------- */}
-      <div className="card c12" ref={rentalAnchor}>
+      {detail === 'rental' && (
+      <div className="card c12">
         <div className="h4row">
           <h2>Rent out the current home</h2>
           <div className="right">
@@ -766,6 +866,8 @@ export default function Goal() {
           $500K married capital-gains exclusion fades. Selling within that window keeps it.
         </p>
       </div>
-    </div>
+      )}
+    </>
   )
+  return detail ? <DetailView title={DETAIL_TITLE[detail]}>{body}</DetailView> : <div className="grid12">{body}</div>
 }

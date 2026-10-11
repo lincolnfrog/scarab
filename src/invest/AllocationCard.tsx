@@ -10,7 +10,7 @@ import { useAction } from '../ui/useAction'
 import './allocation.css'
 
 /** Same list and order as engine/allocation.ts ASSET_CLASSES (the engine module isn't in this bundle). */
-const CLASSES: { cls: AssetClass; label: string }[] = [
+export const CLASSES: { cls: AssetClass; label: string }[] = [
   { cls: 'us_stock', label: 'US stocks' },
   { cls: 'intl_stock', label: 'International stocks' },
   { cls: 'bonds', label: 'Bonds' },
@@ -19,9 +19,9 @@ const CLASSES: { cls: AssetClass; label: string }[] = [
   { cls: 'crypto', label: 'Crypto' },
   { cls: 'other', label: 'Other / mixed' },
 ]
-const LABEL = Object.fromEntries(CLASSES.map((c) => [c.cls, c.label])) as Record<AssetClass, string>
-const pct = (micro: number) => `${(micro / 10_000).toFixed(1)}%`
-const pp = (micro: number) => `${micro > 0 ? '+' : micro < 0 ? '−' : '±'}${Math.abs(micro / 10_000).toFixed(1)}pp`
+export const CLASS_LABEL = Object.fromEntries(CLASSES.map((c) => [c.cls, c.label])) as Record<AssetClass, string>
+export const pct = (micro: number) => `${(micro / 10_000).toFixed(1)}%`
+export const pp = (micro: number) => `${micro > 0 ? '+' : micro < 0 ? '−' : '±'}${Math.abs(micro / 10_000).toFixed(1)}pp`
 const STEP_TITLE: Record<PlanStep['step'], string> = {
   contribute: '1 · New contributions over the next year',
   sheltered: '2 · Trades inside sheltered accounts — no tax',
@@ -44,7 +44,7 @@ function Plan({ a }: { a: Allocation }) {
             {g.rows.map((s, i) => (
               <li key={i} className={s.action}>
                 <span className="al-act">{s.action === 'buy' ? 'Buy' : 'Sell'}</span>
-                <span className="al-cls">{LABEL[s.cls]}</span>
+                <span className="al-cls">{CLASS_LABEL[s.cls]}</span>
                 <span className="al-amt">{formatDollars(s.cents)}</span>
                 <span className="al-where">
                   {s.where}
@@ -125,7 +125,14 @@ export default function AllocationCard({ rev, anchor, planOpen = false }: { rev:
         {err ? <p className="sub2">Couldn't work out the allocation: {err}</p> : <Skeleton h={120} />}
       </div>
     )
-  if (a.totalCents <= 0) return null
+  // In a view of its own now: say why it's empty rather than leave the page blank.
+  if (a.totalCents <= 0)
+    return (
+      <div className="card c12" ref={anchor}>
+        <h2>Allocation</h2>
+        <p className="sub2">Nothing invested yet — once an account holds something, its split by asset class shows here.</p>
+      </div>
+    )
 
   const sum = sumOf(targets)
   const saved = a.target ?? {}
@@ -211,7 +218,7 @@ export default function AllocationCard({ rev, anchor, planOpen = false }: { rev:
                     <td className="r num">{formatDollars(x.cents)}</td>
                     <td className="al-pick">
                       <Select aria-label={`${x.symbol} class`} value={x.guessed ? '' : x.cls} onChange={(e) => void setClass.run('assets', x.id, (e.target.value || null) as AssetClass | null)}>
-                        <option value="">{`Guess: ${LABEL[x.cls]}`}</option>
+                        <option value="">{`Guess: ${CLASS_LABEL[x.cls]}`}</option>
                         {CLASSES.map((c) => <option key={c.cls} value={c.cls}>{c.label}</option>)}
                       </Select>
                     </td>

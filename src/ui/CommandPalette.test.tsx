@@ -136,7 +136,7 @@ describe('the filter', () => {
     expect(top('mortgage', 3)).toContain('goal/loans')
     expect(matchCommand('mortgage', byId('re'))?.hits).toEqual([]) // nothing in the label to highlight
     // "cash" names the Cash screen outright; its actions follow through the screen name.
-    const cash = top('cash', 4)
+    const cash = top('cash', 5) // the screen, then its actions and sections by name
     expect(cash[0]).toBe('cash')
     expect(cash).toContain('cash:import')
     expect(top('taxes paycheck', 3)).toEqual(expect.arrayContaining(['tax/paychecks', 'tax:add-paycheck']))

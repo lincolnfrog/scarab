@@ -53,7 +53,7 @@ export default function DreamHomeTile({ derived: d, setUp, span }: { derived: Go
           when your monthly plan gets you there.
         </p>
       )}
-      <Link to={{ screen: 'goal' }} className="btn gold ch-dream-cta">
+      <Link to={setUp ? { screen: 'goal' } : { screen: 'goal', rest: ['setup'] }} className="btn gold ch-dream-cta">
         {setUp ? 'Open goal →' : 'Set up the fund →'}
       </Link>
     </div>

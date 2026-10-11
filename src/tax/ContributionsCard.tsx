@@ -3,6 +3,7 @@ import type { Contributions, PersonPace } from '../../engine/contributions'
 import type { Person } from '../../engine/people'
 import { formatDollars } from '../../shared/money'
 import { get, put } from '../api'
+import { Link } from '../router'
 import { Button } from '../ui/Button'
 import { Field, MoneyInput, Select } from '../ui/Field'
 import { Skeleton } from '../ui/Skeleton'
@@ -69,7 +70,7 @@ function PersonRows({ p, c }: { p: PersonPace; c: Contributions }) {
       ) : (
         <div className="ct-row">
           <span className="ct-what">401(k) / 403(b)</span>
-          <span className="ct-note ct-wide">No paycheck for {p.name} — add one above to pace deferrals.</span>
+          <span className="ct-note ct-wide">No paycheck for {p.name} — add one on <Link className="scr-link" to={{ screen: 'tax', rest: ['paychecks'] }}>Paychecks</Link> to pace deferrals.</span>
         </div>
       )}
       {p.hsa && p.hsa.coverage === 'self' && (
@@ -79,7 +80,7 @@ function PersonRows({ p, c }: { p: PersonPace; c: Contributions }) {
           <span className="ct-num">
             <b>{formatDollars(p.hsa.plannedCents)}</b> of {formatDollars(p.hsa.limitCents)}
           </span>
-          <span className="ct-note">planned, from the setting below</span>
+          <span className="ct-note">planned, from the People settings below</span>
         </div>
       )}
       <div className="ct-row">
@@ -108,19 +109,29 @@ const YEARS = (() => {
   return Array.from({ length: now - 15 - 1925 + 1 }, (_, i) => now - 15 - i)
 })()
 
+export type ContributionsState = {
+  c: Contributions | null
+  people: Person[] | null
+  setPeople: (f: (ps: Person[] | null) => Person[] | null) => void
+  /** The people list as last read or saved, for the unsaved-changes check. */
+  saved: string
+  dirty: boolean
+  error: string | null
+  /** After a save: adopt what was stored and recompute the pace. */
+  adopt: (people: Person[]) => void
+}
+
 /**
- * Contribution pace (copilot §4b): each person's 401(k)/403(b) deferrals by
- * Dec 31 against the limit their age allows — from the paystubs above —
- * with when the limit is reached and what the match does; HSA against its
- * limit; and the IRA, with whether a direct Roth contribution is open at this
- * year's income. Below it, the few facts about each person the limits need.
- * `version` bumps when the Taxes screen reloads (a paycheck saved), so the
- * pace follows.
+ * The pace and the people form, held by the Taxes screen: its overview
+ * summarizes the pace, and a half-edited person survives a trip between
+ * views. `version` bumps when the screen reloads (a paycheck saved), so the
+ * pace follows; 0 means the tax picture hasn't loaded yet, and nothing is
+ * fetched.
  */
-export default function ContributionsCard({ anchor, version }: { anchor?: RefCallback<HTMLElement>; version: number }) {
+export function useContributions(version: number): ContributionsState {
   const [c, setC] = useState<Contributions | null>(null)
   const [people, setPeople] = useState<Person[] | null>(null)
-  const [saved, setSaved] = useState('') // the list as last read or saved, for the unsaved-changes check
+  const [saved, setSaved] = useState('')
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
     const [cc, pp] = await Promise.all([get<Contributions>('/api/contributions'), get<Person[]>('/api/people')])
@@ -131,21 +142,37 @@ export default function ContributionsCard({ anchor, version }: { anchor?: RefCal
     return pp
   }, [])
   useEffect(() => {
+    if (version === 0) return
     load().catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [load, version])
+  const adopt = useCallback(
+    (list: Person[]) => {
+      setPeople(list)
+      setSaved(JSON.stringify(list))
+      void load()
+    },
+    [load],
+  )
+  const dirty = !!people && JSON.stringify(people) !== saved
+  return { c, people, setPeople, saved, dirty, error, adopt }
+}
 
+/**
+ * Contribution pace (copilot §4b): each person's 401(k)/403(b) deferrals by
+ * Dec 31 against the limit their age allows — from the paystubs — with when
+ * the limit is reached and what the match does; HSA against its limit; and
+ * the IRA, with whether a direct Roth contribution is open at this year's
+ * income. Below it, the few facts about each person the limits need.
+ */
+export default function ContributionsCard({ anchor, ct }: { anchor?: RefCallback<HTMLElement>; ct: ContributionsState }) {
+  const { c, people, setPeople, dirty, error } = ct
   const save = useAction((list: Person[]) => put<{ ok: true; people: Person[] }>('/api/people', { people: list }), {
     success: 'Saved — the pace and the limits recomputed',
     errorPrefix: "Couldn't save the people",
-    onDone: (r) => {
-      setPeople(r.people)
-      setSaved(JSON.stringify(r.people))
-      void load()
-    },
+    onDone: (r) => ct.adopt(r.people),
   })
 
   const set = (i: number, patch: Partial<Person>) => setPeople((ps) => ps && ps.map((p, k) => (k === i ? { ...p, ...patch } : p)))
-  const dirty = !!people && JSON.stringify(people) !== saved
 
   return (
     <div className="card c12" ref={anchor}>
@@ -160,7 +187,7 @@ export default function ContributionsCard({ anchor, version }: { anchor?: RefCal
       ) : (
         <>
           {c.people.length === 0 ? (
-            <p className="sub2">Add a paycheck above and each earner’s deferrals pace against the 2026 limits here.</p>
+            <p className="sub2">Add a <Link className="scr-link" to={{ screen: 'tax', rest: ['paychecks'] }}>paycheck</Link> and each earner’s deferrals pace against the {c.year} limits here.</p>
           ) : (
             c.people.map((p) => <PersonRows key={p.name} p={p} c={c} />)
           )}

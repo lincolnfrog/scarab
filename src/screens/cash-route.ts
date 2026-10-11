@@ -2,7 +2,12 @@
  * The Cash screen's view state as it lives in the URL fragment, and the
  * transactions query built from it. Pure, so node tests can drive it.
  *
- *   #/cash?month=2026-08&cat=12&acct=3&scope=month
+ *   #/cash?month=2026-08                                   the overview
+ *   #/cash/transactions?month=2026-08&cat=12&acct=3&scope=month
+ *
+ * The path names the view (Cash.tsx's DETAILS); `month` applies to every
+ * view, the rest filter the Transactions view — arriving on the overview with
+ * one of them opens that view.
  *
  * Only a YYYY-MM month, numeric ids and enums go in the fragment (browser
  * history syncs it). The search text is household data — merchant names — so

@@ -171,6 +171,23 @@ export const COMMANDS: readonly Command[] = [
   section('invest', ['allocation'], 'Target allocation & rebalance plan', 'asset classes bonds stocks drift rebalance location'),
   section('tax', ['two-year'], 'Next year’s tax — now or in January?', 'timing defer bonus realize gain january next year carryforward convert'),
   section('tax', ['contributions'], 'Contribution pace', '401k 403b ira hsa roth backdoor match catch-up limits birth year'),
+  section('dash', ['news'], 'Since you were last here', 'digest changes what moved new'),
+  section('dash', ['balance'], 'Balance sheet', 'owe owed debts loans cards assets liabilities'),
+  section('invest', ['holdings'], 'All holdings', 'positions stocks table sort set price'),
+  section('invest', ['accounts'], 'Investment accounts', 'brokerage 401k ira check in balances'),
+  section('invest', ['activity'], 'Investment activity', 'buys sells vests history lots'),
+  section('cash', ['transactions'], 'All transactions', 'search ledger list filter'),
+  section('cash', ['spending'], 'Spending by category', 'categories income savings rate'),
+  section('cash', ['recurring'], 'Recurring & subscriptions', 'bills merchants cadence price creep'),
+  section('cash', ['import'], 'Bank accounts', 'set balance account type checking savings card'),
+  section('tax', ['projection'], 'Projected tax breakdown', 'federal state niit income taxable brackets'),
+  section('tax', ['safe-harbor'], 'Withholding gap & safe harbor', 'estimated payments quarterly 1040-es penalty'),
+  section('tax', ['realized'], 'Realized gains (Form 8949)', 'sales short long term csv wash'),
+  section('goal', ['setup'], 'Dream Home target & fund setup', 'purchase price down payment closing accounts plan'),
+  section('goal', ['funding'], 'Funding the gap', 'asset sales carry payoff'),
+  section('future', ['assumptions'], 'Scenario assumptions', 'return volatility savings retire social security roth'),
+  section('future', ['events'], 'Events & decisions', 'price a decision one-off cost'),
+  section('future', ['guide'], 'Projection guide', 'monte carlo bands crossing explained'),
 ]
 
 const GROUPS: readonly { kind: Command['kind']; title: string }[] = [

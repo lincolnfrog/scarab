@@ -5,6 +5,7 @@ import { get, post, put } from '../api'
 import { Link, type RouteTarget } from '../router'
 import { BracketBar } from '../tax/BracketBar'
 import { Button } from '../ui/Button'
+import { DetailView, DrillCard, useDetail } from '../ui/Drill'
 import { EmptyState } from '../ui/EmptyState'
 import { Field, PercentInput, Select } from '../ui/Field'
 import { Finding } from '../ui/Finding'
@@ -122,18 +123,21 @@ function Assumptions({ groups }: { groups: AssumptionGroup[] | null }) {
  * The Checkup: what the ledger says a planner or a tax preparer would bring
  * up, largest dollar impact first — each finding opening into its rule, the
  * household's numbers, the arithmetic and what it leaves out. Findings, never
- * advice. Then the bracket headroom every timing decision needs, the dated
- * items ahead, the few settings the rules read, and every constant behind
- * them with its vintage.
+ * advice. Then the dated items ahead and the bracket headroom every timing
+ * decision needs. One level down, in one view: the few settings the rules
+ * read ('#/checkup/settings', the top of it) and every constant behind them
+ * with its vintage ('#/checkup/assumptions', which scrolls to them).
  */
+const DETAILS = ['assumptions', 'settings'] as const
+
 export default function Checkup() {
+  const detail = useDetail(DETAILS)
   const [data, setData] = useState<CheckupData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [assumptions, setAssumptions] = useState<AssumptionGroup[] | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [form, setForm] = useState<CheckupSettings | null>(null)
   const calendarAnchor = useAnchor('calendar')
-  const settingsAnchor = useAnchor('settings')
   const assumptionsAnchor = useAnchor('assumptions')
 
   const load = useCallback(async () => {
@@ -192,8 +196,7 @@ export default function Checkup() {
   const fresh = findings.filter((f) => f.isNew).length
   const dirty = !!form && JSON.stringify(form) !== JSON.stringify(data.settings)
 
-  return (
-    <div className="grid12">
+  const header = (
       <HeaderSlot
         sub={
           findings.length === 0
@@ -208,51 +211,16 @@ export default function Checkup() {
           ) : undefined
         }
       />
+  )
 
-      <div className="card c8">
-        <div className="h4row">
-          <h2>Findings</h2>
-          <div className="right">
-            <span className="muted">derived from the ledger on every visit</span>
-          </div>
-        </div>
-        {findings.length === 0 ? (
-          <EmptyState
-            title="Nothing to flag"
-            body="Concentration, cash runway, deductions, harvesting, estimated tax and the rest all ran and none fired. The more of the household Scarab holds — paychecks, lots, the mortgage — the more the rules can see."
-          />
-        ) : (
-          <div className="ck-list">
-            {findings.map((f, i) => (
-              <Finding key={f.id} finding={f} defaultOpen={i === 0 && findings.length === 1} />
-            ))}
-          </div>
-        )}
-      </div>
+  const constants = assumptions?.reduce((n, g) => n + g.rows.length, 0) ?? null
 
-      <div className="card c4" ref={calendarAnchor}>
-        <h2>Tax calendar</h2>
-        <Calendar items={data.calendar} />
-      </div>
-
-      <div className="card c12">
-        <div className="h4row">
-          <h2>Bracket headroom · {data.headroom.year}</h2>
-          <div className="right">
-            <Link to={{ screen: 'tax' }} className="ck-a">
-              The whole tax picture →
-            </Link>
-          </div>
-        </div>
-        <BracketBar h={data.headroom} />
-        <p className="ck-fine">
-          Federal only, from this year’s projection on Taxes · {data.headroom.vintage}. The number every Roth-conversion,
-          gain-realizing and vest-timing question starts from. An estimate, not advice.
-        </p>
-      </div>
-
+  if (detail)
+    return (
+      <DetailView title="How Checkup works" lead="The few settings the rules read, and every constant behind them with its source and vintage.">
+        {header}
       {form && (
-        <div className="card c12" ref={settingsAnchor}>
+        <div className="card c12">
           <h2>What the rules read</h2>
           <div className="scr-fields">
             <div className="scr-f lg">
@@ -292,6 +260,62 @@ export default function Checkup() {
         </div>
         <Assumptions groups={assumptions} />
       </div>
+      </DetailView>
+    )
+
+  return (
+    <div className="grid12">
+      {header}
+
+      <div className="card c8">
+        <div className="h4row">
+          <h2>Findings</h2>
+          <div className="right">
+            <span className="muted">derived from the ledger on every visit</span>
+          </div>
+        </div>
+        {findings.length === 0 ? (
+          <EmptyState
+            title="Nothing to flag"
+            body="Concentration, cash runway, deductions, harvesting, estimated tax and the rest all ran and none fired. The more of the household Scarab holds — paychecks, lots, the mortgage — the more the rules can see."
+          />
+        ) : (
+          <div className="ck-list">
+            {findings.map((f, i) => (
+              <Finding key={f.id} finding={f} defaultOpen={i === 0 && findings.length === 1} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card c4" ref={calendarAnchor}>
+        <h2>Tax calendar</h2>
+        <Calendar items={data.calendar} />
+      </div>
+
+      <div className="card c8">
+        <div className="h4row">
+          <h2>Bracket headroom · {data.headroom.year}</h2>
+          <div className="right">
+            <Link to={{ screen: 'tax' }} className="ck-a">
+              The whole tax picture →
+            </Link>
+          </div>
+        </div>
+        <BracketBar h={data.headroom} />
+        <p className="ck-fine">
+          Federal only, from this year’s projection on Taxes · {data.headroom.vintage}. The number every Roth-conversion,
+          gain-realizing and vest-timing question starts from. An estimate, not advice.
+        </p>
+      </div>
+
+      <DrillCard
+        to="settings"
+        span="c4"
+        title="How Checkup works"
+        value={constants === null ? undefined : `${constants} constants`}
+        note="Every bracket, limit and threshold the rules use, with its source and vintage — and the settings they read"
+      />
     </div>
   )
 }

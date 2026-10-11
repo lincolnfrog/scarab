@@ -1,0 +1,14 @@
+/* Taxes overview (Taxes.tsx): the projected bill above the drill cards. */
+.tx-hero-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 18px;
+}
+.tx-hero-num { font-size: 44px; }
+.tx-hero-delta { font-weight: 600; font-size: 13px; }
+
+@container card (max-width: 420px) {
+  .tx-hero-num { font-size: 34px; }
+}

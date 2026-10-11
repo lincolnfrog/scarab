@@ -441,3 +441,11 @@ td.scr-none { padding: 18px 10px; text-align: center; }
 .scr-flowlist { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; margin: 0; font-size: 12.5px; }
 .scr-flowlist dt { color: var(--ink-2); }
 .scr-flowlist dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; color: var(--ink); }
+
+/* ---------- overview: a row of cards that share the width evenly, however many render ---------- */
+.scr-pair { grid-column: span 12; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 14px; }
+.scr-pair:empty { display: none; }
+.scr-pair > .card { container: card / inline-size; }
+@container grid (width < 800px) {
+  .scr-pair { grid-auto-flow: row; }
+}

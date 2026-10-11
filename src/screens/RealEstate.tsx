@@ -9,6 +9,7 @@ import { useDeepAction } from '../ui/CommandPalette'
 import { Dialog } from '../ui/Dialog'
 import { prompt } from '../ui/dialogs'
 import { EmptyState } from '../ui/EmptyState'
+import { DetailView, DrillCard, useDetail } from '../ui/Drill'
 import { DateInput, Field, MoneyInput, TextInput } from '../ui/Field'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { Skeleton } from '../ui/Skeleton'
@@ -42,7 +43,7 @@ function propertiesLine(props: PropertyDetail[] | null): string | undefined {
   if (props === null) return undefined
   if (props.length === 0) return 'Your home, its value and what you still owe on it'
   const equity = props.reduce((s, p) => s + valueOf(p) - debtOf(p), 0)
-  return `${props.length} propert${props.length === 1 ? 'y' : 'ies'} · manual valuations · ${formatDollars(equity)} equity`
+  return `${props.length} propert${props.length === 1 ? 'y' : 'ies'} · ${formatDollars(equity)} equity`
 }
 const MAX_MORTGAGE_RATE = 250_000 // 25%: above that it's a typo, not a mortgage
 
@@ -137,6 +138,7 @@ export default function RealEstate() {
   const [adding, setAdding] = useState(false)
   // '#/re?d=add-property' (the ⌘K palette) opens the Add property dialog on arrival.
   useDeepAction('re', { 'add-property': () => setAdding(true) })
+  const detail = useDetail(['exclusion'] as const)
 
   // A failed first load says so, with a retry; a failed refresh keeps what's on screen.
   const load = useCallback(
@@ -234,9 +236,28 @@ export default function RealEstate() {
     void load()
   }
 
+  const header = <HeaderSlot sub={propertiesLine(props)} actions={<Button onClick={() => setAdding(true)}>+ Add property</Button>} />
+  const addDialog = <AddPropertyDialog open={adding} onClose={() => setAdding(false)} onAdded={onAdded} />
+  if (detail === 'exclusion')
+    return (
+      <DetailView title="§121 exclusion">
+        {header}
+        <div className="card c12">
+          <h2>Worth knowing · §121 exclusion</h2>
+          <p style={{ maxWidth: '72ch' }}>
+            If you sell a home you lived in for 2 of the last 5 years, up to $500K of gain (married filing
+            jointly) is federally tax-free. Renting it out starts a clock: the exclusion fades ~3 years after
+            you move out. Model renting it out on the <Link className="scr-link" to={{ screen: 'goal', rest: ['rental'] }}>Dream Home</Link> page;
+            the move-out date and that window are yours to track.
+          </p>
+        </div>
+        {addDialog}
+      </DetailView>
+    )
+
   return (
     <div className="grid12">
-      <HeaderSlot sub={propertiesLine(props)} actions={<Button onClick={() => setAdding(true)}>+ Add property</Button>} />
+      {header}
       {props === null && (
         <div className="card c12">
           {loadErr ? (
@@ -317,18 +338,15 @@ export default function RealEstate() {
         )
       })}
 
-      <AddPropertyDialog open={adding} onClose={() => setAdding(false)} onAdded={onAdded} />
+      {addDialog}
 
       {props && props.length > 0 && (
-        <div className="card c12">
-          <h2>Worth knowing · §121 exclusion</h2>
-          <p>
-            If you sell a home you lived in for 2 of the last 5 years, up to $500K of gain (married filing
-            jointly) is federally tax-free. Renting it out starts a clock: the exclusion fades ~3 years after
-            you move out. Model renting it out on the <Link className="scr-link" to={{ screen: 'goal', rest: ['rental'] }}>Dream Home</Link> page;
-            the move-out date and that window are yours to track.
-          </p>
-        </div>
+        <DrillCard
+          to="exclusion"
+          span="c12"
+          title="Worth knowing · §121 exclusion"
+          note="Up to $500K of gain on a home you lived in is tax-free — renting it out starts a clock."
+        />
       )}
     </div>
   )

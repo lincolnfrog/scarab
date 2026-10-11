@@ -9,18 +9,19 @@ import { localMode } from '../local'
 import { Link } from '../router'
 import { Button } from '../ui/Button'
 import { useDeepAction } from '../ui/CommandPalette'
+import { DetailView, DrillCard, DrillMore, MiniRows, Stats, useDetail, type StatItem } from '../ui/Drill'
 import { confirm, prompt } from '../ui/dialogs'
 import { Field, MoneyInput, PercentInput, Select, TextInput } from '../ui/Field'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { Segmented } from '../ui/Segmented'
-import { useAnchor } from '../ui/screen'
 import { Skeleton } from '../ui/Skeleton'
 import { toast } from '../ui/Toast'
 import { Tooltip } from '../ui/Tooltip'
 import { useAction } from '../ui/useAction'
 import { fmtShort } from '../viz'
-import { assumptionPills, compareKey, createFlushable, createLatest, dataVersionOf, editGeneration, parseThreshold, saveStatus } from './future-sync'
+import { assumptionSummary, compareKey, createFlushable, createLatest, dataVersionOf, editGeneration, parseThreshold, saveStatus } from './future-sync'
 import './screens.css'
+import './future-overview.css'
 
 /**
  * Future — the decision engine. Named scenarios (knob-sets) run side by side
@@ -196,10 +197,18 @@ const knobParams = (k: Knobs) => (cur: Params): Params | null => {
 const signed = (n: number, unit = '') => (n > 0 ? `+${n}${unit}` : n < 0 ? `${n}${unit}` : `±0${unit}`)
 const signedMoney = (c: number) => (c === 0 ? '±0' : (c > 0 ? '+' : '−') + fmtShort(Math.abs(c)))
 const cls = (n: number) => (n > 0 ? 'pos' : n < 0 ? 'neg' : 'muted')
-const HEADER_SUB = 'Monte Carlo · 2,000 paths over investments, 401(k), property & liabilities'
+const HEADER_SUB = '2,000 simulated futures, in today’s dollars'
+
+/**
+ * The detail views behind the overview: the knobs (and the scenario's own controls), the selected scenario's full
+ * result, the side-by-side table ('#/future/compare', the ⌘K palette's "Compare scenarios"), decisions and events,
+ * and how to read it all.
+ */
+const DETAILS = ['assumptions', 'results', 'compare', 'events', 'guide'] as const
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export default function Future() {
+  const detail = useDetail(DETAILS)
   const [cmp, setCmp] = useState<Compare | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [draw, setDraw] = useState<Draw>('lognormal')
@@ -456,8 +465,6 @@ export default function Future() {
     },
     cmp !== null || err !== null,
   )
-  // '#/future/compare' (the ⌘K palette's "Compare scenarios") scrolls to the side-by-side table.
-  const compareAnchor = useAnchor('compare')
 
   const rename = async () => {
     if (!run) return
@@ -586,30 +593,42 @@ export default function Future() {
     </div>
   )
 
-  // The mockup's assumption pills: the selected scenario's knobs as it was last simulated.
   const buys = run.params.buyEnabled && !!cmp.home // no loan options → the engine models no purchase
-  const pills = assumptionPills(run.params, !!cmp.home)
+  const summary = assumptionSummary(run.params, !!cmp.home)
 
-  return (
-    <div className="grid12">
-      <HeaderSlot
-        sub={HEADER_SUB}
-        actions={
-          <>
-            <span className="scr-pills" role="group" aria-label={`${run.name}'s assumptions`}>
-              <span className="scr-pill">
-                <span className="sw" style={{ background: color }} aria-hidden="true" />
-                {run.name}
-              </span>
-              {pills.map((t) => (
-                <span key={t} className="scr-pill">{t}</span>
-              ))}
-            </span>
-            <Button variant="gold" busy={createScenario.busy} onClick={() => void addScenario()}>+ Scenario</Button>
-          </>
-        }
-      />
-      {/* ---------- scenario rail ---------- */}
+  // "+ Scenario" stays in the header of every view; its prompt is a dialog, so '?d=new-scenario' works on any of them.
+  const header = (
+    <HeaderSlot
+      sub={HEADER_SUB}
+      actions={<Button variant="gold" busy={createScenario.busy} onClick={() => void addScenario()}>+ Scenario</Button>}
+    />
+  )
+
+  /** Which scenario the page is about: the one control the overview keeps. */
+  const chips = cmp.runs.map((r) => (
+    <button
+      key={r.id}
+      className={`chipbtn${r.id === run.id ? ' on' : ''}`}
+      aria-pressed={r.id === run.id}
+      onClick={() => r.id !== run.id && selectRun(r.id)}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}
+    >
+      <span className="sw" style={{ background: colorOf(r.id), width: 9, height: 9, borderRadius: 2, display: 'inline-block' }} />
+      {r.name}
+      {r.isBaseline && <span className="tag">baseline</span>}
+    </button>
+  ))
+  const picker = (
+    <div className="card c12 fo-picker">
+      <div className="formrow" role="group" aria-label="Scenario" style={{ alignItems: 'center', gap: 8 }}>
+        {chips}
+        {busy && <span className="sub2 fo-running">running…</span>}
+      </div>
+    </div>
+  )
+
+  /* ---------- scenario rail: the picker plus the selected scenario's own controls ---------- */
+  const rail = (
       <div className="card c12">
         <div className="h4row">
           <h2>Scenarios</h2>
@@ -619,19 +638,7 @@ export default function Future() {
           </div>
         </div>
         <div className="formrow" style={{ alignItems: 'center', gap: 8 }}>
-          {cmp.runs.map((r) => (
-            <button
-              key={r.id}
-              className={`chipbtn${r.id === run.id ? ' on' : ''}`}
-              aria-pressed={r.id === run.id}
-              onClick={() => r.id !== run.id && selectRun(r.id)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}
-            >
-              <span className="sw" style={{ background: colorOf(r.id), width: 9, height: 9, borderRadius: 2, display: 'inline-block' }} />
-              {r.name}
-              {r.isBaseline && <span className="tag">baseline</span>}
-            </button>
-          ))}
+          {chips}
           <Button size="mini" variant="ghost" onClick={() => void addScenario(run)}>Duplicate</Button>
           <Button size="mini" variant="ghost" busy={renameScenario.busy} onClick={() => void rename()}>Rename</Button>
           {!run.isBaseline && <Button size="mini" variant="ghost" busy={setBaseline.busy} onClick={makeBaseline}>Set as baseline</Button>}
@@ -661,8 +668,10 @@ export default function Future() {
           </span>
         </div>
       </div>
+  )
 
-      {/* ---------- assumptions for the selected scenario ---------- */}
+  /* ---------- assumptions for the selected scenario ---------- */
+  const assumptionsCard = (
       <div className="card c12">
         <div className="h4row">
           <h2>
@@ -691,8 +700,10 @@ export default function Future() {
           {yearKnob('endYear', 'Project to')}
         </div>
       </div>
+  )
 
-      {/* ---------- taxes & income (Future v3) ---------- */}
+  /* ---------- taxes & income (Future v3) ---------- */
+  const taxCard = (
       <div className="card c12">
         <div className="h4row">
           <h2>
@@ -825,9 +836,11 @@ export default function Future() {
           </p>
         )}
       </div>
+  )
 
-      {/* ---------- overlay chart + odds ---------- */}
-      <FutureFan runs={cmp.runs} selectedId={run.id} baselineId={base.id} params={run.params} buys={buys} thresholdPct={cmp.thresholdPct} />
+  /* ---------- overlay chart + odds ---------- */
+  const fan = <FutureFan runs={cmp.runs} selectedId={run.id} baselineId={base.id} params={run.params} buys={buys} thresholdPct={cmp.thresholdPct} />
+  const resultCard = (
       <div className="card c3">
         <h2>{run.name}</h2>
         <div className="scr-odds">
@@ -908,9 +921,11 @@ export default function Future() {
           </div>
         </div>
       </div>
+  )
 
-      {/* ---------- side by side ---------- */}
-      <div className="card c12" ref={compareAnchor}>
+  /* ---------- side by side ---------- */
+  const compareCard = (
+      <div className="card c12">
         <div className="h4row">
           <h2>Side by side</h2>
           <div className="right muted">deltas vs {base.name} · {draw === 'historical' ? 'historical sequences' : 'lognormal draws'}</div>
@@ -982,8 +997,10 @@ export default function Future() {
         </table>
         </div>
       </div>
+  )
 
-      {/* ---------- price a decision ---------- */}
+  /* ---------- price a decision ---------- */
+  const priceCard = (
       <div className="card c6">
         <div className="h4row">
           <h2>Price a decision</h2>
@@ -1040,6 +1057,8 @@ export default function Future() {
           </div>
         )}
       </div>
+  )
+  const eventsCard = (
       <div className="card c6">
         <div className="h4row">
           <h2>Events in {run.name}</h2>
@@ -1065,7 +1084,9 @@ export default function Future() {
           </table>
         )}
       </div>
+  )
 
+  const guideCard = (
       <div className="card c12">
         <h2>How to read this</h2>
         <p>
@@ -1092,6 +1113,125 @@ export default function Future() {
           spouse's own RMD schedule (the oldest birth year sets it for the whole traditional bucket).
         </p>
       </div>
+  )
+
+  if (detail === 'assumptions')
+    return (
+      <DetailView title="Assumptions">
+        {header}
+        {rail}
+        {assumptionsCard}
+        {taxCard}
+      </DetailView>
+    )
+  if (detail === 'results')
+    return (
+      <DetailView title="Results in depth">
+        {header}
+        {picker}
+        {fan}
+        {resultCard}
+      </DetailView>
+    )
+  if (detail === 'compare')
+    return (
+      <DetailView title="Side by side">
+        {header}
+        {compareCard}
+      </DetailView>
+    )
+  if (detail === 'events')
+    return (
+      <DetailView title="Events & decisions">
+        {header}
+        {picker}
+        {priceCard}
+        {eventsCard}
+      </DetailView>
+    )
+  if (detail === 'guide')
+    return (
+      <DetailView title="How to read this">
+        {header}
+        {guideCard}
+      </DetailView>
+    )
+
+  /* ---------- the overview: which scenario, its answer, and the ways down ---------- */
+  const vsBase = (text: string) => `${text} vs ${base.name}`
+  const stats: StatItem[] = [
+    {
+      label: 'Plan succeeds',
+      value: `${run.result.successPct}%`,
+      note: run.delta && run.delta.successPct !== 0 ? vsBase(signed(run.delta.successPct, 'pp')) : undefined,
+    },
+    {
+      label: `Median at ${endYear}`,
+      value: fmtShort(run.result.medianEndCents),
+      note: run.delta && run.delta.medianEndCents !== 0 ? vsBase(signedMoney(run.delta.medianEndCents)) : undefined,
+    },
+    { label: '10th percentile', value: fmtShort(run.result.p10EndCents) },
+  ]
+  const events = run.params.events.length
+  const others = cmp.runs.length - 1
+
+  return (
+    <div className="grid12">
+      {header}
+      {picker}
+      {fan}
+      <div className="card c3 fo-answer">
+        <div className="h4row">
+          <h2>{run.name}</h2>
+          <div className="right">
+            <DrillMore to="results">In depth</DrillMore>
+          </div>
+        </div>
+        <div className="muted">Crossing date · ≥{cmp.thresholdPct}% odds</div>
+        <div className="heronum fo-crossing" style={{ color }}>
+          {run.crossingYear ?? '—'}
+          {run.crossingYear && cmp.birthYear !== null && <span className="sub2">age {run.crossingYear - cmp.birthYear}</span>}
+        </div>
+        <div className="sub2">
+          {run.crossingYear
+            ? `The earliest retirement year the plan still clears ${cmp.thresholdPct}%`
+            : `No year before ${endYear} clears ${cmp.thresholdPct}%`}
+          {run.delta?.crossingYears != null && run.delta.crossingYears !== 0 && ` · ${vsBase(signed(run.delta.crossingYears, ' yr'))}`}
+        </div>
+        <Stats items={stats} />
+      </div>
+
+      <DrillCard to="assumptions" span="c3" title="Assumptions" value={summary.value} note={summary.note} />
+      <DrillCard
+        to="compare"
+        span="c3"
+        title="Side by side"
+        value={`${cmp.runs.length} scenario${cmp.runs.length === 1 ? '' : 's'}`}
+        note={others === 0 ? 'Add a scenario to measure it against this one' : `Crossing year, each measured against ${base.name}`}
+      >
+        {others > 0 && (
+          <MiniRows
+            rows={cmp.runs.slice(0, 4).map((r) => ({
+              key: r.id,
+              label: (
+                <>
+                  <span className="fo-sw" style={{ background: colorOf(r.id) }} aria-hidden="true" />
+                  {r.name}
+                </>
+              ),
+              value: r.crossingYear ?? '—',
+            }))}
+          />
+        )}
+      </DrillCard>
+      <DrillCard
+        to="events"
+        span="c3"
+        title="Events & decisions"
+        value={events === 0 ? 'No events' : `${events} event${events === 1 ? '' : 's'}`}
+        note={events === 0 ? `Price a one-off cost against ${run.name}, then add it` : `Dated cash flows in ${run.name}; price another`}
+      />
+      <DrillCard to="guide" span="c3" title="How to read this" note="What the bands, the crossing date and the tax model mean, and what they leave out" />
     </div>
   )
 }

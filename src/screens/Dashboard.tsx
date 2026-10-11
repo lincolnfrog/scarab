@@ -11,9 +11,10 @@ import { CountUp } from '../chart/CountUpText'
 import { SLOT_VAR } from '../chart/palette'
 import { compositionLayers } from '../chart/stackModel'
 import { TimeChart, type TSeries } from '../chart/TimeChart'
-import DigestCard from '../DigestCard'
-import { Link, useRouteState } from '../router'
+import DigestCard, { DigestSummary } from '../DigestCard'
+import { Link, navigate, useRouteState } from '../router'
 import { Button } from '../ui/Button'
+import { DetailView, DrillMore, useDetail } from '../ui/Drill'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { Segmented } from '../ui/Segmented'
 import { Skeleton } from '../ui/Skeleton'
@@ -29,13 +30,16 @@ const SPARK_MONTHS = 12
 
 type NwView = 'total' | 'parts'
 
+/** The Dashboard's detail views: the whole digest, and the balance sheet behind the allocation ring. */
+const DETAILS = ['news', 'balance'] as const
+
 /** Everything owed today, one row per loan and card, each linking to where it's kept. */
 function OwedList({ debts }: { debts: readonly Debt[] }) {
   const owed = debts.filter((d) => d.owedCents > 0)
-  if (owed.length === 0) return null
+  if (owed.length === 0) return <p className="sub2">Nothing owed — no loans, and the cards are paid off.</p>
   const total = owed.reduce((s, d) => s + d.owedCents, 0)
   return (
-    <div className="ch-owed topline">
+    <div className="ch-owed">
       <div className="ch-owed-head">
         <span>Owed</span>
         <span className="num">{formatDollars(total)}</span>
@@ -117,6 +121,7 @@ export default function Dashboard() {
   const [attempt, setAttempt] = useState(0)
   const [view, setView] = useRouteState<NwView>('nwView', 'total')
   const nwSeries = useMemo(() => (nw ? netWorthSeries(nw.series) : null), [nw])
+  const detail = useDetail(DETAILS)
 
   useEffect(() => {
     let live = true
@@ -220,12 +225,73 @@ export default function Dashboard() {
   const setUp = !!goal && (goal.goal.fundAccountIds.length > 0 || goal.goal.fundExtraCents > 0)
   const dream = goal?.derived ?? null
 
+  const donut = (
+    <Donut
+      centerLabel={clamped ? 'assets' : 'total'}
+      data={[
+        { name: 'Brokerage', cents: current.brokerage, color: SLOT_VAR[1] },
+        { name: 'Retirement', cents: current.retirement, color: SLOT_VAR[2] },
+        { name: 'Home equity', cents: Math.max(0, equity), color: SLOT_VAR[3] },
+        { name: 'Crypto', cents: current.crypto, color: SLOT_VAR[4] },
+        { name: 'Cash', cents: Math.max(0, cash), color: SLOT_VAR[5] },
+      ]}
+    />
+  )
+  const clampNote = clamped && (
+    <div className="muted ch-note">
+      {equity < 0 ? 'Home equity is under water' : 'Cash is overdrawn'}, so the ring shows assets, not net worth.
+    </div>
+  )
+  const owedCents = nw.debts.reduce((s, d) => s + Math.max(0, d.owedCents), 0)
+
+  if (detail === 'news')
+    return (
+      <>
+        {header}
+        <DetailView title="Since you were last here">
+          <DigestCard onCaughtUp={() => navigate({ screen: 'dash' }, { replace: true })} />
+        </DetailView>
+      </>
+    )
+
+  if (detail === 'balance')
+    return (
+      <>
+        {header}
+        <DetailView title="Balance sheet" lead="What the household owns, slice by slice, and everything it owes. Net worth is the first minus the second.">
+          <div className="card c6">
+            <h2>What you own</h2>
+            {donut}
+            {(current.property > 0 || current.credit !== 0) && (
+              <div className="sub2 topline">
+                {current.property > 0 && (
+                  <div>
+                    Home equity = {formatDollars(current.property)} value
+                    {current.liabilities !== 0 ? ` − ${formatDollars(-current.liabilities)} mortgage` : ', nothing owed'}
+                  </div>
+                )}
+                {current.credit !== 0 && (
+                  <div>
+                    Cash = {formatDollars(current.cash)} in the bank {current.credit < 0 ? '−' : '+'} {formatDollars(Math.abs(current.credit))}{' '}
+                    {current.credit < 0 ? 'on cards' : 'card credit'}
+                  </div>
+                )}
+              </div>
+            )}
+            {clampNote}
+          </div>
+          <div className="card c6">
+            <h2>What you owe</h2>
+            <OwedList debts={nw.debts} />
+          </div>
+        </DetailView>
+      </>
+    )
+
   return (
     <>
       {header}
       <div className="grid12">
-        <DigestCard />
-        <CheckupCard />
         <div className="card c8">
           <h2>Household net worth</h2>
           {series.length >= 2 ? (
@@ -252,39 +318,14 @@ export default function Dashboard() {
           )}
         </div>
         <div className="card c4">
-          <h2>Allocation</h2>
-          <Donut
-            centerLabel={clamped ? 'assets' : 'total'}
-            data={[
-              { name: 'Brokerage', cents: current.brokerage, color: SLOT_VAR[1] },
-              { name: 'Retirement', cents: current.retirement, color: SLOT_VAR[2] },
-              { name: 'Home equity', cents: Math.max(0, equity), color: SLOT_VAR[3] },
-              { name: 'Crypto', cents: current.crypto, color: SLOT_VAR[4] },
-              { name: 'Cash', cents: Math.max(0, cash), color: SLOT_VAR[5] },
-            ]}
-          />
-          {(current.property > 0 || current.credit !== 0) && (
-            <div className="sub2 topline">
-              {current.property > 0 && (
-                <div>
-                  Home equity = {formatDollars(current.property)} value
-                  {current.liabilities !== 0 ? ` − ${formatDollars(-current.liabilities)} mortgage` : ', nothing owed'}
-                </div>
-              )}
-              {current.credit !== 0 && (
-                <div>
-                  Cash = {formatDollars(current.cash)} in the bank {current.credit < 0 ? '−' : '+'} {formatDollars(Math.abs(current.credit))}{' '}
-                  {current.credit < 0 ? 'on cards' : 'card credit'}
-                </div>
-              )}
+          <div className="h4row">
+            <h2>Allocation</h2>
+            <div className="right">
+              <DrillMore to="balance">{owedCents > 0 ? `Owed ${formatDollars(owedCents)}` : 'Balance sheet'}</DrillMore>
             </div>
-          )}
-          {clamped && (
-            <div className="muted ch-note">
-              {equity < 0 ? 'Home equity is under water' : 'Cash is overdrawn'}, so the ring shows assets, not net worth.
-            </div>
-          )}
-          <OwedList debts={nw.debts} />
+          </div>
+          {donut}
+          {clampNote}
         </div>
 
         {groups.map((g) => (
@@ -299,6 +340,12 @@ export default function Dashboard() {
             span={span}
           />
         ))}
+
+        {/* What wants attention, one card each; the detail is a click down. */}
+        <div className="scr-pair">
+          <DigestSummary to="news" />
+          <CheckupCard />
+        </div>
 
         <ActivityCard rows={activity} span={dream ? 'c7' : 'c12'} />
         {dream && <DreamHomeTile derived={dream} setUp={setUp} span="c5" />}

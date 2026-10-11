@@ -2,11 +2,15 @@ import { todayLocal } from '../../shared/dates'
 import { formatCents } from '../../shared/money'
 import { shortDay } from '../chart/format'
 import { Link, type RouteTarget } from '../router'
+import { DrillMore } from '../ui/Drill'
 import { Skeleton } from '../ui/Skeleton'
 import '../chart/chart.css'
 
 /** One row of GET /api/activity: a bank transaction (tag = its category, '—' when none) or a trade (tag = its account). */
 export type ActivityRow = { on_date: string; description: string; cents: number; tag: string; kind: 'tx' | 'trade' }
+
+/** The overview shows the latest few; the rest are a click away. */
+const SHOWN = 6
 
 const capital = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s)
 
@@ -25,7 +29,7 @@ export default function ActivityCard({ rows, span }: { rows: ActivityRow[] | nul
       <div className="h4row">
         <h2>Recent activity</h2>
         <div className="right">
-          <span className="muted">transactions and trades</span>
+          <DrillMore to={{ screen: 'cash', rest: ['transactions'] }}>All transactions</DrillMore>
         </div>
       </div>
       {rows === null ? (
@@ -39,7 +43,7 @@ export default function ActivityCard({ rows, span }: { rows: ActivityRow[] | nul
       ) : (
         <table className="ch-activity">
           <tbody>
-            {rows.map((a, i) => {
+            {rows.slice(0, SHOWN).map((a, i) => {
               const trade = a.kind === 'trade'
               // A transaction lands on Cash's list (the path scrolls to it), searched for its description.
               const to: RouteTarget = trade ? { screen: 'invest' } : { screen: 'cash', rest: ['transactions'] }

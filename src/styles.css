@@ -456,6 +456,21 @@ body {
   font-size: 24px;
   letter-spacing: 0.04em;
 }
+/* In a detail view: "Taxes › Realized gains" — the screen's name is the link back up. */
+.shead h1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.shead-up { color: var(--ink-3); text-decoration: none; transition: color var(--dur-1) var(--ease-out); }
+.shead-up:hover { color: var(--gold); }
+.shead-sep { color: var(--ink-3); font-family: var(--sans); font-size: 18px; }
+.shead:has(.shead-up) .sub { display: none; } /* the crumb says where we are; the overview's tagline steps aside */
+.shead-here { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shead h1:has(.shead-up) { flex: 0 1 auto; }
+@media (width < 720px) {
+  /* A phone stacks the crumb: the way back as a small line over the view's own name. */
+  .shead h1:has(.shead-up) { flex-wrap: wrap; gap: 0; flex-basis: 100%; }
+  .shead-up { flex-basis: 100%; font-family: var(--sans); font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 0; }
+  .shead-up::before { content: '‹ '; }
+  .shead-sep { display: none; }
+}
 .shead .sub {
   font-size: 12.5px;
   color: var(--ink-3);
@@ -603,10 +618,11 @@ body {
    that row sits under the title, left-aligned — except a lone button, which keeps its place beside it.
    (A phone rule rather than a card-width one: a desktop's narrow column cards keep the mockup's header.) */
 .h4row { flex-wrap: wrap; row-gap: 8px; }
-.h4row:has(> .right > .btn:only-child) { flex-wrap: nowrap; } /* the title wraps its words instead */
+.h4row:has(> .right > .btn:only-child),
+.h4row:has(> .right > .ui-drill-more:only-child) { flex-wrap: nowrap; } /* the title wraps its words instead */
 .h4row .right { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
 @media (width < 720px) {
-  .h4row > .right:not(:has(> .btn:only-child)) {
+  .h4row > .right:not(:has(> .btn:only-child), :has(> .ui-drill-more:only-child)) {
     flex-basis: 100%;
     margin-left: 0;
     flex-wrap: wrap;

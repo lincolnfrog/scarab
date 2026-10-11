@@ -3,9 +3,9 @@ import { todayLocal } from '../../shared/dates'
 import { formatCents } from '../../shared/money'
 import type { Account, AccountKind, BudgetRow, Category, CategorySpend, ImportSummary, MonthlyFlow, Tx, TxPage } from '../../shared/types'
 import { get, patch, post, put } from '../api'
-import { setParams, useRouteState } from '../router'
+import { Link, navigate, setParams, useRouteState, type RouteTarget } from '../router'
 import { Bullets, fmtMonth, fmtShort } from '../viz'
-import RecurringCard from '../RecurringCard'
+import RecurringCard, { recurringSummary, useRecurring } from '../RecurringCard'
 import CashFlowCard from '../cards/CashFlowCard'
 import CategorySpendCard from '../cards/CategorySpendCard'
 import RulesSheet from './RulesSheet'
@@ -16,8 +16,8 @@ import { Tooltip } from '../ui/Tooltip'
 import { EmptyState } from '../ui/EmptyState'
 import { MoneyInput, Select, TextInput } from '../ui/Field'
 import { HeaderSlot } from '../ui/HeaderSlot'
-import { prefersReducedMotion } from '../ui/motion'
-import { anchorId, useAnchor, useScreen, useScreenRoute } from '../ui/screen'
+import { DetailView, DrillCard, DrillMore, MiniRows, Stats, useDetail } from '../ui/Drill'
+import { useScreen, useScreenRoute } from '../ui/screen'
 import { Skeleton } from '../ui/Skeleton'
 import { toast } from '../ui/Toast'
 import { useAction } from '../ui/useAction'
@@ -33,6 +33,7 @@ import {
   type CatFilter,
 } from './cash-route'
 import './screens.css'
+import './cash-overview.css'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -71,71 +72,22 @@ function BudgetInput(p: { row: BudgetRow; onSave: (row: BudgetRow, cents: number
   )
 }
 
-/** The header's subtitle: the bank accounts imports land in (the mockup's "Wells Fargo checking ··2841 & savings ··7730"). */
-function accountsLine(accounts: Account[] | null): string {
-  if (!accounts?.length) return 'Bank CSV or OFX downloads · the plan resets monthly'
-  const names = accounts.slice(0, 3).map((a) => a.name)
-  const more = accounts.length > 3 ? ` +${accounts.length - 3} more` : ''
-  return `${names.join(' · ')}${more} · the plan resets monthly`
+/** The header's subtitle: short — how many accounts, and the month on screen. */
+function accountsLine(accounts: Account[] | null, month: string): string {
+  if (!accounts?.length) return 'Bank CSV or OFX downloads'
+  return `${accounts.length} account${accounts.length === 1 ? '' : 's'} · ${fmtMonth(month, true)}`
 }
-
-/** How long after arriving at a section link the screen keeps it in view while the cards above it load. */
-const SETTLE_MS = 2500
 
 /**
- * A section link (#/cash/transactions, #/cash/budget — the Dashboard's and
- * the digest's) scrolls when its card mounts (useAnchor), which is often
- * before the charts, budget and recurring cards above it have loaded; each
- * one that lands pushes the section back down. For a moment after arriving,
- * follow the section as the layout settles — until the person scrolls
- * themselves. Arriving is the screen showing, or the section changing (as
- * useAnchor reads it); a filter change on the same path isn't.
+ * The screen's detail views. `import`, `budget` and `transactions` were
+ * section anchors before the overview existed — the digest, the Dashboard and
+ * the command palette link to them — so they keep their names.
  */
-function useSettleOnSection(section: string | undefined, active: boolean) {
-  useEffect(() => {
-    const scroller = document.getElementById('main')
-    if (!active || !section || !scroller) return
-    let stopped = false
-    const stop = () => {
-      stopped = true
-    }
-    // Each frame: where the section sits in the page (scrolling doesn't move that) and how tall the page is.
-    // Jump back to it when it moves, or when the page grew while it sits below its spot (a first scroll cut
-    // short by a page too short to reach it). A layout that never changes leaves useAnchor's smooth scroll alone.
-    let at: number | null = null
-    let tall: number | null = null
-    let raf = 0
-    const tick = () => {
-      if (stopped) return
-      const el = document.getElementById(anchorId('cash', section))
-      if (el) {
-        const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-        const now = top + scroller.scrollTop
-        const moved = at !== null && Math.abs(now - at) > 1
-        const grew = tall !== null && scroller.scrollHeight > tall && top > (parseFloat(getComputedStyle(el).scrollMarginTop) || 0) + 1
-        if (moved || grew) el.scrollIntoView({ block: 'start' })
-        at = now
-        tall = scroller.scrollHeight
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    const done = setTimeout(stop, SETTLE_MS)
-    const opts = { passive: true }
-    scroller.addEventListener('wheel', stop, opts)
-    scroller.addEventListener('touchstart', stop, opts)
-    scroller.addEventListener('pointerdown', stop, opts)
-    window.addEventListener('keydown', stop)
-    return () => {
-      cancelAnimationFrame(raf)
-      clearTimeout(done)
-      scroller.removeEventListener('wheel', stop)
-      scroller.removeEventListener('touchstart', stop)
-      scroller.removeEventListener('pointerdown', stop)
-      window.removeEventListener('keydown', stop)
-    }
-  }, [section, active])
-}
+const DETAILS = ['spending', 'budget', 'recurring', 'import', 'transactions'] as const
+type Detail = (typeof DETAILS)[number]
+
+/** How many rows the overview previews of a list. */
+const PREVIEW = 6
 
 /** A posted date as the table shows it: 'MM-DD' this year, the full date otherwise (Load more reaches back years). */
 const shortDate = (iso: string, year: string) => (iso.startsWith(year) ? iso.slice(5) : iso)
@@ -163,11 +115,9 @@ export default function Cash() {
   const [newAccount, setNewAccount] = useState<{ name: string; kind: AccountKind } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const accountNameRef = useRef<HTMLInputElement>(null)
-  const txAnchor = useAnchor('transactions')
-  const budgetAnchor = useAnchor('budget')
-  const importAnchor = useAnchor('import')
+  const detail = useDetail(DETAILS)
   const { active } = useScreen()
-  useSettleOnSection(route.rest[0], active)
+  const recurring = useRecurring(dataVersion)
 
   // What the filters resolve to. A filter naming an account or category that no longer exists reads as "all".
   const latest = monthly?.at(-1)?.month ?? null
@@ -176,8 +126,26 @@ export default function Cash() {
     accounts && filters.acct !== 'all' && !accounts.some((a) => a.id === filters.acct) ? 'all' : filters.acct
   const cat: CatFilter =
     categories && typeof filters.cat === 'number' && !categories.some((c) => c.id === filters.cat) ? 'all' : filters.cat
-  const filterQuery = txFilterQuery({ cat, acct, scope: filters.scope, month, q })
+  // The filters belong to the Transactions view; everywhere else the list is the ledger's latest rows.
+  const inTx = detail === 'transactions'
+  const filterQuery = inTx ? txFilterQuery({ cat, acct, scope: filters.scope, month, q }) : ''
   const filtered = filterQuery !== ''
+
+  /** A view of this screen, on the month showing — plus the transaction filters when `keep` is set. */
+  const viewTarget = (d: Detail | null, f: Partial<CashFilters> = {}, keep = false): RouteTarget => {
+    const base: CashFilters = keep ? filters : { month: filters.month, cat: 'all', acct: 'all', scope: 'all' }
+    const params: Record<string, string | number | undefined> = {}
+    for (const [k, v] of Object.entries(cashParamsPatch({ ...base, ...f }))) if (v !== null) params[k] = v
+    return { screen: 'cash', rest: d ? [d] : [], params }
+  }
+  const go = (d: Detail, f: Partial<CashFilters> = {}, o: { replace?: boolean; state?: Record<string, unknown>; keep?: boolean } = {}) =>
+    navigate(viewTarget(d, f, o.keep), { replace: o.replace, state: o.state })
+
+  // A link that filters the list without naming a view ('#/cash?cat=12', from before the overview) opens the list.
+  const strayFilter = detail === null && (filters.cat !== 'all' || filters.acct !== 'all' || filters.scope === 'month')
+  useEffect(() => {
+    if (active && strayFilter && route.params.d === undefined) navigate(viewTarget('transactions', {}, true), { replace: true })
+  })
 
   const loadStatic = useCallback(async () => {
     const [a, c] = await Promise.all([get<Account[]>('/api/accounts'), get<Category[]>('/api/categories')])
@@ -230,14 +198,14 @@ export default function Cash() {
   const keepLimit = () => Math.min(TX_REFRESH_MAX, Math.max(TX_PAGE, rowCount.current))
   const monthKnown = filters.month !== null || monthly !== null // a list scoped to "the latest month" waits for it
   useEffect(() => {
-    if (filters.scope === 'month' && !monthKnown) return
+    if (inTx && filters.scope === 'month' && !monthKnown) return
     const same = loadedKey.current === filterQuery
     const t = setTimeout(
       () => loadTxs(filterQuery, same ? keepLimit() : TX_PAGE).catch((e) => toast.error("Couldn't load transactions", { detail: message(e) })),
       same ? 0 : 200,
     )
     return () => clearTimeout(t)
-  }, [filterQuery, filters.scope, monthKnown, loadTxs])
+  }, [filterQuery, inTx, filters.scope, monthKnown, loadTxs])
 
   async function loadMore() {
     if (!page || loadedKey.current !== filterQuery) return // the filters moved; their first page is on its way
@@ -266,12 +234,6 @@ export default function Cash() {
     setDataVersion((v) => v + 1) // the recurring card re-reads too
   }, [loadMonthly, loadMonth, loadTxs, month])
 
-  /** Bring a section into view — for an in-screen jump (a bar clicked, a merchant link) that doesn't change the path. */
-  const scrollTo = (section: string) =>
-    document
-      .getElementById(anchorId('cash', section))
-      ?.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
-
   // Every write goes through useAction: a busy state, a toast either way, and a refresh after.
   const importFile = useAction(
     async (file: File, account: Account) => {
@@ -295,6 +257,7 @@ export default function Cash() {
   function onImportClick() {
     if (!importAccount) {
       setNewAccount((cur) => cur ?? { name: '', kind: 'checking' })
+      if (detail !== 'import' && monthly?.length) go('import')
       toast.info('Name the bank account first — every import is filed under one')
       return
     }
@@ -349,21 +312,22 @@ export default function Cash() {
   function onAddAccount() {
     if (newAccount?.name.trim()) void addAccount.run(newAccount)
   }
-  /** The account form open, in view, with the cursor in its name. */
+  /** The account form open, in view (it lives in the Accounts view), with the cursor in its name. */
   function startAddAccount() {
     setNewAccount((cur) => cur ?? { name: '', kind: 'checking' })
-    scrollTo('import')
+    if (detail !== 'import') go('import', {}, { replace: true })
     requestAnimationFrame(() => accountNameRef.current?.focus({ preventScroll: true }))
   }
 
-  // Deep links ('#/cash/import?d=import', the ⌘K palette): run once the accounts and the file input are here.
-  // The file picker needs the click's user activation, which a palette keypress still carries on arrival; if a
-  // browser refuses it anyway, the import card is scrolled to and pulsing with its button.
+  // Deep links ('#/cash/import?d=import', the ⌘K palette): run once the accounts and the file input are here —
+  // both are mounted in every view. The file picker needs the click's user activation, which a palette keypress
+  // still carries on arrival; if a browser refuses it anyway, the header's Import button is there in every view.
+  // Arriving without the view named opens the Accounts view, where the import's target account is chosen.
   useDeepAction(
     'cash',
     {
       import: () => {
-        scrollTo('import')
+        if (detail !== 'import') go('import', {}, { replace: true })
         onImportClick()
       },
       'add-account': startAddAccount,
@@ -422,26 +386,21 @@ export default function Cash() {
     },
   )
 
+  // Jumps between views: each opens the Transactions (or Budget) view as a new entry, so Back returns here.
   /** A Spending-by-category bar: that category's transactions for the month. */
   function showCategory(id: number | null) {
-    setFilters({ cat: id === null ? 'uncategorized' : id, scope: 'month' })
-    scrollTo('transactions')
+    go('transactions', { cat: id === null ? 'uncategorized' : id, scope: 'month' }, { state: { q: '' } })
   }
   /** A merchant in the recurring card: its transactions, any month or category. */
   function showMerchant(merchant: string) {
-    setQ(merchant)
-    setFilters({ cat: 'all', scope: 'all' })
-    scrollTo('transactions')
+    go('transactions', {}, { state: { q: merchant } })
   }
   function showCategoryNamed(name: string) {
     const c = categories?.find((x) => x.name === name)
-    if (!c) return
-    setFilters({ cat: c.id, scope: 'all' })
-    scrollTo('transactions')
+    if (c) go('transactions', { cat: c.id }, { state: { q: '' } })
   }
   function showBudget(m: string) {
-    setFilters({ month: m === latest ? null : m })
-    scrollTo('budget')
+    go('budget', { month: m === latest ? null : m })
   }
   function clearFilters() {
     setQ('')
@@ -450,7 +409,7 @@ export default function Cash() {
 
   const header = (
     <HeaderSlot
-      sub={accountsLine(accounts)}
+      sub={accountsLine(accounts, month)}
       actions={
         <>
           <Button variant="ghost" disabled={!categories} onClick={() => setRulesOpen(true)}>
@@ -514,7 +473,23 @@ export default function Cash() {
   const rows = page?.rows ?? []
   const left = page ? page.matching - rows.length : 0
 
-  return (
+  const monthSelect = (
+    <Select
+      className="mini"
+      aria-label="Month"
+      value={month}
+      onChange={(e) => setFilters({ month: e.target.value === latest ? null : e.target.value })}
+    >
+      {monthChoices(months, month).map((m) => (
+        <option key={m} value={m}>
+          {fmtMonth(m, true)}
+        </option>
+      ))}
+    </Select>
+  )
+
+  // Mounted in every view: the header's buttons, the rules sheet and the file picker the import actions click.
+  const chrome = (
     <>
       {header}
       <RulesSheet
@@ -533,54 +508,90 @@ export default function Cash() {
         hidden
         onChange={(e) => e.target.files?.[0] && void onImportFile(e.target.files[0])}
       />
+    </>
+  )
 
-      {/* ---------- accounts: where imports go ---------- */}
-      <div className="card wide scr-accounts" ref={importAnchor}>
-        <div className="h4row">
-          <h2>Accounts &amp; import</h2>
-          <div className="right muted">CSV or OFX/QFX download from the bank · duplicates are skipped automatically</div>
-        </div>
-        <div className="importbar">
-          <span className="sub2">
-            {accounts?.length ? (
-              'Imports go to'
-            ) : (
-              <>
-                First: name the bank account these imports belong to <b className="inkstrong">→</b>
-              </>
+  /* ---------- accounts: where imports go ---------- */
+  const accountsCard = (
+    <div className="card wide scr-accounts">
+      <div className="h4row">
+        <h2>Accounts &amp; import</h2>
+        <div className="right muted">CSV or OFX/QFX download from the bank · duplicates are skipped automatically</div>
+      </div>
+      <div className="importbar">
+        <span className="sub2">
+          {accounts?.length ? (
+            'Imports go to'
+          ) : (
+            <>
+              First: name the bank account these imports belong to <b className="inkstrong">→</b>
+            </>
+          )}
+        </span>
+        {(accounts ?? []).map((a) => (
+          <button
+            key={a.id}
+            className={`chipbtn ${importAccount === a.id ? 'on' : ''}`}
+            aria-pressed={importAccount === a.id}
+            onClick={() => setImportAccount(a.id)}
+          >
+            {a.name}
+          </button>
+        ))}
+        {newAccount ? (
+          <form
+            className="scr-addacct"
+            onSubmit={(e) => {
+              e.preventDefault()
+              onAddAccount()
+            }}
+          >
+            <TextInput
+              ref={accountNameRef}
+              autoFocus
+              aria-label="Account name"
+              maxLength={60}
+              placeholder="e.g. WF Checking ··2841"
+              value={newAccount.name}
+              onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+            />
+            <Select
+              aria-label="Account type"
+              value={newAccount.kind}
+              onChange={(e) => setNewAccount({ ...newAccount, kind: e.target.value as AccountKind })}
+            >
+              {KIND_OPTIONS.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </Select>
+            <Button type="submit" busy={addAccount.busy} disabled={!newAccount.name.trim()}>
+              Add
+            </Button>
+            {!!accounts?.length && (
+              <Button variant="ghost" onClick={() => setNewAccount(null)}>
+                Cancel
+              </Button>
             )}
-          </span>
-          {(accounts ?? []).map((a) => (
-            <button
-              key={a.id}
-              className={`chipbtn ${importAccount === a.id ? 'on' : ''}`}
-              aria-pressed={importAccount === a.id}
-              onClick={() => setImportAccount(a.id)}
-            >
-              {a.name}
-            </button>
-          ))}
-          {newAccount ? (
-            <form
-              className="scr-addacct"
-              onSubmit={(e) => {
-                e.preventDefault()
-                onAddAccount()
-              }}
-            >
-              <TextInput
-                ref={accountNameRef}
-                autoFocus
-                aria-label="Account name"
-                maxLength={60}
-                placeholder="e.g. WF Checking ··2841"
-                value={newAccount.name}
-                onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
-              />
+          </form>
+        ) : (
+          <button className="chipbtn" onClick={() => setNewAccount({ name: '', kind: 'checking' })}>
+            + account
+          </button>
+        )}
+      </div>
+      {!!accounts?.length && (
+        <ul className="scr-balances topline" aria-label="Account balances">
+          {accounts.map((a) => (
+            <li key={a.id}>
+              <span className="scr-bal-name">{a.name}</span>
               <Select
-                aria-label="Account type"
-                value={newAccount.kind}
-                onChange={(e) => setNewAccount({ ...newAccount, kind: e.target.value as AccountKind })}
+                className="mini"
+                aria-label={`${a.name}: account type`}
+                value={a.kind}
+                disabled={changeKind.busy}
+                onChange={(e) => void changeKind.run(a, e.target.value as AccountKind)}
               >
                 {KIND_OPTIONS.map((k) => (
                   <option key={k.value} value={k.value}>
@@ -588,60 +599,33 @@ export default function Cash() {
                   </option>
                 ))}
               </Select>
-              <Button type="submit" busy={addAccount.busy} disabled={!newAccount.name.trim()}>
-                Add
-              </Button>
-              {!!accounts?.length && (
-                <Button variant="ghost" onClick={() => setNewAccount(null)}>
-                  Cancel
+              <span className="scr-bal-amt">
+                {a.kind === 'credit' ? (
+                  <>
+                    {formatCents(Math.abs(a.balance_cents))} <span className="muted">{a.balance_cents <= 0 ? 'owed' : 'credit'}</span>
+                  </>
+                ) : (
+                  formatCents(a.balance_cents)
+                )}
+              </span>
+              <Tooltip content="Set the real balance — the ledger only knows flows since your first import">
+                <Button variant="ghost" size="mini" aria-label={`Set ${a.name}'s actual balance`} onClick={() => void setBalance(a)}>
+                  Set balance
                 </Button>
-              )}
-            </form>
-          ) : (
-            <button className="chipbtn" onClick={() => setNewAccount({ name: '', kind: 'checking' })}>
-              + account
-            </button>
-          )}
-        </div>
-        {!!accounts?.length && (
-          <ul className="scr-balances topline" aria-label="Account balances">
-            {accounts.map((a) => (
-              <li key={a.id}>
-                <span className="scr-bal-name">{a.name}</span>
-                <Select
-                  className="mini"
-                  aria-label={`${a.name}: account type`}
-                  value={a.kind}
-                  disabled={changeKind.busy}
-                  onChange={(e) => void changeKind.run(a, e.target.value as AccountKind)}
-                >
-                  {KIND_OPTIONS.map((k) => (
-                    <option key={k.value} value={k.value}>
-                      {k.label}
-                    </option>
-                  ))}
-                </Select>
-                <span className="scr-bal-amt">
-                  {a.kind === 'credit' ? (
-                    <>
-                      {formatCents(Math.abs(a.balance_cents))} <span className="muted">{a.balance_cents <= 0 ? 'owed' : 'credit'}</span>
-                    </>
-                  ) : (
-                    formatCents(a.balance_cents)
-                  )}
-                </span>
-                <Tooltip content="Set the real balance — the ledger only knows flows since your first import">
-                  <Button variant="ghost" size="mini" aria-label={`Set ${a.name}'s actual balance`} onClick={() => void setBalance(a)}>
-                    Set balance
-                  </Button>
-                </Tooltip>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+              </Tooltip>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 
-      {!hasData ? (
+  // First run: name an account, import a file. Every view is this until there's a month to show.
+  if (!hasData)
+    return (
+      <>
+        {chrome}
+        {accountsCard}
         <div className="card wide">
           <EmptyState
             title="Nothing here yet"
@@ -654,10 +638,24 @@ export default function Cash() {
             action={{ label: 'Import CSV / OFX', onClick: onImportClick }}
           />
         </div>
-      ) : (
-        <div className="grid12">
-          {/* ---------- charts row ---------- */}
-          <CashFlowCard monthly={monthly} month={month} onSelectMonth={(m) => setFilters({ month: m === latest ? null : m })} />
+      </>
+    )
+
+  if (detail === 'import')
+    return (
+      <>
+        {chrome}
+        <DetailView title="Accounts & import" plain>
+          {accountsCard}
+        </DetailView>
+      </>
+    )
+
+  if (detail === 'spending')
+    return (
+      <>
+        {chrome}
+        <DetailView title="Spending & income">
           <CategorySpendCard
             rows={catSpend}
             month={month}
@@ -665,8 +663,6 @@ export default function Cash() {
             onMonth={(m) => setFilters({ month: m === latest ? null : m })}
             onSelectCategory={showCategory}
           />
-
-          {/* ---------- budget row ---------- */}
           <div className="card c4">
             <div className="h4row">
               <h2>Income · {fmtMonth(month, true)}</h2>
@@ -686,41 +682,7 @@ export default function Cash() {
               </tbody>
             </table>
           </div>
-          <div className="card c5" ref={budgetAnchor}>
-            <div className="h4row">
-              <h2>Plan vs. actual · {fmtMonth(month, true)}</h2>
-              {(anyBudget || editBudgets) && (
-                <div className="right">
-                  <Button size="mini" onClick={() => setEditBudgets((v) => !v)}>
-                    {editBudgets ? 'Done' : 'Set budgets'}
-                  </Button>
-                </div>
-              )}
-            </div>
-            {editBudgets ? (
-              <table className="scr-budget">
-                <tbody>
-                  {expenseBudget.map((b) => (
-                    <tr key={b.category_id}>
-                      <td>{b.name}</td>
-                      <td className="r">
-                        <BudgetInput row={b} onSave={saveBudget.run} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : anyBudget ? (
-              <Bullets data={bulletRows} month={month} />
-            ) : (
-              <EmptyState
-                title="No budgets set"
-                body="Plan a monthly amount for the categories you care about, and this card tracks the month's spending against it."
-                action={{ label: 'Set budgets', onClick: () => setEditBudgets(true) }}
-              />
-            )}
-          </div>
-          <div className="card c3">
+          <div className="card c4">
             <div className="h4row">
               <h2>Savings · {fmtMonth(month, true)}</h2>
             </div>
@@ -767,11 +729,95 @@ export default function Cash() {
               spending; transfers between your own accounts are excluded.
             </div>
           </div>
+        </DetailView>
+      </>
+    )
 
-          <RecurringCard refreshKey={dataVersion} onMerchant={showMerchant} onCategory={showCategoryNamed} onBudget={showBudget} />
+  const budgeted = expenseBudget.filter((b) => b.monthly_cents > 0)
+  const budgetCents = budgeted.reduce((t, b) => t + b.monthly_cents, 0)
+  const budgetSpent = budgeted.reduce((t, b) => t + b.actual_cents, 0)
+  const overBudget = budgeted.filter((b) => b.actual_cents > b.monthly_cents)
 
-          {/* ---------- transactions ---------- */}
-          <div className="card c12" ref={txAnchor}>
+  if (detail === 'budget')
+    return (
+      <>
+        {chrome}
+        <DetailView title="Budget">
+          <div className="card c8">
+            <div className="h4row">
+              <h2>Plan vs. actual · {fmtMonth(month, true)}</h2>
+              {(anyBudget || editBudgets) && (
+                <div className="right">
+                  <Button size="mini" onClick={() => setEditBudgets((v) => !v)}>
+                    {editBudgets ? 'Done' : 'Set budgets'}
+                  </Button>
+                </div>
+              )}
+            </div>
+            {editBudgets ? (
+              <table className="scr-budget">
+                <tbody>
+                  {expenseBudget.map((b) => (
+                    <tr key={b.category_id}>
+                      <td>{b.name}</td>
+                      <td className="r">
+                        <BudgetInput row={b} onSave={saveBudget.run} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : anyBudget ? (
+              <Bullets data={bulletRows} month={month} />
+            ) : (
+              <EmptyState
+                title="No budgets set"
+                body="Plan a monthly amount for the categories you care about, and this card tracks the month's spending against it."
+                action={{ label: 'Set budgets', onClick: () => setEditBudgets(true) }}
+              />
+            )}
+          </div>
+          <div className="card c4">
+            <div className="h4row">
+              <h2>The month's plan</h2>
+              <div className="right">{monthSelect}</div>
+            </div>
+            {anyBudget ? (
+              <Stats
+                items={[
+                  { label: 'Budgeted', value: formatCents(budgetCents) },
+                  { label: 'Spent of it', value: formatCents(budgetSpent) },
+                  { label: 'Over plan', value: overBudget.length === 0 ? 'None' : `${overBudget.length} of ${budgeted.length}` },
+                ]}
+              />
+            ) : (
+              <p className="sub2">No category has a monthly amount yet.</p>
+            )}
+            <p className="sub2 topline">
+              The plan resets each month. Spending in a category without a budget shows on its own, and refunds lower
+              their category's spending.
+            </p>
+          </div>
+        </DetailView>
+      </>
+    )
+
+  if (detail === 'recurring')
+    return (
+      <>
+        {chrome}
+        <DetailView title="Recurring & subscriptions">
+          <RecurringCard data={recurring} onMerchant={showMerchant} onCategory={showCategoryNamed} onBudget={showBudget} />
+        </DetailView>
+      </>
+    )
+
+  if (detail === 'transactions')
+    return (
+      <>
+        {chrome}
+        <DetailView title="Transactions">
+          <div className="card c12">
             <div className="h4row scr-txhead">
               <h2>Transactions</h2>
               <div className="right">
@@ -897,8 +943,175 @@ export default function Cash() {
               </div>
             )}
           </div>
+        </DetailView>
+      </>
+    )
+
+  /* ---------- the overview ---------- */
+  const spendRows = [...catSpend].filter((c) => c.spend_cents > 0).sort((a, b) => b.spend_cents - a.spend_cents)
+  const catTotal = spendRows.reduce((t, c) => t + c.spend_cents, 0)
+  // Closest to (or furthest past) its plan first: actual/budget compared by cross-multiplying, in whole cents.
+  const tightest = [...budgeted].sort((a, b) => b.actual_cents * a.monthly_cents - a.actual_cents * b.monthly_cents)
+  const rec = recurring ? recurringSummary(recurring, todayLocal()) : null
+  const bank = (accounts ?? []).filter((a) => a.kind !== 'credit')
+  const cards = (accounts ?? []).filter((a) => a.kind === 'credit')
+  const bankCents = bank.reduce((t, a) => t + a.balance_cents, 0)
+  const owedCents = cards.reduce((t, a) => t + Math.max(0, -a.balance_cents), 0)
+  const mm = fmtMonth(month, true)
+  const latestRows = rows.slice(0, PREVIEW)
+
+  return (
+    <>
+      {chrome}
+      <div className="grid12">
+        <div className="card c4 co-hero">
+          <div className="h4row">
+            <h2>Kept</h2>
+            <div className="right">{monthSelect}</div>
+          </div>
+          <div className="heronum">{formatCents(savings, { sign: savings > 0 })}</div>
+          <div className="sub2">{savingsRate === null ? `No income recorded in ${mm}` : `${savingsRate}% of ${mm}'s income`}</div>
+          <Stats
+            items={[
+              { label: 'Income', value: formatCents(incomeTotal) },
+              { label: 'Spending', value: formatCents(spendTotal) },
+              ...(taxCents > 0 ? [{ label: 'Of it, tax', value: formatCents(taxCents) }] : []),
+            ]}
+          />
         </div>
-      )}
+        <CashFlowCard monthly={monthly} month={month} onSelectMonth={(m) => setFilters({ month: m === latest ? null : m })} />
+
+        <DrillCard
+          to={viewTarget('spending')}
+          title="Spending by category"
+          value={spendRows.length ? formatCents(catTotal) : undefined}
+          note={
+            spendRows.length
+              ? `${mm} · ${spendRows.length} categor${spendRows.length === 1 ? 'y' : 'ies'}, with income and savings`
+              : `No spending in ${mm} yet`
+          }
+        >
+          {spendRows.length > 0 && (
+            <MiniRows
+              rows={spendRows.slice(0, 4).map((c) => ({
+                key: c.category_id ?? 'un',
+                label: c.name,
+                sub: `${Math.round((c.spend_cents * 100) / catTotal)}%`,
+                value: formatCents(c.spend_cents),
+              }))}
+            />
+          )}
+        </DrillCard>
+        <DrillCard
+          to={viewTarget('budget')}
+          title="Budget"
+          badge={overBudget.length > 0 ? `${overBudget.length} over` : undefined}
+          value={anyBudget ? formatCents(budgetSpent) : undefined}
+          note={
+            anyBudget
+              ? `spent of ${formatCents(budgetCents)} planned for ${mm}`
+              : 'No budgets set — plan a monthly amount for the categories you care about'
+          }
+        >
+          {anyBudget && (
+            <MiniRows
+              rows={tightest.slice(0, 4).map((b) => ({
+                key: b.category_id ?? 'un',
+                label: b.name,
+                sub: b.actual_cents > b.monthly_cents ? `over by ${formatCents(b.actual_cents - b.monthly_cents)}` : undefined,
+                value: `${fmtShort(b.actual_cents)} / ${fmtShort(b.monthly_cents)}`,
+              }))}
+            />
+          )}
+        </DrillCard>
+        <DrillCard
+          to={viewTarget('recurring')}
+          title="Recurring"
+          badge={rec && rec.priceUp > 0 ? `${rec.priceUp} up in price` : undefined}
+          value={rec && rec.active > 0 ? (rec.safe ? formatCents(rec.safe.cents) : `${rec.active} active`) : undefined}
+          note={
+            !rec
+              ? 'Looking for a rhythm in the ledger…'
+              : rec.active === 0
+                ? 'No recurring charges detected yet'
+                : rec.safe
+                  ? `left to spend this month · ${rec.active} recurring, ≈${formatCents(rec.safe.billsCents)} still coming`
+                  : 'bills and subscriptions with a steady rhythm'
+          }
+        >
+          {rec && rec.upcoming.length > 0 && (
+            <MiniRows
+              rows={rec.upcoming.slice(0, 4).map((r) => ({
+                key: r.merchant,
+                label: r.merchant,
+                sub: shortDate(r.nextExpectedOn, thisYear),
+                value: formatCents(r.typicalCents),
+              }))}
+            />
+          )}
+        </DrillCard>
+
+        <DrillCard
+          to={viewTarget('import')}
+          title="Accounts"
+          value={accounts?.length ? formatCents(bankCents) : undefined}
+          note={
+            accounts?.length
+              ? `in ${bank.length} bank account${bank.length === 1 ? '' : 's'}` +
+                (cards.length ? ` · ${formatCents(owedCents)} owed on ${cards.length} card${cards.length === 1 ? '' : 's'}` : '')
+              : 'No accounts yet — add one to import into'
+          }
+        >
+          {!!accounts?.length && (
+            <MiniRows
+              rows={[...accounts]
+                .sort((a, b) => Math.abs(b.balance_cents) - Math.abs(a.balance_cents))
+                .slice(0, 4)
+                .map((a) => ({
+                  key: a.id,
+                  label: a.name,
+                  sub: a.kind === 'credit' ? (a.balance_cents <= 0 ? 'card · owed' : 'card · credit') : a.kind,
+                  value: formatCents(a.kind === 'credit' ? Math.abs(a.balance_cents) : a.balance_cents),
+                }))}
+            />
+          )}
+        </DrillCard>
+        <div className="card c8 co-latest">
+          <div className="h4row">
+            <h2>Latest transactions</h2>
+            <div className="right">
+              {!!page?.uncategorized && (
+                <Link className="scr-link" to={viewTarget('transactions', { cat: 'uncategorized' })} state={{ q: '' }}>
+                  {page.uncategorized.toLocaleString()} uncategorized
+                </Link>
+              )}
+              <DrillMore to={viewTarget('transactions')} state={{ q: '' }}>
+                {page ? `All ${page.matching.toLocaleString()}` : 'All'}
+              </DrillMore>
+            </div>
+          </div>
+          {!page ? (
+            <Skeleton h={150} />
+          ) : latestRows.length === 0 ? (
+            <p className="sub2">No transactions yet.</p>
+          ) : (
+            <MiniRows
+              rows={latestRows.map((t) => ({
+                key: t.id,
+                label: (
+                  <>
+                    <span className="co-tx-when">{shortDate(t.posted_on, thisYear)}</span>
+                    <span className="co-tx-desc">{t.description}</span>
+                    <span className="co-tx-cat">{t.category_name ?? 'uncategorized'}</span>
+                  </>
+                ),
+                value: formatCents(t.amount_cents, { sign: t.amount_cents > 0 }),
+                tone: t.amount_cents > 0 ? ('pos' as const) : undefined,
+              }))}
+            />
+          )}
+        </div>
+      </div>
     </>
   )
 }
