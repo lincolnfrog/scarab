@@ -17,6 +17,7 @@ import {
 import * as svc from '../../engine/services'
 import { simulate, type SimParams } from '../../engine/simulate'
 import { dumpDb, loadDump, TABLES, type Dump } from '../../engine/snapshot'
+import { getCapacity } from '../../engine/capacity'
 import { getTax, putTaxSettings } from '../../engine/tax'
 import { getTwoYear, priceTiming } from '../../engine/twoyear'
 import { CURRENT_VERSION, readabilityError } from '../../engine/upgrades'
@@ -106,6 +107,7 @@ export const CORE: LocalRoute[] = [
   r('PUT', '/paychecks/:id', (c) => updatePaySource(c.db, Number(c.params.id), c.body)),
   r('DELETE', '/paychecks/:id', (c) => deletePaySource(c.db, Number(c.params.id))),
   r('GET', '/tax/two-year', (c) => getTwoYear(c.db, c.today)),
+  r('GET', '/tax/capacity', (c) => getCapacity(c.db, c.today)),
   // Read-like: prices a timing choice against the ledger and stores nothing.
   r('POST', '/tax/timing', (c) => priceTiming(c.db, c.today, c.body), 'never'),
   r('GET', '/contributions', (c) => getContributions(c.db, c.today)),

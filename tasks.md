@@ -810,6 +810,54 @@ statements).
       Vests are still never recorded automatically: the release's FMV and
       withholding are the facts the basis and the tax are computed from.
 
+## The plan around a managed strategy (2026-10-11)
+
+A tax-aware long/short account (AQR Flex, Parametric, direct indexing)
+manufactures losses Scarab can only see as the broker's year-to-date figure
+(migration 26). What the household needed on top was the *plan*: when money
+went in, what the manager expects it to harvest, and how a sale planned for
+January nets against it. Built generically — a managed strategy, not a
+vendor — as inputs the user types, never as code: a plugin layer was
+considered and rejected (the served JavaScript is the ZK trust root;
+vault-stored code would run against the plaintext ledger and the unlocked
+key, and can't be held to the engine's invariants).
+
+- [x] **Deposits and withdrawals** (`account_flows`): the fact a balance
+      history can't show; dated ahead, a planned deposit. The drawer's
+      Deposits tab, with the deposits set against the latest balance.
+- [x] **The harvest forecast** (`harvest_profiles`, `harvest_forecasts`):
+      the manager's estimate — rates on new money by age, dollar figures for
+      the standing book by year, the day given and the source — spread over
+      the calendar (`engine/harvest.ts`). The drawer's Forecast tab, taxable
+      balance accounts only; labelled an estimate everywhere it is read.
+- [x] **Planned sales** (`planned_sales`): shares of a holding on a day
+      ahead, at a typed price or today's quote, realized off the lots as they
+      stand (FIFO, long-term by the planned day; warns when the holdings
+      shrink under a plan). Entered on the capacity view.
+- [x] **Loss capacity** (`engine/capacity.ts`, `GET /tax/capacity`,
+      `#/tax/capacity`): reported + forecast losses against recorded +
+      planned gains, netted year by year with the carry by character and the
+      tax on what is left, on this year's tables; the chart (facts solid,
+      forecast and plan dashed, each year from its carry-in), the per-year
+      table, the managed accounts, how it was worked out and what it leaves
+      out. The two-year view folds the plan into both columns (basis lines
+      say so); the Projected tax card stays facts-only. Dream Home's
+      carryforward fallback follows it.
+- [x] **Floor to v27** once the vault was confirmed resealed there
+      (`snapshot-v27.json` from `5fa224a`; the fixture script now covers a
+      credit card and a broker-reported loss).
+
+Follow-ups:
+
+- [ ] A Checkup finding for a planned sale the losses won't cover by then.
+- [ ] A money-weighted return for balance-tracked accounts now that their
+      deposits are recorded (today only lots accounts have one).
+- [ ] "Plan a sale…" from the holding drawer, prefilled.
+- [ ] Future: a planned sale as a scenario event (proceeds net of the tax
+      the capacity view prices) and its proceeds as a planned deposit.
+- [ ] The forecast treats a withdrawal as not reducing it; a pro-rata
+      reduction of the standing book would be the next refinement.
+
 ## Backlog: smaller, high leverage
 
 - [x] Performance attribution on Invest — shipped 2026-09-23 (above): a

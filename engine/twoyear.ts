@@ -4,8 +4,10 @@ import { formatDollars } from '../shared/money'
 import { deferralLimit } from './contributions'
 import type { DbLike } from './db'
 import { bad } from './errors'
+import { accountForecasts, forecastLossIn } from './harvest'
 import { listPaySources, PERIODS_PER_YEAR } from './paychecks'
 import { ageInYear, listPeople, personNamed } from './people'
+import { plannedSaleGains } from './planned-sales'
 import { computeTax, marginalRates, projectVests, taxYear, TAX_DATA_VINTAGE, type TaxComputed, type TaxInputs } from './tax'
 
 /**
@@ -29,6 +31,10 @@ export type YearView = {
   otherCents: number
   stGainCents: number
   ltGainCents: number
+  /** The plan's part of the year: sales planned for it, by term, and the harvest forecast's expected further losses (positive). */
+  plannedStCents: number
+  plannedLtCents: number
+  forecastLossCents: number
   /** Capital loss carried in from the year before (short-term, long-term). */
   carryInStCents: number
   carryInLtCents: number
@@ -71,9 +77,53 @@ export function lossCarry(stCents: number, ltCents: number): { st: number; lt: n
   return { st: stLoss - usedSt, lt: ltLoss - (used - usedSt) }
 }
 
-type Context = {
+/** What the plan adds to one tax year: the sales planned for it by term, and the harvest forecast's expected further losses. */
+export type YearPlan = { plannedStCents: number; plannedLtCents: number; forecastLossCents: number; sales: number; accounts: string[] }
+
+/**
+ * The plan by year (engine/planned-sales.ts, engine/harvest.ts): planned
+ * sales priced off the lots as they stand, and each managed account's
+ * expected further losses — this year after the broker's figure, later years
+ * whole. Years are keyed as given; one entry each.
+ */
+export function yearPlans(db: DbLike, today: string, years: readonly number[]): Map<number, YearPlan> {
+  const last = Math.max(...years)
+  const gains = plannedSaleGains(db, today)
+  const forecasts = accountForecasts(db, today, last)
+  const out = new Map<number, YearPlan>()
+  for (const y of years) {
+    const mine = gains.filter((g) => Number(g.planned_on.slice(0, 4)) === y)
+    out.set(y, {
+      plannedStCents: mine.reduce((s, g) => s + g.st_cents, 0),
+      plannedLtCents: mine.reduce((s, g) => s + g.lt_cents, 0),
+      forecastLossCents: forecastLossIn(forecasts, y),
+      sales: mine.length,
+      accounts: forecasts.filter((f) => (f.byYear.find((b) => b.year === y)?.cents ?? 0) !== 0).map((f) => f.account),
+    })
+  }
+  return out
+}
+
+/** The basis lines a year's plan adds, when it has one. */
+function planLines(year: number, p: YearPlan, isThisYear: boolean): string[] {
+  const lines: string[] = []
+  if (p.sales > 0)
+    lines.push(
+      `${year}: ${p.sales} planned sale${p.sales === 1 ? '' : 's'} — ${formatDollars(p.plannedStCents + p.plannedLtCents, { sign: true })} realized as the lots stand today`,
+    )
+  if (p.forecastLossCents !== 0)
+    lines.push(
+      `${year}: ${formatDollars(p.forecastLossCents)} of further losses${isThisYear ? ' over the rest of the year' : ''} expected from ${p.accounts.join(', ')} — the manager’s estimate, not a fact${isThisYear ? '; the Projected tax card shows what is realized so far' : ''}`,
+    )
+  return lines
+}
+
+export type Context = {
+  /** This year's inputs with the plan in them (the two-year view's left column); `plain` is the same without the plan. */
   thisInputs: TaxInputs
   nextBase: TaxInputs
+  plain: { thisYear: TaxInputs; nextYear: TaxInputs }
+  out: ReturnType<typeof taxYear>['out']
   view: TwoYear
 }
 
@@ -83,6 +133,17 @@ function context(db: DbLike, today: string): Context {
   const next = year + 1
   const settings = out.settings
   const basis: string[] = []
+
+  // The plan: sales planned for each year and the losses a managed account's manager expects — this year's rest and
+  // next year whole. Both columns feel them; the Projected tax card keeps to what has happened.
+  const plans = yearPlans(db, today, [year, next])
+  const planThis = plans.get(year)!
+  const planNext = plans.get(next)!
+  const planned: TaxInputs = {
+    ...inputs,
+    stGainCents: inputs.stGainCents + planThis.plannedStCents - planThis.forecastLossCents,
+    ltGainCents: inputs.ltGainCents + planThis.plannedLtCents,
+  }
 
   // Wages: each paycheck for a full year, pre-tax deferrals capped at next year's limit for the earner's age.
   const sources = listPaySources(db)
@@ -125,25 +186,28 @@ function context(db: DbLike, today: string): Context {
   basis.push('Dividends & interest: the last twelve months')
   if (settings.otherIncomeCents) basis.push('Other income: the setting, again')
 
-  const carry = lossCarry(inputs.stGainCents, inputs.ltGainCents)
+  const carry = lossCarry(planned.stGainCents, planned.ltGainCents)
   if (carry.st + carry.lt > 0)
     basis.push(
       `Capital loss carried in from ${year}: ${[carry.st ? `${formatDollars(carry.st)} short-term` : '', carry.lt ? `${formatDollars(carry.lt)} long-term` : ''].filter(Boolean).join(', ')}`,
     )
-  basis.push('No sales planned yet; the same deduction; this year’s brackets')
+  for (const line of planLines(year, planThis, true)) basis.push(line)
+  for (const line of planLines(next, planNext, false)) basis.push(line)
+  if (planThis.sales + planNext.sales === 0) basis.push('No sales planned yet')
+  basis.push('The same deduction; this year’s brackets')
 
   const nextBase: TaxInputs = {
     filing: settings.filingStatus,
     ordinaryCents: wages + settings.otherIncomeCents + rsu + (div - divQualified),
-    stGainCents: -carry.st,
-    ltGainCents: -carry.lt,
+    stGainCents: -carry.st + planNext.plannedStCents - planNext.forecastLossCents,
+    ltGainCents: -carry.lt + planNext.plannedLtCents,
     qualifiedDividendCents: divQualified,
     investmentIncomeCents: div,
     deductionCents: inputs.deductionCents,
     ...(ficaWages !== undefined ? { medicareWagesCents: ficaWages + rsu } : {}),
     state: settings,
   }
-  const view = (y: number, i: TaxInputs, w: number, r: number, d: number, carryIn: { st: number; lt: number }, st: number, lt: number): YearView => ({
+  const view = (y: number, i: TaxInputs, w: number, r: number, d: number, carryIn: { st: number; lt: number }, st: number, lt: number, p: YearPlan): YearView => ({
     year: y,
     wagesCents: w,
     rsuCents: r,
@@ -151,6 +215,9 @@ function context(db: DbLike, today: string): Context {
     otherCents: settings.otherIncomeCents,
     stGainCents: st,
     ltGainCents: lt,
+    plannedStCents: p.plannedStCents,
+    plannedLtCents: p.plannedLtCents,
+    forecastLossCents: p.forecastLossCents,
     carryInStCents: carryIn.st,
     carryInLtCents: carryIn.lt,
     deductionCents: i.deductionCents,
@@ -158,21 +225,24 @@ function context(db: DbLike, today: string): Context {
     marginal: marginalRates(i),
   })
   return {
-    thisInputs: inputs,
+    thisInputs: planned,
     nextBase,
+    plain: { thisYear: inputs, nextYear: { ...nextBase, stGainCents: 0, ltGainCents: 0 } },
+    out,
     view: {
       // This year's realized gains apart from the carryover the return brought in (Taxes' setting): the inputs net the two.
       thisYear: view(
         year,
-        inputs,
+        planned,
         out.incomes.wagesCents,
         out.incomes.rsuYtdCents + out.incomes.rsuProjectedCents,
         out.incomes.dividendsYtdCents,
         { st: out.incomes.carryInStCents, lt: out.incomes.carryInLtCents },
         out.incomes.realizedStCents,
         out.incomes.realizedLtCents,
+        planThis,
       ),
-      nextYear: view(next, nextBase, wages, rsu, div, carry, 0, 0),
+      nextYear: view(next, nextBase, wages, rsu, div, carry, 0, 0, planNext),
       basis,
       vintage: `${TAX_DATA_VINTAGE} — held for ${next}`,
     },
@@ -181,6 +251,11 @@ function context(db: DbLike, today: string): Context {
 
 export function getTwoYear(db: DbLike, today: string): TwoYear {
   return context(db, today).view
+}
+
+/** The two-year context for other derivations (engine/capacity.ts): the inputs with and without the plan, and the year picture. */
+export function twoYearContext(db: DbLike, today: string): Context {
+  return context(db, today)
 }
 
 /* ============================== timing ============================== */

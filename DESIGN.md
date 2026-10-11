@@ -204,7 +204,8 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             price and day, PriceChart, accounts and lots, its trades),
             AccountStrip, AccountDrawer (Positions ·
             Activity · Grants · Settings; a balance account's Balances ·
-            Realized · Settings, ReportedPanel), AddAccountFlow, TradeSheet (live
+            Deposits · Realized · Forecast · Settings: ReportedPanel,
+            FlowsPanel, HarvestPanel), AddAccountFlow, TradeSheet (live
             preview from POST /trades/preview), ActivityTable (edit and delete
             trades in place), OpeningPositionsSheet, CheckinDrawer,
             BalanceAccounts, CashPanel, VestDialog, GrantsPanel, SetPrice,
@@ -226,7 +227,8 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             PortfolioValueCard, PriceChart (one symbol's daily history, in
             the holding drawer), RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
             CategorySpendCard; cardModel.ts.
-  tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard, TwoYearCard), BracketBar, and their copy.
+  tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard, TwoYearCard,
+            CapacityCard: the loss-capacity view with its planned-sales editor), BracketBar, and their copy.
   viz.tsx BigChart.tsx  Donut, GroupedBars, HBars, Bullets; the daily price
             chart (log scale, 50D/200D/200W, buys and sells marked).
   ui/Finding.tsx  One Checkup finding: the five parts every finding carries.
@@ -256,6 +258,15 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                balance-tracked taxable account and tax year (Flex-style
                managed strategies Scarab can't hold as lots); Taxes, the
                portfolio totals and the realized report add them in.
+  account-flows.ts  Deposits and withdrawals on a balance-tracked account
+               (dated ahead: planned).
+  harvest.ts   The harvest forecast: a managed account's expected net losses
+               from its manager's estimate, spread over the calendar
+               (lossSchedule, lossBetween, accountForecasts).
+  planned-sales.ts  Sales not yet made, and what they realize off the lots
+               as they stand (plannedSaleGains).
+  capacity.ts  Loss capacity: the above against the ledger, year by year
+               (GET /tax/capacity) — netting, carry, tax, the chart series.
   positions-paste.ts  Pure parser for pasted starting positions.
   prices.ts    Quotes in (upsertPrices; applyBasket → prices + prices_daily),
                each with the previous close its source reported; chart data
@@ -295,8 +306,9 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                table, RMD ages, Social Security claiming and taxable share.
   buckets.ts   Account subtypes → the three buckets, with taxable basis.
   twoyear.ts   This year and next: next year on the same settings with the
-               loss carryforward (by character), and a timing question —
-               the same amount now or in January — priced over both years.
+               loss carryforward (by character), the plan (planned sales,
+               the harvest forecast) in both columns, and a timing question
+               — the same amount now or in January — priced over both years.
   allocation.ts  Asset classes (set, or guessed from symbol and name), the
                allocation against a target, and the rebalance plan:
                contributions, then sheltered trades, then taxable lots by
@@ -338,7 +350,8 @@ server/     Node-only shell.
               basket (GET, status, throttled rebuild).
   api9.ts     Brokerage: account detail, owners, assets, check-in, balances,
               trade edit/delete/preview, opening positions, manual prices,
-              the realized report, target allocation and asset classes.
+              the realized report, target allocation and asset classes,
+              deposits and withdrawals, harvest forecasts, planned sales.
   api10.ts    Market data and analytics: price refresh, daily charts, series,
               catalog and views, returns, the market history file.
   basket.ts   The daily price basket: the whole US-listed universe + top crypto,
@@ -397,7 +410,7 @@ specific lots, per-account pools), tax, money parsing, series and returns
 math, chart scales (including a non-vacuous America/Los_Angeles test), and
 simulation determinism.
 
-## 3. Data model (migrations 1–27)
+## 3. Data model (migrations 1–28)
 
 Ledger philosophy: **store dated facts, derive everything**. Transactions,
 trades, prices, valuations, balances are facts; balance sheets, charts, cost
@@ -479,6 +492,19 @@ number.
     loans (mortgages), so home equity is unchanged. `getNetworth` itemizes
     both as `debts`. Cards are left out of the dream-home fund and the asset
     allocation; Future starts from cash net of them.
+28. The plan around a managed tax-aware strategy, four additive tables.
+    `account_flows`: money into (positive) or out of a balance-tracked
+    account on a day, with a note — the fact a balance history can't show (a
+    deposit otherwise reads as growth); dated after today it is a planned
+    deposit. `harvest_profiles` + `harvest_forecasts`: the manager's own
+    estimate of the net losses the account will realize — rates on new money
+    by its age (year one, year two, after) and dollar figures for the
+    standing book by tax year, with the day given and the source; taxable
+    balance accounts only, an assumption labelled one wherever read.
+    `planned_sales`: so many shares of a holding in a lots account on a day
+    ahead, at a typed price or the latest quote when read. Nothing derived
+    is stored: `engine/capacity.ts` nets them against the ledger on every
+    read.
 
 **Server-only, never in a snapshot**: vault_blobs, vault_history,
 household_members, vault_invites, basket_quotes and the `basket:*` app_meta
@@ -515,12 +541,26 @@ belong to the deployment.
   year, netted by character before this year's netting.
 - **Hand-entered prices** are ordinary price rows marked by
   `price:manual:<SYM>`; a later market quote supersedes them.
+- **The harvest forecast** (migration 28) spreads the manager's figures over
+  days: a stated year's figure over that year (the estimate's own year from
+  its `as_of`), a deposit after `as_of` at the year-one rate over its first
+  twelve months, year-two over the next, the later rate after — and the
+  standing book at the later rate on the balance as of the estimate for any
+  year without a figure. Where the broker's reported figure exists for the
+  year, the forecast takes over the day after it runs through. Withdrawals
+  don't reduce it (said so). A planned sale's gain replays the account's
+  ledger with the plans appended in date order, so FIFO and the holding
+  period come out as a recorded sale's would. `getCapacity` nets each year
+  (reported + forecast losses, recorded + planned gains, the carry-in by
+  character) with `netCapitalGains`/`lossCarry` and prices the capital side
+  on this year's tables held forward; the two-year view folds the same plan
+  into both columns (the Projected tax card stays facts-only).
 - **Snapshot compatibility** (`engine/upgrades.ts`): tier A (UX) and B
   (additive schema) changes need nothing; a tier-C change (data changes shape)
-  needs an upgrade entry. Until production, `SNAPSHOT_COMPAT.minReadable` is
-  the current version and the registry is empty, so an older snapshot is
-  refused rather than upgraded (`engine/fixtures/README.md`) — every new
-  migration makes earlier dev vaults unreadable until then.
+  needs an upgrade entry. While the household's is the only vault, the floor
+  (`SNAPSHOT_COMPAT.minReadable`, equal to the oldest fixture under
+  `engine/fixtures/`) follows the vault up once it has been resealed at a
+  newer version — v27 since 2026-10-11 (`engine/fixtures/README.md`).
 
 Money invariants: **integer cents everywhere**; parsing is string math
 (`parseMoney` handles commas-only-in-thousands, accounting parens);
@@ -645,7 +685,9 @@ isomorphic engine + parity (ZK-2), local mode with encrypted saves (ZK-3),
 boot-into-local-from-vault + start-empty (ZK front door, 2026-09-09), the
 daily price basket that keeps a ZK session's quotes fresh without naming
 holdings (2026-09-09), the passkey-only vault and a two-member household
-(2026-09-15), and the improvement pass below (2026-09-23).
+(2026-09-15), the improvement pass below (2026-09-23), and the plan around a
+managed strategy (2026-10-11: deposits, the harvest forecast, planned sales
+and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
 
 1. ~~Boot-into-local-from-vault~~ **— done 2026-09-09** (`src/FrontDoor.tsx`,
    `src/session.ts`). The front door shows only when the server holds no

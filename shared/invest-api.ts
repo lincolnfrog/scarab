@@ -60,8 +60,11 @@ export type InvestAccountRow = {
   mask: string | null
   sort: number
   latest_snapshot: { balanced_on: string; balance_cents: number } | null
-  /** `reported`: years of realized gains entered as the broker reports them (a balance account's). */
-  counts: { trades: number; balances: number; unvested: number; paychecks: number; reported: number }
+  /**
+   * `reported`: years of realized gains entered as the broker reports them (a balance account's); `flows`: its
+   * deposits and withdrawals; `planned`: sales planned from a lots account.
+   */
+  counts: { trades: number; balances: number; unvested: number; paychecks: number; reported: number; flows: number; planned: number }
 }
 
 /**
@@ -130,6 +133,10 @@ export type InvestAccountDetail = {
   cash: PortfolioAccount | null
   /** A balance account's realized gains as its broker reports them, newest year first. */
   reported: ReportedRealizedRow[]
+  /** A balance account's deposits and withdrawals, newest first (planned ones included). */
+  flows: AccountFlowRow[]
+  /** A taxable balance account's harvest forecast — the manager's estimate — or null. */
+  harvest: HarvestProfile | null
 }
 
 /**
@@ -152,6 +159,88 @@ export type ReportedRealizedRow = {
 /** PUT /api/invest/accounts/:id/realized/:year. `asOf` defaults to today, or Dec 31 for a past year. */
 export type ReportedRealizedBody = { stCents: number; ltCents: number; asOf?: string }
 // … → { ok: true; changed: boolean; row: ReportedRealizedRow }. DELETE the same path → { ok: true; removed: ReportedRealizedRow }.
+
+/* ---------- deposits and withdrawals (migration 28) ---------- */
+
+/**
+ * Money moved into (positive) or out of (negative) an account tracked by
+ * balance, on a day: a deposit from the bank, a transfer in kind, a
+ * withdrawal. The fact a balance history can't show on its own — without it a
+ * deposit reads as growth. Dated after today it is a plan (`planned`): a
+ * deposit the harvest forecast counts as new money from that day.
+ */
+export type AccountFlowRow = {
+  id: number
+  invest_account_id: number
+  account: string
+  flowed_on: string
+  amount_cents: number
+  note: string | null
+  planned: boolean
+}
+/** POST /api/invest/flows → { ok, row }; PUT /api/invest/flows/:id → { ok, changed, row }; DELETE → { ok, removed }. */
+export type AccountFlowBody = { investAccountId: number; flowedOn: string; amountCents: number; note?: string | null }
+
+/* ---------- the harvest forecast (migration 28) ---------- */
+
+/**
+ * A managed tax-aware strategy's expected net realized losses, as its
+ * manager estimates them — an assumption, kept with the day it was given and
+ * where it came from. Rates in micro (1e6 = 100%) on money by its age:
+ * `year1_micro` of a deposit in its first twelve months, `year2_micro` in the
+ * next twelve, `later_micro` each year after (and the standing book's rate
+ * past the stated years). `years`: the manager's dollar figures for the
+ * standing book, by tax year, from `as_of` on.
+ */
+export type HarvestProfile = {
+  invest_account_id: number
+  as_of: string
+  year1_micro: number
+  year2_micro: number
+  later_micro: number
+  source: string | null
+  years: { tax_year: number; loss_cents: number }[]
+}
+/** PUT /api/invest/accounts/:id/harvest → { ok, changed, profile }; DELETE → { ok, removed }. */
+export type HarvestProfileBody = {
+  asOf: string
+  year1Micro: number
+  year2Micro: number
+  laterMicro: number
+  source?: string | null
+  years?: { taxYear: number; lossCents: number }[]
+}
+
+/* ---------- planned sales (migration 28) ---------- */
+
+/**
+ * A sale not yet made: this many shares of a holding in a lots account, on a
+ * day ahead, at a typed price or (null) the latest quote when read. Its gain
+ * comes from the account's lots as they stand today, FIFO, long-term by the
+ * planned day — so the capacity view can net it against the losses expected
+ * by then.
+ */
+export type PlannedSaleRow = {
+  id: number
+  invest_account_id: number
+  account: string
+  asset_id: number
+  symbol: string
+  asset_kind: 'stock' | 'crypto'
+  planned_on: string
+  qty_micro: number
+  price_cents: number | null
+  note: string | null
+}
+/** POST /api/invest/planned-sales → { ok, row }; PUT /api/invest/planned-sales/:id → { ok, changed, row }; DELETE → { ok, removed }. */
+export type PlannedSaleBody = {
+  investAccountId: number
+  assetId: number
+  plannedOn: string
+  qtyMicro: number
+  priceCents?: number | null
+  note?: string | null
+}
 
 // GET /api/invest/owners → string[]: paycheck earners, then anyone else named as an account's owner.
 

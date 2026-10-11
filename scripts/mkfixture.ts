@@ -12,6 +12,7 @@ import { createOpeningPositions, createTrade, putBalanceSnapshot, putUnvested, v
 import { putAccountClass, putAssetClass, putTarget } from '../engine/allocation'
 import { putCheckupSettings } from '../engine/checkup-settings'
 import { createPaySource } from '../engine/paychecks'
+import { putReportedRealized } from '../engine/realized-reported'
 import { putPeople } from '../engine/people'
 import { createAccount, createInvestAccount, createLiability, createProperty, putBudget, putValuation, runImport } from '../engine/services'
 import { dumpDb } from '../engine/snapshot'
@@ -29,6 +30,14 @@ runImport(
 )
 const dining = (db.prepare("SELECT id FROM categories WHERE name = 'Dining'").get() as { id: number }).id
 putBudget(db, { categoryId: dining, monthlyCents: 30_000 })
+
+// A credit card (migration 27): its own kind of bank account, imported like any other, owed rather than held.
+const card = createAccount(db, { name: 'Visa', kind: 'credit' }) as { id: number }
+runImport(
+  db,
+  { accountId: card.id, filename: 'visa.csv', content: 'Date,Description,Amount\n2026-09-05,TST* SOME BISTRO,-61.20\n2026-09-20,PAYMENT THANK YOU,500.00\n' },
+  'max@example.com',
+)
 
 // A lots-tracked brokerage: a trade and a starting position.
 const vanguard = createInvestAccount(db, { name: 'Vanguard', kind: 'brokerage', tracking: 'lots' }).id
@@ -50,6 +59,11 @@ createPaySource(db, {
   earner: 'Max', employer: 'Acme', cadence: 'biweekly', paidOn: '2026-09-18', grossCents: 600_000, fedWithheldCents: 120_000,
   retirementCents: 40_000, rothCents: 20_000, matchRateMicro: 500_000, matchCapMicro: 60_000, matchTrueUp: true, investAccountId: plan,
 })
+
+// A managed strategy tracked by balance, with the year's realized loss as its broker reports it (migration 26).
+const managed = createInvestAccount(db, { name: 'Flex 250', kind: 'brokerage', tracking: 'balance', subtype: 'taxable', institution: 'Schwab' }).id
+putBalanceSnapshot(db, { investAccountId: managed, balancedOn: '2026-08-31', balanceCents: 195_000_000 })
+putReportedRealized(db, managed, 2026, { stCents: -48_000_000, ltCents: 0, asOf: '2026-09-18' }, TODAY)
 
 // A balance-tracked 401(k).
 const k401 = createInvestAccount(db, { name: 'Fidelity 401(k)', kind: 'retirement', tracking: 'balance' }).id

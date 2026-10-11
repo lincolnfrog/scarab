@@ -168,12 +168,12 @@ export default function Goal() {
   const detail = useDetail(DETAILS)
 
   // A failed first load says so (with a retry) instead of "Loading…" forever; a failed refresh keeps the last data.
-  // The loss Taxes carries out of this year (recorded sales, broker-reported figures and last year's carryover):
-  // what the gross-up uses while no carryforward is typed here. null while unknown.
+  // The loss Taxes' capacity view carries out of this year (recorded and planned sales, broker-reported figures, the
+  // harvest forecast and last year's carryover): what the gross-up uses while no carryforward is typed here. null while unknown.
   const [taxCarry, setTaxCarry] = useState<number | null>(null)
   const load = useCallback(() => {
-    get<{ tax: { capLossCarryCents: number } }>('/api/tax')
-      .then((t) => setTaxCarry(t.tax.capLossCarryCents))
+    get<{ years: { carryOutStCents: number; carryOutLtCents: number }[] }>('/api/tax/capacity')
+      .then((c) => setTaxCarry(c.years[0] ? c.years[0].carryOutStCents + c.years[0].carryOutLtCents : 0))
       .catch(() => setTaxCarry(null))
     return get<GoalData>('/api/goal')
       .then((d) => {
@@ -719,7 +719,7 @@ export default function Goal() {
               hint={
                 taxCarry ? (
                   <>
-                    blank = {formatDollars(taxCarry)} carried forward on <Link className="scr-link" to={{ screen: 'tax' }}>Taxes</Link>
+                    blank = {formatDollars(taxCarry)} carried into next year as <Link className="scr-link" to={{ screen: 'tax', rest: ['capacity'] }}>Loss capacity</Link> projects it
                   </>
                 ) : (
                   'banked losses offset gains'

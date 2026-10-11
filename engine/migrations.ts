@@ -553,6 +553,55 @@ export const migrations: string[] = [
    INSERT INTO accounts (id, name, kind, external_id, created_at, opening_cents)
      SELECT id, name, kind, external_id, created_at, opening_cents FROM accounts_27;
    DROP TABLE accounts_27`,
+
+  // 28 — the plan around a managed tax-aware strategy, in four tables, all
+  // additive (tier B). `account_flows`: money moved into (positive) or out of
+  // (negative) an account tracked by balance, on a day — the fact a balance
+  // history can't show on its own (a deposit otherwise reads as growth); a
+  // row dated ahead of today is a planned deposit. `harvest_profiles` and
+  // `harvest_forecasts`: the manager's own estimate of the net losses the
+  // account will realize — a rate on new money by its age, and dollar figures
+  // for the standing book by tax year, with the day the estimate was given
+  // and its source. An assumption, labelled one everywhere it is read; only a
+  // taxable balance-tracked account takes one. `planned_sales`: a sale not
+  // yet made — this many shares of a holding, on a day ahead, at a typed
+  // price or the quote of the day it is read; its gain comes from the lots
+  // as they stand. Nothing derived is stored: the capacity view
+  // (engine/capacity.ts) nets these against the ledger on every read.
+  `CREATE TABLE account_flows (
+     id                INTEGER PRIMARY KEY,
+     invest_account_id INTEGER NOT NULL REFERENCES invest_accounts(id),
+     flowed_on         TEXT NOT NULL,
+     amount_cents      INTEGER NOT NULL CHECK (amount_cents <> 0),
+     note              TEXT,
+     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+   CREATE INDEX idx_account_flows_account ON account_flows(invest_account_id, flowed_on);
+   CREATE TABLE harvest_profiles (
+     invest_account_id INTEGER PRIMARY KEY REFERENCES invest_accounts(id),
+     as_of             TEXT NOT NULL,
+     year1_micro       INTEGER NOT NULL,
+     year2_micro       INTEGER NOT NULL,
+     later_micro       INTEGER NOT NULL,
+     source            TEXT
+   );
+   CREATE TABLE harvest_forecasts (
+     invest_account_id INTEGER NOT NULL REFERENCES invest_accounts(id),
+     tax_year          INTEGER NOT NULL,
+     loss_cents        INTEGER NOT NULL CHECK (loss_cents >= 0),
+     PRIMARY KEY (invest_account_id, tax_year)
+   );
+   CREATE TABLE planned_sales (
+     id                INTEGER PRIMARY KEY,
+     invest_account_id INTEGER NOT NULL REFERENCES invest_accounts(id),
+     asset_id          INTEGER NOT NULL REFERENCES assets(id),
+     planned_on        TEXT NOT NULL,
+     qty_micro         INTEGER NOT NULL CHECK (qty_micro > 0),
+     price_cents       INTEGER,
+     note              TEXT,
+     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+   CREATE INDEX idx_planned_sales_account ON planned_sales(invest_account_id, asset_id, planned_on)`,
 ]
 
 export function migrate(db: DbLike): void {

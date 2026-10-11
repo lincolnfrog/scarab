@@ -699,3 +699,8 @@
 .inv-detail-owners .inv-owners { margin: 0; }
 /* The overview's short holdings table: "8 more holdings" under the largest few. */
 .inv-restrow .inv-cashlabel { color: var(--ink-2); }
+
+/* The Deposits and Forecast tabs (FlowsPanel, HarvestPanel). */
+.inv-yearrows { display: grid; gap: 8px; }
+.inv-yearrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.inv-yearrow .ui-input { width: auto; }

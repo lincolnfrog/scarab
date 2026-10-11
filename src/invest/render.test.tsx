@@ -147,7 +147,7 @@ describe('brokerage cards render from the contract', () => {
       id: 3, name: 'Fidelity 401(k)', kind: 'retirement', tracking: 'balance', stock_plan: 0,
       latest_snapshot: { balanced_on: '2026-06-30', balance_cents: 44_500_00 },
       subtype: '401k', institution: 'Fidelity', owner: 'Nicole', mask: '1234', sort: 0,
-      counts: { trades: 0, balances: 2, unvested: 0, paychecks: 0, reported: 0 },
+      counts: { trades: 0, balances: 2, unvested: 0, paychecks: 0, reported: 0, flows: 0, planned: 0 },
     }
     const html = renderToStaticMarkup(
       <BalancePanel

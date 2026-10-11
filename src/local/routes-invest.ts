@@ -1,3 +1,4 @@
+import { createAccountFlow, deleteAccountFlow, listAccountFlows, updateAccountFlow } from '../../engine/account-flows'
 import { getAllocation, putAccountClass, putAssetClass, putTarget } from '../../engine/allocation'
 import {
   createInvestAccount,
@@ -23,6 +24,8 @@ import {
   updateTrade,
   vestUnvested,
 } from '../../engine/invest'
+import { deleteHarvestProfile, putHarvestProfile } from '../../engine/harvest'
+import { createPlannedSale, deletePlannedSale, listPlannedSales, updatePlannedSale } from '../../engine/planned-sales'
 import { deleteReportedRealized, putReportedRealized } from '../../engine/realized-reported'
 import { getRealizedReport, previewTrade } from '../../engine/tax'
 import { r, type LocalRoute } from './table'
@@ -32,6 +35,9 @@ import { r, type LocalRoute } from './table'
  * in-tab mirror of api2.ts's investment half and of api9.ts. Every handler
  * calls the same engine function its server route does.
  */
+/** An optional ?accountId= — a positive integer, else undefined (the engine refuses anything stranger). */
+const numberQuery = (v: string | null): number | undefined => (v === null || v === '' ? undefined : Number(v))
+
 export const INVEST: LocalRoute[] = [
   /* ---------- target allocation (api9.ts) ---------- */
   r('GET', '/allocation', (c) => getAllocation(c.db, c.today)),
@@ -52,6 +58,16 @@ export const INVEST: LocalRoute[] = [
   r('DELETE', '/invest/balances/:accountId/:date', (c) => deleteBalanceSnapshot(c.db, Number(c.params.accountId), c.params.date!)),
   r('PUT', '/invest/accounts/:id/realized/:year', (c) => putReportedRealized(c.db, Number(c.params.id), c.params.year, c.body, c.today)),
   r('DELETE', '/invest/accounts/:id/realized/:year', (c) => deleteReportedRealized(c.db, Number(c.params.id), c.params.year, c.today)),
+  r('GET', '/invest/flows', (c) => listAccountFlows(c.db, c.today, { accountId: numberQuery(c.query.get('accountId')) })),
+  r('POST', '/invest/flows', (c) => createAccountFlow(c.db, c.body, c.today)),
+  r('PUT', '/invest/flows/:id', (c) => updateAccountFlow(c.db, Number(c.params.id), c.body, c.today)),
+  r('DELETE', '/invest/flows/:id', (c) => deleteAccountFlow(c.db, Number(c.params.id), c.today)),
+  r('PUT', '/invest/accounts/:id/harvest', (c) => putHarvestProfile(c.db, Number(c.params.id), c.body, c.today)),
+  r('DELETE', '/invest/accounts/:id/harvest', (c) => deleteHarvestProfile(c.db, Number(c.params.id))),
+  r('GET', '/invest/planned-sales', (c) => listPlannedSales(c.db, { accountId: numberQuery(c.query.get('accountId')) })),
+  r('POST', '/invest/planned-sales', (c) => createPlannedSale(c.db, c.body, c.today)),
+  r('PUT', '/invest/planned-sales/:id', (c) => updatePlannedSale(c.db, Number(c.params.id), c.body, c.today)),
+  r('DELETE', '/invest/planned-sales/:id', (c) => deletePlannedSale(c.db, Number(c.params.id))),
 
   r('POST', '/trades', (c) => createTrade(c.db, c.body, c.today)),
   r('POST', '/trades/opening', (c) => createOpeningPositions(c.db, c.body, c.today)),

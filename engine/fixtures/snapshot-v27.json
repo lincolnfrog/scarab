@@ -1,7 +1,7 @@
 {
  "scarab": true,
- "schemaVersion": 25,
- "exportedAt": "2026-10-01T23:30:10.971Z",
+ "schemaVersion": 27,
+ "exportedAt": "2026-10-11T16:26:19.050Z",
  "tables": {
   "app_meta": [],
   "accounts": [
@@ -10,7 +10,15 @@
     "name": "Checking",
     "kind": "checking",
     "external_id": null,
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
+    "opening_cents": 0
+   },
+   {
+    "id": 2,
+    "name": "Visa",
+    "kind": "credit",
+    "external_id": null,
+    "created_at": "2026-10-11 16:26:19",
     "opening_cents": 0
    }
   ],
@@ -152,7 +160,18 @@
     "rows_imported": 3,
     "rows_skipped": 0,
     "imported_by": "max@example.com",
-    "imported_at": "2026-10-01 23:30:10"
+    "imported_at": "2026-10-11 16:26:19"
+   },
+   {
+    "id": 2,
+    "account_id": 2,
+    "filename": "visa.csv",
+    "format": "csv-generic",
+    "rows_total": 2,
+    "rows_imported": 2,
+    "rows_skipped": 0,
+    "imported_by": "max@example.com",
+    "imported_at": "2026-10-11 16:26:19"
    }
   ],
   "transactions": [
@@ -166,7 +185,7 @@
     "categorized_by": "rule:27",
     "import_id": 1,
     "dedupe_hash": "a6a3a2a65eaf161d5290#0",
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 2,
@@ -178,7 +197,7 @@
     "categorized_by": "rule:61",
     "import_id": 1,
     "dedupe_hash": "c4cb033147d7a31e7dac#0",
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 3,
@@ -190,7 +209,31 @@
     "categorized_by": "rule:9",
     "import_id": 1,
     "dedupe_hash": "73f35ec9b53e7fff1c5c#0",
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
+   },
+   {
+    "id": 4,
+    "account_id": 2,
+    "posted_on": "2026-09-05",
+    "amount_cents": -6120,
+    "description": "TST* SOME BISTRO",
+    "category_id": 8,
+    "categorized_by": "rule:61",
+    "import_id": 2,
+    "dedupe_hash": "17f03d8d8429ab1530f0#0",
+    "created_at": "2026-10-11 16:26:19"
+   },
+   {
+    "id": 5,
+    "account_id": 2,
+    "posted_on": "2026-09-20",
+    "amount_cents": 50000,
+    "description": "PAYMENT THANK YOU",
+    "category_id": 17,
+    "categorized_by": "rule:77",
+    "import_id": 2,
+    "dedupe_hash": "4ca9407348dd96c83347#0",
+    "created_at": "2026-10-11 16:26:19"
    }
   ],
   "rules": [
@@ -199,574 +242,574 @@
     "pattern": "WHOLE FOODS",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 2,
     "pattern": "TRADER JOE",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 3,
     "pattern": "SAFEWAY",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 4,
     "pattern": "COSTCO",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 5,
     "pattern": "INSTACART",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 6,
     "pattern": "MORTGAGE",
     "category_id": 6,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 7,
     "pattern": "MR. COOPER",
     "category_id": 6,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 8,
     "pattern": "MR COOPER",
     "category_id": 6,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 9,
     "pattern": "PG&E",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 10,
     "pattern": "PGANDE",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 11,
     "pattern": "SO CAL EDISON",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 12,
     "pattern": "SOCALGAS",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 13,
     "pattern": "COX COMM",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 14,
     "pattern": "AMAZON",
     "category_id": 9,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 15,
     "pattern": "TARGET",
     "category_id": 9,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 16,
     "pattern": "NETFLIX",
     "category_id": 15,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 17,
     "pattern": "SPOTIFY",
     "category_id": 15,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 18,
     "pattern": "APPLE.COM/BILL",
     "category_id": 15,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 19,
     "pattern": "UBER",
     "category_id": 13,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 20,
     "pattern": "LYFT",
     "category_id": 13,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 21,
     "pattern": "SHELL OIL",
     "category_id": 13,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 22,
     "pattern": "CHEVRON",
     "category_id": 13,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 23,
     "pattern": "ONLINE TRANSFER",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 24,
     "pattern": "ZELLE",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 25,
     "pattern": "VENMO",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 26,
     "pattern": "WEALTHFRONT EDI",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 27,
     "pattern": "PAYROLL",
     "category_id": 1,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 28,
     "pattern": "DIRECT DEP",
     "category_id": 1,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 29,
     "pattern": "INTEREST PAYMENT",
     "category_id": 4,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 30,
     "pattern": "DIVIDEND",
     "category_id": 4,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 31,
     "pattern": "SITEONE LANDSCAPE",
     "category_id": 18,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 32,
     "pattern": "NURSERY",
     "category_id": 18,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 33,
     "pattern": "ARBORICULTURAL",
     "category_id": 18,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 34,
     "pattern": "TOTAL WINE",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 35,
     "pattern": "BEVERAGES & MORE",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 36,
     "pattern": "BEVMO",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 37,
     "pattern": "BOTTLE SHOP",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 38,
     "pattern": "LIQUOR",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 39,
     "pattern": "WINERY",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 40,
     "pattern": "BREWING",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 41,
     "pattern": "BREWERY",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 42,
     "pattern": "ALEHOUSE",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 43,
     "pattern": "TAPROOM",
     "category_id": 19,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 44,
     "pattern": "VETERINARY",
     "category_id": 20,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 45,
     "pattern": "CHEWY.COM",
     "category_id": 20,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 46,
     "pattern": "PETSMART",
     "category_id": 20,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 47,
     "pattern": "PETCO",
     "category_id": 20,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 48,
     "pattern": "THEFARMERSDOG",
     "category_id": 20,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 49,
     "pattern": "USATAXPYMT",
     "category_id": 21,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 50,
     "pattern": "FRANCHISE TAX BO",
     "category_id": 21,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 51,
     "pattern": "POOL SERVICE",
     "category_id": 6,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 52,
     "pattern": "CLEANING SERVICE",
     "category_id": 6,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 53,
     "pattern": "CITY OF",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 54,
     "pattern": "WASTE MANAGEMENT",
     "category_id": 11,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 55,
     "pattern": "STATE FARM",
     "category_id": 12,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 56,
     "pattern": "WHOLEFDS",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 57,
     "pattern": "SPROUTS",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 58,
     "pattern": "KROGER",
     "category_id": 7,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 59,
     "pattern": "DOORDASH",
     "category_id": 8,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 60,
     "pattern": "IN-N-OUT",
     "category_id": 8,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 61,
     "pattern": "TST*",
     "category_id": 8,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 62,
     "pattern": "SQ *",
     "category_id": 8,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 63,
     "pattern": "VRBO",
     "category_id": 10,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 64,
     "pattern": "AIRBNB",
     "category_id": 10,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 65,
     "pattern": "SOUTHWES",
     "category_id": 10,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 66,
     "pattern": "HOTEL",
     "category_id": 10,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 67,
     "pattern": "EXPEDIA",
     "category_id": 10,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 68,
     "pattern": "THREDUP",
     "category_id": 9,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 69,
     "pattern": "NORDSTROM",
     "category_id": 9,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 70,
     "pattern": "KAISER",
     "category_id": 14,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 71,
     "pattern": "PARAMOUNT+",
     "category_id": 15,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 72,
     "pattern": "PRIME VIDEO",
     "category_id": 15,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 73,
     "pattern": "YOUTUBEPREM",
     "category_id": 15,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 74,
     "pattern": "BIG O TIRES",
     "category_id": 13,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 75,
     "pattern": "RIVIAN",
     "category_id": 13,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 76,
     "pattern": "AUTOPAY",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 77,
     "pattern": "PAYMENT THANK YOU",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 78,
     "pattern": "PAYMENT, THANK YOU",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 79,
     "pattern": "AUTOMATIC PAYMENT",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 80,
     "pattern": "GOLDMAN SACHS",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 81,
     "pattern": "MORGAN STANLEY",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    },
    {
     "id": 82,
     "pattern": "COINBASE",
     "category_id": 17,
     "priority": 0,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    }
   ],
   "budgets": [
@@ -781,7 +824,7 @@
     "name": "Vanguard",
     "kind": "brokerage",
     "tracking": "lots",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "stock_plan": 0,
     "subtype": null,
     "institution": null,
@@ -795,7 +838,7 @@
     "name": "Coinbase",
     "kind": "crypto",
     "tracking": "lots",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "stock_plan": 0,
     "subtype": null,
     "institution": null,
@@ -809,7 +852,7 @@
     "name": "Morgan Stanley",
     "kind": "brokerage",
     "tracking": "lots",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "stock_plan": 1,
     "subtype": null,
     "institution": null,
@@ -820,10 +863,24 @@
    },
    {
     "id": 4,
+    "name": "Flex 250",
+    "kind": "brokerage",
+    "tracking": "balance",
+    "created_at": "2026-10-11 16:26:19",
+    "stock_plan": 0,
+    "subtype": "taxable",
+    "institution": "Schwab",
+    "owner": null,
+    "mask": null,
+    "sort": 0,
+    "asset_class": null
+   },
+   {
+    "id": 5,
     "name": "Fidelity 401(k)",
     "kind": "retirement",
     "tracking": "balance",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "stock_plan": 0,
     "subtype": null,
     "institution": null,
@@ -873,7 +930,7 @@
     "qty_micro": 10000000,
     "total_cents": 250000,
     "note": null,
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "sold_lot_trade_id": null,
     "acquired_on": null,
     "basis_cents": null,
@@ -888,7 +945,7 @@
     "qty_micro": 20000000,
     "total_cents": 100000,
     "note": "Opening position",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "sold_lot_trade_id": null,
     "acquired_on": "2019-04-01",
     "basis_cents": null,
@@ -903,7 +960,7 @@
     "qty_micro": 500000,
     "total_cents": 1000000,
     "note": "Opening position",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "sold_lot_trade_id": null,
     "acquired_on": "2017-06-06",
     "basis_cents": null,
@@ -918,7 +975,7 @@
     "qty_micro": 50000000,
     "total_cents": 500000,
     "note": "RSU vest",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "sold_lot_trade_id": null,
     "acquired_on": null,
     "basis_cents": null,
@@ -933,7 +990,7 @@
     "qty_micro": 18000000,
     "total_cents": 180000,
     "note": "RSU withholding",
-    "created_at": "2026-10-01 23:30:10",
+    "created_at": "2026-10-11 16:26:19",
     "sold_lot_trade_id": 4,
     "acquired_on": null,
     "basis_cents": null,
@@ -945,8 +1002,22 @@
   "balance_snapshots": [
    {
     "invest_account_id": 4,
+    "balanced_on": "2026-08-31",
+    "balance_cents": 195000000
+   },
+   {
+    "invest_account_id": 5,
     "balanced_on": "2026-06-30",
     "balance_cents": 18000000
+   }
+  ],
+  "realized_reported": [
+   {
+    "invest_account_id": 4,
+    "tax_year": 2026,
+    "st_cents": -48000000,
+    "lt_cents": 0,
+    "as_of": "2026-09-18"
    }
   ],
   "properties": [
@@ -955,7 +1026,7 @@
     "name": "Home",
     "purchased_on": "2015-05-01",
     "purchase_cents": 90000000,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    }
   ],
   "property_valuations": [
@@ -972,7 +1043,7 @@
     "property_id": 1,
     "name": "Mortgage",
     "rate_micro": 30000,
-    "created_at": "2026-10-01 23:30:10"
+    "created_at": "2026-10-11 16:26:19"
    }
   ],
   "liability_balances": [

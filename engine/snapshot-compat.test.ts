@@ -7,8 +7,10 @@ import type { DbLike } from './db'
 import { migrate } from './migrations'
 import { getUnvested } from './invest'
 import { listPaySources } from './paychecks'
+import { listReportedRealized } from './realized-reported'
 import { listPeople } from './people'
 import { listInvestAccounts } from './services'
+import { computeTaxYear } from './tax'
 import { type Dump, dumpDb, loadDump } from './snapshot'
 import { openBrowserDb } from './sqljs-db'
 import { CURRENT_VERSION, type Compat, readabilityError, SNAPSHOT_COMPAT, upgradesFor } from './upgrades'
@@ -250,10 +252,15 @@ describe('the shipped contract stays honest', () => {
     expect(upgradesFor(CURRENT_VERSION)).toEqual([])
   })
 
-  it('v25, the floor since 2026-10-01: grants, the paycheck’s Roth line and match, classes and settings all load', async () => {
-    const dump = JSON.parse(readFileSync(new URL('snapshot-v25.json', fixtureDir), 'utf8')) as Dump
+  it('v27, the floor since 2026-10-11: a credit card, a broker-reported loss, grants, the paycheck’s Roth line and match, classes and settings all load', async () => {
+    const dump = JSON.parse(readFileSync(new URL('snapshot-v27.json', fixtureDir), 'utf8')) as Dump
     for (const [engine, db] of await both()) {
-      expect(loadDump(db, dump).from, engine).toBe(25)
+      expect(loadDump(db, dump).from, engine).toBe(27)
+      // A credit card is its own kind of bank account (migration 27), its ledger imported like any other.
+      expect(db.prepare("SELECT kind, count(*) AS n FROM accounts a JOIN transactions t ON t.account_id = a.id WHERE a.name = 'Visa'").get(), engine).toEqual({ kind: 'credit', n: 2 })
+      // A managed account's realized loss as its broker reported it (migration 26), still on the tax bill.
+      expect(listReportedRealized(db).map((r) => [r.account, r.tax_year, r.st_cents, r.as_of]), engine).toEqual([['Flex 250', 2026, -48_000_000, '2026-09-18']])
+      expect(computeTaxYear(db, '2026-09-25').incomes.reportedStCents, engine).toBe(-48_000_000)
       // Two grants of one stock, each on its own schedule (migration 22).
       expect(getUnvested(db).rows.map((g) => [g.symbol, g.qty_micro, g.next_vest_on]), engine).toEqual([
         ['ACME', 350_000_000, '2026-11-15'],
@@ -272,6 +279,8 @@ describe('the shipped contract stays honest', () => {
         ['Nicole', 1977],
       ])
       expect(getCheckupSettings(db), engine).toMatchObject({ concentrationMicro: 150_000, charityCategoryId: 0 })
+      // Migration 28's tables are additive: the older snapshot loads with them empty.
+      expect(db.prepare('SELECT count(*) AS n FROM account_flows').get(), engine).toEqual({ n: 0 })
     }
   })
 

@@ -24,6 +24,8 @@ const ROWS: { label: string; of: (y: YearView) => number; show?: (a: YearView, b
   { label: 'Other income', of: (y) => y.otherCents, show: (a) => a.otherCents > 0 },
   { label: 'Realized short-term', of: (y) => y.stGainCents, show: (a, b) => a.stGainCents !== 0 || b.stGainCents !== 0 },
   { label: 'Realized long-term', of: (y) => y.ltGainCents, show: (a, b) => a.ltGainCents !== 0 || b.ltGainCents !== 0 },
+  { label: 'Planned sales', of: (y) => y.plannedStCents + y.plannedLtCents, show: (a, b) => a.plannedStCents + a.plannedLtCents !== 0 || b.plannedStCents + b.plannedLtCents !== 0 },
+  { label: 'Harvest forecast', of: (y) => -y.forecastLossCents, show: (a, b) => a.forecastLossCents + b.forecastLossCents > 0 },
   { label: 'Loss carried in', of: (y) => -(y.carryInStCents + y.carryInLtCents), show: (a, b) => a.carryInStCents + a.carryInLtCents + b.carryInStCents + b.carryInLtCents > 0 },
   { label: 'Deduction', of: (y) => -y.deductionCents },
   { label: 'Federal tax', of: (y) => y.tax.fedTotalCents },

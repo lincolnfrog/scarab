@@ -168,6 +168,7 @@ export const COMMANDS: readonly Command[] = [
   section('checkup', ['assumptions'], 'Assumptions — every constant and its vintage', 'brackets limits thresholds rules sources trust'),
   section('checkup', ['calendar'], 'Tax calendar', 'deadlines due dates quarterly estimated'),
   section('tax', ['harvest'], 'Harvesting advisor', 'loss lots wash sale'),
+  section('tax', ['capacity'], 'Loss capacity — harvest forecast & planned sales', 'managed strategy direct indexing planned sale carryforward forecast room'),
   section('invest', ['allocation'], 'Target allocation & rebalance plan', 'asset classes bonds stocks drift rebalance location'),
   section('tax', ['two-year'], 'Next year’s tax — now or in January?', 'timing defer bonus realize gain january next year carryforward convert'),
   section('tax', ['contributions'], 'Contribution pace', '401k 403b ira hsa roth backdoor match catch-up limits birth year'),

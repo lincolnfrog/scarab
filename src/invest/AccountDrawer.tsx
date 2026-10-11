@@ -16,20 +16,22 @@ import { shortDay } from './balanceMath'
 import { cashView } from './cashMath'
 import { dayAmount, dayPercent, toneOf, totalDay } from './dayMath'
 import CashPanel from './CashPanel'
+import FlowsPanel from './FlowsPanel'
 import GrantsPanel from './GrantsPanel'
+import HarvestPanel from './HarvestPanel'
 import HoldingsTable from './HoldingsTable'
 import ReportedPanel from './ReportedPanel'
 import './invest.css'
 
-export type DrawerTab = 'positions' | 'activity' | 'grants' | 'balances' | 'realized' | 'settings'
+export type DrawerTab = 'positions' | 'activity' | 'grants' | 'balances' | 'flows' | 'realized' | 'harvest' | 'settings'
 
 /**
  * The tabs an account has: a lots account's holdings, trades and (stock plans) grants; a balance account's
- * history, and — taxable — the realized gains its broker reports.
+ * history and its deposits, and — taxable — the realized gains its broker reports and its harvest forecast.
  */
 export function drawerTabs(a: Pick<InvestAccountRow, 'tracking' | 'kind'>): DrawerTab[] {
   if (a.tracking === 'lots') return ['positions', 'activity', 'grants', 'settings']
-  return a.kind === 'retirement' ? ['balances', 'settings'] : ['balances', 'realized', 'settings']
+  return a.kind === 'retirement' ? ['balances', 'flows', 'settings'] : ['balances', 'flows', 'realized', 'harvest', 'settings']
 }
 
 /** The tab to show for a `tab` route param: one this account has, else its first. */
@@ -38,7 +40,16 @@ export function drawerTab(a: Pick<InvestAccountRow, 'tracking' | 'kind'>, param:
   return tabs.find((t) => t === param) ?? tabs[0]!
 }
 
-const TAB_LABEL: Record<DrawerTab, string> = { positions: 'Positions', activity: 'Activity', grants: 'Grants', balances: 'Balances', realized: 'Realized', settings: 'Settings' }
+const TAB_LABEL: Record<DrawerTab, string> = {
+  positions: 'Positions',
+  activity: 'Activity',
+  grants: 'Grants',
+  balances: 'Balances',
+  flows: 'Deposits',
+  realized: 'Realized',
+  harvest: 'Forecast',
+  settings: 'Settings',
+}
 
 export type AccountDrawerProps = {
   /** The account shown; null closes the drawer (it keeps the last one through the exit). */
@@ -142,6 +153,8 @@ export default function AccountDrawer(p: AccountDrawerProps) {
     )
   else if (tab === 'balances') panel = <BalancePanel account={a} snapshots={shown.balances} today={p.today} onChanged={p.onChanged} />
   else if (tab === 'realized') panel = <ReportedPanel key={a.id} account={a} rows={shown.reported} today={p.today} onChanged={p.onChanged} />
+  else if (tab === 'flows') panel = <FlowsPanel key={a.id} account={a} rows={shown.flows} today={p.today} onChanged={p.onChanged} />
+  else if (tab === 'harvest') panel = <HarvestPanel key={`${a.id}:${shown.harvest?.as_of ?? ''}`} account={a} profile={shown.harvest} today={p.today} onChanged={p.onChanged} />
   else if (tab === 'grants')
     panel =
       a.stock_plan === 1 ? (
@@ -232,7 +245,9 @@ export default function AccountDrawer(p: AccountDrawerProps) {
                   ? a.counts.balances
                   : t === 'realized' && a.counts.reported > 0
                     ? a.counts.reported
-                    : undefined,
+                    : t === 'flows' && a.counts.flows > 0
+                      ? a.counts.flows
+                      : undefined,
         }))}
       />
       <div role="tabpanel" id={`inv-acct-panel-${tab}`} aria-labelledby={tabId('inv-acct', tab)} className="inv-tabpanel">

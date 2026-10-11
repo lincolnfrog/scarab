@@ -14,7 +14,7 @@ const acct = (id: number, name: string, owner: string | null, extra: Partial<Inv
   mask: null,
   sort: 0,
   latest_snapshot: null,
-  counts: { trades: 1, balances: 0, unvested: 0, paychecks: 0, reported: 0 },
+  counts: { trades: 1, balances: 0, unvested: 0, paychecks: 0, reported: 0, flows: 0, planned: 0 },
   ...extra,
 })
 

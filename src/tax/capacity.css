@@ -1,0 +1,20 @@
+/* Loss capacity (src/tax/CapacityCard.tsx): the plan around a managed strategy, year by year. */
+.cap-years td, .cap-years th { padding: 7px 8px; }
+.cap-years td:first-child, .cap-years th:first-child { padding-left: 0; }
+.cap-years td:last-child, .cap-years th:last-child { padding-right: 0; }
+.cap-years .inv-subline { white-space: normal; }
+.cap-est { margin-left: 6px; font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.cap-list { display: grid; gap: 12px; }
+.cap-item { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--plane); font-size: 13px; }
+.cap-item-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.cap-item-head b { color: var(--ink); font-weight: 600; }
+.cap-item .muted { font-size: 12px; }
+.cap-chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cap-notes { margin: 2px 0 0 16px; display: grid; gap: 2px; font-size: 12px; color: var(--ink-3); }
+.cap-basis { margin: 8px 0 0 18px; display: grid; gap: 4px; font-size: 12.5px; color: var(--ink-2); max-width: 90ch; }
+.cap-basis li::marker { color: var(--ink-3); }
+.cap-h3 { margin: 14px 0 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.cap-sales td { vertical-align: top; }
+.cap-form { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 12px; }
+.cap-form .inv-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cap-warn { color: var(--ink-2); cursor: help; }

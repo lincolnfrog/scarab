@@ -33,10 +33,12 @@ doesn't have to stay put — it can follow the vault up:
 Once anyone else keeps a vault, stop: their unlock can't be confirmed, so the
 floor only ever drops from then on (as the section below describes).
 
-Current floor: `snapshot-v25.json`, frozen 2026-10-01 from `c4671ad` (with
-the fixture script extended to cover grants, the paycheck's Roth line and
-match, asset classes and the settings blobs). It replaced `snapshot-v21.json`
-(2026-09-25, `c459152`) once the household vault was confirmed resealed at v25.
+Current floor: `snapshot-v27.json`, frozen 2026-10-11 from `5fa224a` (with
+the fixture script extended to cover a credit card account and a managed
+account's broker-reported realized loss). It replaced `snapshot-v25.json`
+(2026-10-01, `c4671ad`, which had added grants, the paycheck's Roth line and
+match, asset classes and the settings blobs) once the household vault was
+confirmed resealed at v27.
 
 ## Adding one
 

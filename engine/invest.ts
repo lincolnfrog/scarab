@@ -31,8 +31,10 @@ import {
   symbolKey,
 } from '../shared/invest-api'
 import { formatCents, formatQtyMicro, parseQtyMicro } from '../shared/money'
+import { listAccountFlows } from './account-flows'
 import type { DbLike } from './db'
 import { ApiError, bad, isoDay, notFound } from './errors'
+import { getHarvestProfile } from './harvest'
 import { ALL_TIME, cashAt, cashEffectCents, holdingLedger, loadHoldings, type CashTrade, type LedgerTrade } from './holdings'
 import { computePosition, longTermOn, lotCostShare, positionValueCents, saleRealized, type Sale } from './lots'
 import { priceFlagKeys, upsertPrices } from './prices'
@@ -67,13 +69,15 @@ function accountRows(db: DbLike, onlyId?: number): InvestAccountRow[] {
             (SELECT count(*) FROM balance_snapshots WHERE invest_account_id = ?) AS balances,
             (SELECT count(*) FROM unvested_positions WHERE invest_account_id = ?) AS unvested,
             (SELECT count(*) FROM pay_sources WHERE invest_account_id = ?) AS paychecks,
-            (SELECT count(*) FROM realized_reported WHERE invest_account_id = ?) AS reported`,
+            (SELECT count(*) FROM realized_reported WHERE invest_account_id = ?) AS reported,
+            (SELECT count(*) FROM account_flows WHERE invest_account_id = ?) AS flows,
+            (SELECT count(*) FROM planned_sales WHERE invest_account_id = ?) AS planned`,
   )
   return rows.map((r) => ({
     ...r,
     subtype: isInvestSubtype(r.subtype) ? r.subtype : null,
     latest_snapshot: (latest.get(r.id) as InvestAccountRow['latest_snapshot'] | undefined) ?? null,
-    counts: counts.get(r.id, r.id, r.id, r.id, r.id) as InvestAccountRow['counts'],
+    counts: counts.get(r.id, r.id, r.id, r.id, r.id, r.id, r.id) as InvestAccountRow['counts'],
   }))
 }
 
@@ -242,6 +246,12 @@ export function updateInvestAccount(db: DbLike, id: number, b: Partial<Record<ke
       bad(
         `${cur.name} has realized gains reported for ${plural(cur.counts.reported, 'year')} — tracking trades would count its sales from them instead. Delete them first, or add a separate account that tracks trades`,
       )
+    if (cur.tracking === 'balance' && cur.counts.flows > 0)
+      bad(`${cur.name} has ${plural(cur.counts.flows, 'deposit or withdrawal')} recorded — a lots account's money shows in its cash and trades. Delete them first, or add a separate account that tracks trades`)
+    if (cur.tracking === 'balance' && getHarvestProfile(db, id))
+      bad(`${cur.name} has a harvest forecast — a lots account's realized gains come from its sales. Remove the forecast first, or add a separate account that tracks trades`)
+    if (cur.tracking === 'lots' && cur.counts.planned > 0)
+      bad(`${cur.name} has ${plural(cur.counts.planned, 'planned sale')} — a balance account has no lots to sell from. Delete them first, or add a separate balance-tracked account`)
   }
   const stockPlan = b.stockPlan === undefined ? cur.stock_plan === 1 : b.stockPlan === true
   stockPlanOk(next.tracking, stockPlan)
@@ -298,6 +308,8 @@ export function getInvestAccount(db: DbLike, id: number, today: string): InvestA
     counts: account.counts,
     cash: pf.accounts[0] ?? null,
     reported: account.tracking === 'balance' ? listReportedRealized(db, { accountId: id }) : [],
+    flows: account.tracking === 'balance' ? listAccountFlows(db, today, { accountId: id }) : [],
+    harvest: account.tracking === 'balance' && account.kind !== 'retirement' ? getHarvestProfile(db, id) : null,
   }
 }
 
@@ -315,7 +327,15 @@ export function deleteInvestAccount(db: DbLike, id: number) {
   if (!row) notFound('no such investment account')
   const n = (t: string) =>
     (db.prepare(`SELECT count(*) AS n FROM ${t} WHERE invest_account_id = ?`).get(id) as { n: number }).n
-  const removed = { trades: n('trades'), balances: n('balance_snapshots'), unvested: n('unvested_positions'), reported: n('realized_reported') }
+  const removed = {
+    trades: n('trades'),
+    balances: n('balance_snapshots'),
+    unvested: n('unvested_positions'),
+    reported: n('realized_reported'),
+    flows: n('account_flows'),
+    planned: n('planned_sales'),
+    forecast: n('harvest_profiles'),
+  }
   const unlinkedPaychecks = n('pay_sources')
   db.transaction(() => {
     // Lots pool per account, so a sell elsewhere that names a lot from here
@@ -327,7 +347,7 @@ export function deleteInvestAccount(db: DbLike, id: number) {
       'UPDATE trades SET sold_lot_trade_id = NULL WHERE sold_lot_trade_id IN (SELECT id FROM trades WHERE invest_account_id = ?)',
     ).run(id)
     db.prepare('UPDATE pay_sources SET invest_account_id = NULL WHERE invest_account_id = ?').run(id)
-    for (const t of ['rsu_vests', 'unvested_positions', 'balance_snapshots', 'realized_reported', 'trades'])
+    for (const t of ['rsu_vests', 'unvested_positions', 'balance_snapshots', 'realized_reported', 'account_flows', 'harvest_forecasts', 'harvest_profiles', 'planned_sales', 'trades'])
       db.prepare(`DELETE FROM ${t} WHERE invest_account_id = ?`).run(id)
     db.prepare('DELETE FROM invest_accounts WHERE id = ?').run(id)
     dropOrphanAssets(db)
@@ -343,6 +363,7 @@ export function deleteInvestAccount(db: DbLike, id: number) {
  */
 function dropOrphanAssets(db: DbLike, onlyAssetId?: number) {
   const orphanWhere = `id NOT IN (SELECT asset_id FROM trades)
+     AND id NOT IN (SELECT asset_id FROM planned_sales)
      AND id NOT IN (SELECT asset_id FROM unvested_positions)
      AND id NOT IN (SELECT asset_id FROM rsu_vests)`
   const orphans = (

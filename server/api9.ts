@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { createAccountFlow, deleteAccountFlow, listAccountFlows, updateAccountFlow } from '../engine/account-flows'
 import { getAllocation, putAccountClass, putAssetClass, putTarget } from '../engine/allocation'
 import type { DbLike } from '../engine/db'
 import {
@@ -14,6 +15,8 @@ import {
   setManualPrice,
   updateTrade,
 } from '../engine/invest'
+import { deleteHarvestProfile, putHarvestProfile } from '../engine/harvest'
+import { createPlannedSale, deletePlannedSale, listPlannedSales, updatePlannedSale } from '../engine/planned-sales'
 import { deleteReportedRealized, putReportedRealized } from '../engine/realized-reported'
 import { getRealizedReport, previewTrade } from '../engine/tax'
 import { handle } from './api'
@@ -29,6 +32,8 @@ export const api9 = new Hono<{ Variables: { userEmail: string } }>()
 
 // UTC, the same day api2's trade and balance routes use.
 const today = () => new Date().toISOString().slice(0, 10)
+/** An optional ?accountId= — a positive integer, else undefined (the engine refuses anything stranger). */
+const numberQuery = (v: string | undefined): number | undefined => (v === undefined || v === '' ? undefined : Number(v))
 
 // One account, everything its drawer shows; and who accounts can belong to.
 // (The account list and its create/patch/delete are in api2.)
@@ -56,6 +61,36 @@ api9.put('/invest/accounts/:id/realized/:year', async (c) => {
 api9.delete('/invest/accounts/:id/realized/:year', (c) =>
   handle(c, () => deleteReportedRealized(db, Number(c.req.param('id')), c.req.param('year'), today())),
 )
+
+// A balance account's deposits and withdrawals (dated ahead: planned), and a taxable one's harvest forecast —
+// the manager's estimate of the losses it will realize (migration 28).
+api9.get('/invest/flows', (c) => handle(c, () => listAccountFlows(db, today(), { accountId: numberQuery(c.req.query('accountId')) })))
+api9.post('/invest/flows', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => createAccountFlow(db, b, today()))
+})
+api9.put('/invest/flows/:id', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => updateAccountFlow(db, Number(c.req.param('id')), b, today()))
+})
+api9.delete('/invest/flows/:id', (c) => handle(c, () => deleteAccountFlow(db, Number(c.req.param('id')), today())))
+api9.put('/invest/accounts/:id/harvest', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => putHarvestProfile(db, Number(c.req.param('id')), b, today()))
+})
+api9.delete('/invest/accounts/:id/harvest', (c) => handle(c, () => deleteHarvestProfile(db, Number(c.req.param('id')))))
+
+// Sales planned from a lots account: what the capacity view nets against the losses expected by then.
+api9.get('/invest/planned-sales', (c) => handle(c, () => listPlannedSales(db, { accountId: numberQuery(c.req.query('accountId')) })))
+api9.post('/invest/planned-sales', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => createPlannedSale(db, b, today()))
+})
+api9.put('/invest/planned-sales/:id', async (c) => {
+  const b = await c.req.json()
+  return handle(c, () => updatePlannedSale(db, Number(c.req.param('id')), b, today()))
+})
+api9.delete('/invest/planned-sales/:id', (c) => handle(c, () => deletePlannedSale(db, Number(c.req.param('id')))))
 
 // Starting positions: lots already held as of a statement date, all or none.
 api9.post('/trades/opening', async (c) => {

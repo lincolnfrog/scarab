@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { formatCents, formatCentsPlain, formatDollars, formatQtyMicro } from '../../shared/money'
 import { del, get, post, put } from '../api'
 import { Link, navigate } from '../router'
+import CapacityCard, { useCapacity, yearLine } from '../tax/CapacityCard'
 import ContributionsCard, { useContributions } from '../tax/ContributionsCard'
 import HarvestCard from '../tax/HarvestCard'
 import { gapLine, scheduleNote } from '../tax/copy'
@@ -203,9 +204,9 @@ const signedDollars = (c: number) => formatDollars(c, { sign: c > 0 })
  * The Taxes detail views. The overview ('#/tax') is the projected bill and one
  * card per question; each id here is the full card behind one of them. The
  * Dashboard, the Checkup's findings and other screens link to 'paychecks',
- * 'settings', 'safe-harbor', 'harvest', 'contributions' and 'two-year'.
+ * 'settings', 'safe-harbor', 'harvest', 'capacity', 'contributions' and 'two-year'.
  */
-const DETAILS = ['projection', 'safe-harbor', 'harvest', 'realized', 'two-year', 'contributions', 'paychecks', 'settings'] as const
+const DETAILS = ['projection', 'safe-harbor', 'harvest', 'capacity', 'realized', 'two-year', 'contributions', 'paychecks', 'settings'] as const
 
 /** A row note behind a dotted underline: hover or focus shows it (Tooltip), one line per entry. */
 function Note(p: { tip: string | string[]; children: ReactNode }) {
@@ -459,6 +460,7 @@ export default function Taxes() {
   const rz = useRealized(tax?.year ?? null)
   const ty = useTwoYear(loads)
   const ct = useContributions(loads)
+  const cp = useCapacity(loads)
   const [opened, setOpened] = useState(0) // bumps on every "+ Paycheck", so a second click scrolls back to the editor
 
   /** The stored settings the form was last filled from: an unedited form follows the store, an edited one is kept. */
@@ -1165,6 +1167,18 @@ export default function Taxes() {
         </DetailView>
       </>
     )
+  if (detail === 'capacity')
+    return (
+      <>
+        {header}
+        <DetailView
+          title="Loss capacity"
+          lead="What a managed strategy has realized in losses and is expected to, against the gains realized and planned — netted year by year the way the return will, with the loss that carries forward and the tax on what doesn’t."
+        >
+          <CapacityCard cp={cp} />
+        </DetailView>
+      </>
+    )
   if (detail === 'realized')
     return (
       <>
@@ -1222,6 +1236,13 @@ export default function Taxes() {
   // Harvesting: the same lots and totals the harvest table shows.
   const lossLots = harvest.rows.filter((r) => r.gain_cents < 0).length
   const harvestable = harvest.totals.harvestableStCents + harvest.totals.harvestableLtCents
+
+  // Capacity: this year's room (or net gain) and what next year holds, planned and forecast.
+  const capThis = cp.c?.years[0] ?? null
+  const capNext = cp.c?.years[1] ?? null
+  const capManaged = cp.c ? cp.c.accounts.filter((a) => a.profile || a.reported).length : 0
+  const capEmpty = !!cp.c && capManaged === 0 && cp.c.sales.length === 0
+  const capLine = capThis ? yearLine(capThis) : null
 
   // Realized: the year's figures from the income picture; the wash-sale count from the report, once it's in for this year.
   const realized = incomes.realizedStCents + incomes.realizedLtCents
@@ -1291,6 +1312,30 @@ export default function Taxes() {
               </>
             ) : (
               'No taxable lot is under water at today’s prices'
+            )
+          }
+        />
+
+        <DrillCard
+          to="capacity"
+          title="Loss capacity"
+          value={!cp.c ? undefined : capEmpty ? 'Nothing planned' : capLine!.value}
+          note={
+            !cp.c ? (
+              cp.err ? 'Couldn’t work out the capacity' : 'Working it out…'
+            ) : capEmpty ? (
+              'Enter a managed account’s harvest forecast, or plan a sale, to see how gains and losses net'
+            ) : (
+              <>
+                {capLine!.label.startsWith('Room') ? `of losses left for gains in ${capThis!.year}` : `taxable after losses in ${capThis!.year}`}
+                {capNext && (
+                  <>
+                    {' · '}
+                    {capNext.year}: {formatDollars(-capNext.forecastCents)} forecast, {signedDollars(capNext.plannedStCents + capNext.plannedLtCents)} planned
+                  </>
+                )}
+                {capThis!.est && ' · est.'}
+              </>
             )
           }
         />

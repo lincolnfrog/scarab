@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { getCapacity } from '../engine/capacity'
 import { getContributions } from '../engine/contributions'
 import type { DbLike } from '../engine/db'
 import { createPaySource, deletePaySource, updatePaySource } from '../engine/paychecks'
@@ -42,6 +43,8 @@ api5.put('/people', async (c) => {
 
 // The two-year view (copilot §4e): next year on the same settings, and when-to-do-it priced over both.
 api5.get('/tax/two-year', (c) => handle(c, () => getTwoYear(db, today())))
+// Loss capacity: reported and forecast losses against recorded and planned sales, year by year (migration 28).
+api5.get('/tax/capacity', (c) => handle(c, () => getCapacity(db, today())))
 api5.post('/tax/timing', async (c) => {
   const b = await c.req.json()
   return handle(c, () => priceTiming(db, today(), b))

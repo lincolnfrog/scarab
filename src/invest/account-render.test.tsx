@@ -16,7 +16,7 @@ import ReportedPanel, { lastDayOf, reportYears } from './ReportedPanel'
 const text = (html: string) =>
   html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/\s+/g, ' ')
 const TODAY = '2026-09-22'
-const noCounts = { trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 0 }
+const noCounts = { trades: 0, balances: 0, unvested: 0, paychecks: 0, reported: 0, flows: 0, planned: 0 }
 const acct = (over: Partial<InvestAccountRow>): InvestAccountRow => ({
   id: 1, name: 'Schwab brokerage', kind: 'brokerage', tracking: 'lots', stock_plan: 0, subtype: 'taxable', institution: 'Schwab',
   owner: 'Max', mask: '1234', sort: 0, latest_snapshot: null, counts: noCounts, ...over,
