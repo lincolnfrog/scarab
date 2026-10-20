@@ -36,14 +36,19 @@ SERVICE="scarab"
 # Idempotent — every step tolerates "already exists".
 # ---------------------------------------------------------------------------
 # A service account that was created a moment ago is not yet visible to IAM
-# everywhere: the next binding can fail with "does not exist" for some seconds.
-# Retry such a failure a few times; any other error is final.
+# everywhere, sometimes for a few minutes: a binding that names it fails with
+# "does not exist", and setting the account's own policy fails with
+# PERMISSION_DENIED "… denied on resource (or it may not exist)" — IAM's way of
+# not saying whether a resource exists. Retry either for up to two minutes;
+# any other error is final. (A real denial on an Owner's account is not this;
+# if the retries run out, check the active account's role on the project —
+# Owner, or Service Account Admin plus Artifact Registry Admin.)
 bind_with_retry() { # <gcloud … add-iam-policy-binding …>
   local attempt out
-  for attempt in 1 2 3 4 5 6; do
+  for attempt in $(seq 1 12); do
     if out=$("$@" 2>&1); then return 0; fi
-    if [[ $attempt -lt 6 && "$out" == *"does not exist"* ]]; then
-      echo "    (IAM hasn't seen the new service account yet — retrying in 10s)"
+    if [[ $attempt -lt 12 && "$out" == *"not exist"* ]]; then
+      echo "    (IAM hasn't seen the new service account yet — retrying in 10s, attempt ${attempt}/12)"
       sleep 10
     else
       echo "$out" >&2
