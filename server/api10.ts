@@ -7,6 +7,7 @@ import { handle } from './api'
 import { ensureDailyHistory } from './charts'
 import { db as rawDb } from './db'
 import { runCrawl } from './crawl'
+import { bucketResponse, ensureDailyBuckets } from './daily-buckets'
 import { applyServerHistory, ensureHistoryPack, packResponse, serverMarket } from './history-pack'
 import { backfillMonthlyHistory, fetchCryptoQuotes, fetchStockQuotes } from './prices'
 
@@ -73,10 +74,19 @@ api10.get('/basket/history', (c) => {
   wantHistory()
   return packResponse(db, c.req.header('accept-encoding'), c.req.header('if-none-match'))
 })
-// Run the market-history build inside this request, so it has CPU on Cloud
-// Run (./crawl.ts). Called on a schedule by .github/workflows/history.yml as
-// the scarab-history identity; a trigger only — no body is read, the answer
-// is the build's progress. Vault-only servers answer it (server/zk-routes.ts).
+// Two years of daily closes for one hashed bucket of the universe
+// (./daily-buckets.ts): the same file for every caller, 304 when unchanged,
+// 202 while there are no files yet. Wanting a bucket is also what starts or
+// resumes the crawl on a server nothing schedules (throttled there).
+api10.get('/basket/daily/:bucket', (c) => {
+  ensureDailyBuckets(db)?.catch((e: unknown) => console.error('daily history crawl failed', e))
+  return bucketResponse(db, c.req.param('bucket'), c.req.header('accept-encoding'), c.req.header('if-none-match'))
+})
+// Run whichever market-history build is due inside this request, so it has
+// CPU on Cloud Run (./crawl.ts). Called on a schedule by
+// .github/workflows/history.yml as the scarab-history identity; a trigger only
+// — no body is read, the answer is the builds' progress. Vault-only servers
+// answer it (server/zk-routes.ts).
 api10.post('/basket/crawl', async (c) => c.json(await runCrawl(db, fetch, new Date())))
 // Write the history's month-end closes for this household's own assets into
 // its quote table (a tab does the same with the file it downloaded).

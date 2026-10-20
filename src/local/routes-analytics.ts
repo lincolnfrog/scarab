@@ -1,16 +1,19 @@
 import { getChartViews, getSeries, getSeriesCatalog, parseSeriesQuery, putChartViews, type MarketHistory } from '../../engine/analytics'
-import { applyBasket, applyMonthlyHistory, getChartData, getRecentCloses, isHistoryPack, needsMonthlyHistory, packMarket } from '../../engine/prices'
+import { applyBasket, applyMonthlyHistory, bucketCloses, getChartData, getRecentCloses, isDailyBucket, isHistoryPack, needsMonthlyHistory, packMarket, type DayClose } from '../../engine/prices'
 import { getHoldingsReturns } from '../../engine/returns'
-import type { BasketResponse, HistoryApplyResult, HistoryPack, HistoryPending } from '../../shared/series-api'
+import { dailyBucket, marketSymbolOf, type MarketKind } from '../../shared/buckets'
+import type { BasketResponse, DailyBucket, HistoryApplyResult, HistoryPack, HistoryPending } from '../../shared/series-api'
 import { r, type LocalRoute } from './table'
 
 /**
  * Prices, price charts and the series layer — the in-tab mirror of api10.ts.
  * The server fetches quotes from Yahoo and CoinGecko; a tab can't (CORS, and
  * asking for its own symbols would tell the server what it holds), so its
- * price sources are the two shared files every caller gets alike: the daily
- * basket (GET /api/basket) and the monthly market history
- * (GET /api/basket/history).
+ * price sources are the shared files every caller gets alike: the daily
+ * basket (GET /api/basket), the monthly market history
+ * (GET /api/basket/history), and — for a held symbol's daily price chart —
+ * the hashed bucket its symbol falls in (GET /api/basket/daily/:bucket, one
+ * of DAILY_BUCKETS files; PRIVACY.md "Daily history").
  */
 
 /* ---------- the monthly market history, kept in memory per tab ---------- */
@@ -79,6 +82,57 @@ const historyPending = () => (cached?.settled && !cached.ok ? cached.pending : n
 /** Tests only: forget the tab's copy. */
 export function forgetTabHistory() {
   cached = null
+  buckets.clear()
+}
+
+/* ---------- the daily buckets, kept in memory per tab ---------- */
+
+// One cache entry per bucket asked for, kept like the monthly file: a good
+// copy for HISTORY_TTL_MS (an unchanged one is a 304 from the browser cache),
+// a 202 or a failure for HISTORY_RETRY_MS. Nothing from a bucket is written
+// to the vault — the chart reads it here and lets it go with the page. Which
+// buckets a tab asks for is decided here, from the symbol whose chart opens:
+// the server sees a bucket number, never the symbol (shared/buckets.ts).
+type CachedBucket = { at: number; settled: boolean; ok: boolean; value: Promise<DailyBucket | null> }
+const buckets = new Map<number, CachedBucket>()
+
+async function fetchBucket(bucket: number): Promise<DailyBucket | null> {
+  const res = await fetch(`/api/basket/daily/${bucket}`)
+  if (res.status === 202) return null // not built yet: the chart draws what the tab has
+  if (!res.ok) throw new Error(`daily history: ${res.status} ${res.statusText}`)
+  const file: unknown = await res.json()
+  if (!isDailyBucket(file) || file.bucket !== bucket) throw new Error('daily history: malformed file')
+  return file
+}
+
+/** The tab's copy of one bucket, shared by every chart whose symbol falls in it. */
+export function tabBucket(bucket: number): Promise<DailyBucket | null> {
+  const c = buckets.get(bucket)
+  if (c && (!c.settled || Date.now() - c.at < (c.ok ? HISTORY_TTL_MS : HISTORY_RETRY_MS))) return c.value
+  const entry: CachedBucket = { at: Date.now(), settled: false, ok: false, value: Promise.resolve(null) }
+  entry.value = fetchBucket(bucket).then(
+    (file) => {
+      Object.assign(entry, { settled: true, ok: file !== null })
+      return file
+    },
+    () => {
+      Object.assign(entry, { settled: true, ok: false })
+      return null
+    },
+  )
+  buckets.set(bucket, entry)
+  return entry.value
+}
+
+/** A held symbol's daily closes from its bucket, waiting at most HISTORY_WAIT_MS; null when the tab has none (not built, unreachable, not in the file). */
+async function marketCloses(kind: MarketKind, symbol: string): Promise<DayClose[] | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const file = await Promise.race([
+    tabBucket(dailyBucket(kind, symbol)),
+    new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), HISTORY_WAIT_MS))),
+  ])
+  clearTimeout(timer)
+  return file ? bucketCloses(file, kind, marketSymbolOf(kind, symbol)) : null
 }
 
 /** The file for a series request, waiting at most HISTORY_WAIT_MS. */
@@ -137,10 +191,17 @@ export const ANALYTICS: LocalRoute[] = [
     const h = await (cached?.settled && cached.ok ? cached.value : tabHistory())
     return h ? applyMonthlyHistory(c.db, h.pack) : NO_HISTORY
   }),
-  // No daily-history fetch in a tab: each refresh's basket quotes accrue in
-  // prices_daily (applyBasket), and the quote table fills in the months before
-  // that. `coverage` says how much there is and where it came from.
-  r('GET', '/charts/:symbol', (c) => getChartData(c.db, c.params.symbol!, [])),
+  // A held symbol's daily history comes from the hashed bucket its symbol
+  // falls in — one of N shared files, fetched here and kept in memory — joined
+  // with the basket quotes that accrue in prices_daily (applyBasket); the quote
+  // table fills in the months before either. Nothing is written. `coverage`
+  // says how much there is and where it came from.
+  r('GET', '/charts/:symbol', async (c) => {
+    const symbol = c.params.symbol!.toUpperCase()
+    const asset = c.db.prepare('SELECT kind FROM assets WHERE symbol = ?').get(symbol) as { kind: MarketKind } | undefined
+    const market = asset ? await marketCloses(asset.kind, symbol) : null
+    return getChartData(c.db, symbol, [], market)
+  }),
 
   r('GET', '/series/catalog', async (c) => getSeriesCatalog(c.db, c.today, await marketFor())),
   r('GET', '/series', async (c) => {

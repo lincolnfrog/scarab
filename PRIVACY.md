@@ -258,8 +258,9 @@ Consequences, stated plainly:
   `SCARAB_ZK_ONLY=1`, the server answers exactly six things: identity, the
   mode probe, the encrypted-blob courier (with the versions it keeps), its
   membership list and invitations (emails it already knows from IAP), the
-  price basket with its market history (the monthly file, identical for every
-  caller, and the scheduled trigger that builds it), and health. Every other route returns 403 before any handler runs,
+  price basket with its market history (the monthly file and the daily
+  buckets, each identical for every caller, and the scheduled trigger that
+  builds them), and health. Every other route returns 403 before any handler runs,
   and the server refuses to boot at all if its database holds plaintext (a
   one-time `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data,
   keeping the ciphertext, its membership routing and the shared price data). The
@@ -357,7 +358,8 @@ push by `.github/workflows/egress.yml`) builds the app, starts the real
 vault-only server and drives a whole session in headless Chromium with a
 virtual passkey — create a vault, enter data on every screen that takes input,
 let autosave run, reload, unlock, browse every screen plus the history and
-both backups — while recording every request the browser makes. It then
+both backups, and a holding's drawer (whose chart asks for a hashed bucket) —
+while recording every request the browser makes. It then
 asserts (a) every request was same-origin and either a static file or on the
 `server/zk-routes.ts` allowlist, imported, not copied; (b) the only writes were
 `PUT /api/vault`; (c) every upload opens with the recovery code to a snapshot
@@ -421,13 +423,12 @@ the operator can observe:
   is asked of the server for it. A session's "prices as of" line asks when the basket
   was built (`/api/basket/status`, on entry and when the tab returns to view,
   at most every 30 minutes). Monthly history comes from the shared market
-  history file (below), and a tab's daily price chart is those month-ends
-  plus the daily basket quotes it has collected since. Not yet covered:
+  history file (below), and a holding's daily price chart from the hashed
+  symbol bucket its symbol falls in ("Daily history", below): the tab asks
+  for one of 64 shared files, never for the symbol. Not yet covered:
   holdings outside the basket (mutual funds, CITs, private stock) get no
   quote — they take a hand-entered price, kept with the rest of the
-  household's encrypted data — and
-  there is no per-symbol daily history in ZK mode. The planned fix is an
-  anonymous-add path and hashed symbol buckets.
+  household's encrypted data. The planned fix is an anonymous-add path.
 - **Bank sync (future)**: automatic SimpleFIN-style sync is fundamentally in
   tension with zero-knowledge — a server-side job would see plaintext
   transactions. ZK mode therefore ships with manual imports (client-side
@@ -609,3 +610,67 @@ crypto), about 1.5 MB gzipped.
   Opening-position lots still start on their as-of date by design; the file
   fills history for back-dated trades, benchmarks and price series. Symbols
   outside the basket universe get no history.
+
+### Daily history
+
+A holding's price chart wants daily closes, and one file of two years of
+daily closes for the whole universe would be about 35 MB of JSON — too much
+to download for one chart. So the daily history is dealt into **hashed
+symbol buckets**, Safe-Browsing style: the tab asks for the bucket its symbol
+falls in, never for the symbol — **`GET /api/basket/daily/:bucket`**
+(`server/daily-buckets.ts`, served since 2026-10-20).
+
+- **The deal.** `shared/buckets.ts` `dailyBucket`: the first 32 bits of
+  SHA-1 over `kind:SYMBOL` (the basket's spelling), modulo **N = 64**. The
+  same function runs on the server, which deals, and in the tab, which asks,
+  and a test pins it: changing it moves every symbol to another file. The
+  universe is the basket's — about 11,000 symbols (every US-listed stock and
+  ETF, plus the top 500 crypto) — so a bucket holds **about 170 symbols**.
+- **What a request reveals.** Opening a holding's chart asks for one bucket:
+  the server learns that this identity's holding is one of that bucket's
+  ~170 symbols. A household that opens the charts of *k* holdings reveals at
+  most *k* bucket numbers, each with ~170 candidates; buckets are fixed, so
+  asking again (a new session, another day) adds nothing. The honest limit:
+  the 170 are not equally likely — a bucket that holds a famous fund was
+  more probably asked for because of it than because of an obscure
+  micro-cap, so an operator ranking by popularity does better than 1-in-170.
+  The number is an anonymity *set*, not a probability. A symbol outside the
+  universe (a private stock) still hashes to a bucket, which then carries
+  nothing of it; the request reveals only that bucket. The sparklines and
+  the holdings table ask for nothing: they draw what the tab has.
+- **What the server learns**, then: that an identity asked for bucket *b*,
+  and when — when a holding's drawer opens, at most every 30 minutes per
+  bucket (a minute while the files aren't ready), and after that usually a
+  304. Every caller gets the identical file for a bucket, with one ETag; the
+  server does not read the caller's identity to answer. `basket/daily/[0-9]+`
+  is the pattern this adds to the vault-only allowlist.
+- **The files.** Two years of daily closes per symbol (`DAILY_YEARS`; the
+  monthly file keeps the ten-year tail), each symbol one compact array on a
+  calendar-day axis — `[offset, first, Δ, Δ, …]`, null on a day without a
+  close — so a bucket is roughly 550 KB of JSON and 180 KB gzipped, and all
+  64 about 35 MB in the server's `app_meta` under `basket:daily:*` keys:
+  shared infrastructure like the basket, never part of anyone's snapshot or
+  export, kept by the zero-knowledge purge.
+- **What the tab does with it.** The file stays in the tab's memory
+  (`src/local/routes-analytics.ts`), kept 30 minutes; the chart joins the
+  bucket's closes with the basket quotes the tab has collected (today's,
+  which the crawl hasn't seen yet) and the month-ends before the bucket's
+  reach. **Nothing from a bucket is written to the vault**: the only price
+  write from shared data remains the monthly import above, and it is
+  unchanged.
+- **Where the server gets it.** The same Yahoo spark endpoint as the monthly
+  file, `range=2y&interval=1d`, 20 symbols a call, on **one shared budget**
+  (`server/crawl-budget.ts`): one call every 1.5 s, 160 a run, runs 20
+  minutes apart, **640 a day for both files together**, the first refusal
+  pausing both until the next day. One crawl of the universe is about 600
+  calls — a day's budget — and happens once, then again each month once a
+  month has closed (a day the basket missed, split adjustments, the window
+  moving on); between crawls each daily basket build folds its quotes into
+  every bucket. The scheduled trigger (above) runs the monthly file first,
+  then the buckets; wanting a bucket also starts or resumes the crawl on a
+  server nothing schedules. Until the first crawl completes the route answers
+  202 with its progress and the chart draws what the tab has.
+- **Not done, and why.** Decoy buckets — a tab also fetching a few fixed
+  buckets it has no holding in, chosen from a secret so the server can't
+  tell them apart — would blur the *k* above; they need a per-vault secret
+  the tab has only once a vault exists, and are left for later.

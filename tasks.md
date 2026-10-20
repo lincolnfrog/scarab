@@ -497,10 +497,14 @@ Follow-ups (not blocking):
 - [x] ZK *monthly* history (2026-09-23): the shared market history file,
       ten years of month-ends for the whole basket, identical for every caller
       (`server/history-pack.ts`, `GET /api/basket/history`).
-- [ ] ZK *daily* history: hashed symbol buckets so a client fetches 1-of-N
-      buckets instead of naming the ticker (Safe-Browsing style) — only once
-      the monthly file has proved itself. A tab's daily chart is month-ends
-      plus the basket quotes it has collected.
+- [x] ZK *daily* history (2026-10-20): hashed symbol buckets — the universe
+      dealt into 64 files by SHA-1 (`shared/buckets.ts`), two years of daily
+      closes each, crawled on the budget the monthly file shares
+      (`server/daily-buckets.ts`, `server/crawl-budget.ts`), served at
+      `GET /api/basket/daily/:bucket`; a holding's chart fetches the bucket
+      its symbol falls in, in memory only. PRIVACY.md "Daily history" has the
+      numbers and the honest limit (popularity ranking inside a bucket).
+      Possible hardening left: decoy buckets from a per-vault secret.
 - [ ] Migrate household price refresh onto the basket path too (one code path);
       today `POST /api/prices/refresh` still fetches held symbols per-symbol.
 - [x] Passkey-only vault v2 (WebAuthn PRF; no passphrase; typed recovery

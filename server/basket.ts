@@ -1,6 +1,7 @@
 import type { DbLike } from '../engine/db'
 import { addDaysIso } from '../shared/dates'
 import type { BasketQuoteRow, BasketResponse } from '../shared/series-api'
+import { appendDailyQuotes } from './daily-buckets'
 import { appendToHistory, historyStatus } from './history-pack'
 import { upstreamSignal } from './upstream'
 
@@ -337,11 +338,16 @@ export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<
   const allErrors = [...errors, ...stocks.errors, ...crypto.errors]
   const builtAt = new Date().toISOString()
   storeBasket(db, all, allErrors, builtAt)
-  // Keep the monthly history's month in progress current. Best-effort: the basket is served either way.
+  // Keep the monthly history's month in progress, and the daily buckets' latest day, current. Best-effort: the basket is served either way.
   try {
     appendToHistory(db, all, builtAt.slice(0, 10))
   } catch (e) {
     console.error('basket: merging quotes into the market history failed', e)
+  }
+  try {
+    appendDailyQuotes(db, all, builtAt.slice(0, 10))
+  } catch (e) {
+    console.error('basket: merging quotes into the daily history failed', e)
   }
   return { stocks: stocks.quotes.length, crypto: crypto.quotes.length, universe: listings.length, errors: allErrors, ms: Date.now() - t0 }
 }

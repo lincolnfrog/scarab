@@ -6,8 +6,11 @@ import type { DbLike } from '../engine/db'
 import { applyMonthlyHistory, decodeMonthly, encodeMonthly, isHistoryPack, packMarket, type MonthClose } from '../engine/prices'
 import { addDaysIso, addMonthsToMonth } from '../shared/dates'
 import type { HistoryApplyResult, HistoryPack, HistoryPending, HistorySeries, HistoryStatus } from '../shared/series-api'
+import { budgetGate, CRAWL_DAY_CALLS, CRAWL_PACE_MS, CRAWL_RUN_CALLS, CRAWL_RUN_GAP_MS, noteCall, noteRefusal, noteRunStart, readBudget, type BudgetOptions } from './crawl-budget'
 import { exchangeDay } from './prices'
 import { upstreamSignal } from './upstream'
+
+export { untilNextUtcDay } from './crawl-budget'
 
 /**
  * The monthly market history: month-end closes for the whole basket universe
@@ -22,11 +25,12 @@ import { upstreamSignal } from './upstream'
  * datacenter IP, so the build is gentle and resumable:
  *   - one call at a time, HISTORY_PACE_MS apart;
  *   - a run makes at most HISTORY_RUN_CALLS calls, runs start at least
- *     HISTORY_RUN_GAP_MS apart, and a day allows HISTORY_DAY_CALLS;
+ *     HISTORY_RUN_GAP_MS apart, and a day allows HISTORY_DAY_CALLS — one
+ *     budget shared with the daily buckets' crawl (./crawl-budget.ts);
  *   - progress is saved every few batches, so a restart loses little and the
  *     next run picks up where the last one stopped;
  *   - Yahoo refusing (429/403/5xx, an unreadable reply, a network error) ends
- *     the run and pauses the build until the next day.
+ *     the run and pauses every crawl until the next day.
  * Runs are started by someone wanting the history (GET /basket/history,
  * GET /series/catalog) or by the scheduled crawl (POST /basket/crawl,
  * server/crawl.ts — the one that reliably finishes on Cloud Run, where a
@@ -58,16 +62,16 @@ const PART_PREFIX = 'basket:history:part:'
 export const HISTORY_YEARS = 10
 /** Yahoo spark answers 400 for more than 20 symbols per call. */
 export const HISTORY_BATCH = 20
-export const HISTORY_PACE_MS = 1_500
-export const HISTORY_RUN_CALLS = 160
-export const HISTORY_RUN_GAP_MS = 20 * 60_000
-export const HISTORY_DAY_CALLS = 640
+export const HISTORY_PACE_MS = CRAWL_PACE_MS
+export const HISTORY_RUN_CALLS = CRAWL_RUN_CALLS
+export const HISTORY_RUN_GAP_MS = CRAWL_RUN_GAP_MS
+export const HISTORY_DAY_CALLS = CRAWL_DAY_CALLS
 /** Batches between progress saves. */
 const SAVE_EVERY = 10
 
 const UA = { 'user-agent': 'Mozilla/5.0 (scarab price basket)' }
 /** Symbols the file can carry: Yahoo spelling (BRK-B, ^GSPC) and plain tickers — never a prototype name. */
-const SYMBOL_OK = /^[\^A-Z0-9][A-Z0-9.=-]{0,23}$/
+export const SYMBOL_OK = /^[\^A-Z0-9][A-Z0-9.=-]{0,23}$/
 
 type Book = { stock: Record<string, HistorySeries>; crypto: Record<string, HistorySeries> }
 type Head = { etag: string; final: string; asOf: string; builtAt: string; symbols: number }
@@ -77,19 +81,14 @@ type BuildState = {
   start: string // month 0 of every offset in its parts
   next: number // index into its keys
   parts: number
-  day: string // the day `calls` counts
-  calls: number
-  lastRunAt: string | null
-  blockedOn: string | null // Yahoo refused on this day: no more runs until the next
   missing: number // symbols Yahoo had no history for
   errors: string[] // the latest few
 }
+/** What one run did — the monthly build's and the daily buckets' alike (./daily-buckets.ts). */
 export type HistoryRun = { calls: number; fetched: number; done: boolean; blocked: boolean; errors: string[] }
-export type HistoryRunOptions = {
+export type HistoryRunOptions = BudgetOptions & {
   paceMs?: number
   runCalls?: number
-  dayCalls?: number
-  gapMs?: number
   sleep?: (ms: number) => Promise<void>
   /**
    * Epoch ms: the run makes no further call once the clock passes it, and
@@ -106,9 +105,9 @@ export type HistoryRunOptions = {
  *   running   a run is in progress (a caller joins it: ensureHistoryPack)
  *   current   the file is current through last month: nothing to build
  *   no-basket no universe yet (the basket hasn't been built)
- *   blocked   Yahoo refused today: the build waits for the next UTC day
- *   gap       the last run ended less than HISTORY_RUN_GAP_MS ago
- *   day       today's HISTORY_DAY_CALLS are spent
+ *   blocked   Yahoo refused today: every crawl waits for the next UTC day
+ *   gap       the last run (of any crawl) started less than HISTORY_RUN_GAP_MS ago
+ *   day       today's HISTORY_DAY_CALLS are spent (./crawl-budget.ts)
  */
 export type HistoryGate = { ready: true } | { ready: false; why: 'running' | 'current' | 'no-basket' } | { ready: false; why: 'blocked' | 'gap' | 'day'; waitMs: number }
 
@@ -217,7 +216,7 @@ export function historyPending(db: DbLike, today = dayOf(new Date())): HistoryPe
     done: state.next,
     total,
     reason:
-      state.blockedOn === today
+      readBudget(db, today).blockedOn === today
         ? `The server’s market-history build paused after an upstream error (${pct}% done); it resumes tomorrow`
         : `The server is still building the market history (${pct}% done)`,
   }
@@ -361,10 +360,10 @@ export function applyServerHistory(db: DbLike): HistoryApplyResult {
 
 /* ---------------- building ---------------- */
 
-type SparkBars = { symbol: string; ts: unknown[]; closes: unknown[]; tz?: string }
+export type SparkBars = { symbol: string; ts: unknown[]; closes: unknown[]; tz?: string }
 
 /** Both spark shapes: v8's flat { SYM: { timestamp, close } } and v7's { spark: { result: [...] } }. */
-function sparkBars(body: unknown): SparkBars[] {
+export function sparkBars(body: unknown): SparkBars[] {
   if (!isObject(body)) return []
   if (isObject(body.spark)) {
     const results = body.spark.result
@@ -421,27 +420,42 @@ export function parseSparkHistory(body: unknown, today: string): Map<string, Mon
 }
 
 type BatchResult = { bars: Map<string, MonthClose[]> } | { error: string; blocked: boolean }
+export type SparkReply = { json: unknown } | { error: string; blocked: boolean }
 
-/** One spark call for up to HISTORY_BATCH universe keys ('s:SYM' / 'c:SYM'). */
-async function fetchBatch(keys: string[], f: typeof fetch, today: string): Promise<BatchResult> {
-  const yahoo = keys.map((k) => (k.startsWith('c:') ? `${k.slice(2)}-USD` : k.slice(2)))
-  const url = `https://query1.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(yahoo.join(','))}&range=${HISTORY_YEARS}y&interval=1mo`
+/** Universe keys ('s:SYM' / 'c:SYM') as Yahoo spells them: coins are SYM-USD. */
+export const yahooSymbols = (keys: readonly string[]): string[] => keys.map((k) => (k.startsWith('c:') ? `${k.slice(2)}-USD` : k.slice(2)))
+
+/**
+ * One spark call for up to HISTORY_BATCH symbols over `range` at `interval`,
+ * classified: a refusal (429/403/999/5xx, an unreadable reply — a consent or
+ * block page, typically — or a network error) is `blocked`, which pauses every
+ * crawl for the day; a plain error status skips the batch. Shared with the
+ * daily buckets' crawl (./daily-buckets.ts).
+ */
+export async function sparkCall(yahoo: readonly string[], range: string, interval: string, f: typeof fetch, what = 'history'): Promise<SparkReply> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(yahoo.join(','))}&range=${range}&interval=${interval}`
   let r: Response
   try {
     r = await f(url, { headers: UA, signal: upstreamSignal() })
   } catch (e) {
-    return { error: `history: ${yahoo[0]}… ${e instanceof Error ? e.message : 'fetch failed'}`, blocked: true }
+    return { error: `${what}: ${yahoo[0]}… ${e instanceof Error ? e.message : 'fetch failed'}`, blocked: true }
   }
   if (r.status === 429 || r.status === 403 || r.status === 999 || r.status >= 500)
-    return { error: `history: Yahoo HTTP ${r.status} at ${yahoo[0]}…`, blocked: true }
-  if (!r.ok) return { error: `history: batch ${yahoo[0]}… HTTP ${r.status}`, blocked: false }
-  let json: unknown
+    return { error: `${what}: Yahoo HTTP ${r.status} at ${yahoo[0]}…`, blocked: true }
+  if (!r.ok) return { error: `${what}: batch ${yahoo[0]}… HTTP ${r.status}`, blocked: false }
   try {
-    json = await r.json()
+    return { json: await r.json() }
   } catch {
-    return { error: `history: batch ${yahoo[0]}… unreadable reply`, blocked: true } // a consent or block page, typically
+    return { error: `${what}: batch ${yahoo[0]}… unreadable reply`, blocked: true }
   }
-  const got = parseSparkHistory(json, today)
+}
+
+/** One spark call for up to HISTORY_BATCH universe keys ('s:SYM' / 'c:SYM'). */
+async function fetchBatch(keys: string[], f: typeof fetch, today: string): Promise<BatchResult> {
+  const yahoo = yahooSymbols(keys)
+  const reply = await sparkCall(yahoo, `${HISTORY_YEARS}y`, '1mo', f)
+  if ('error' in reply) return reply
+  const got = parseSparkHistory(reply.json, today)
   const bars = new Map<string, MonthClose[]>()
   keys.forEach((k, i) => {
     const rows = got.get(yahoo[i]!)
@@ -450,18 +464,14 @@ async function fetchBatch(keys: string[], f: typeof fetch, today: string): Promi
   return { bars }
 }
 
-/** The universe for a new build: today's basket, as 's:SYM' / 'c:SYM'. */
-function universe(db: DbLike): string[] {
+/** The universe for a new build: today's basket, as 's:SYM' / 'c:SYM' (crypto first, then stocks, each sorted). */
+export function basketUniverse(db: DbLike): string[] {
   const rows = db.prepare('SELECT symbol, kind FROM basket_quotes ORDER BY kind DESC, symbol').all() as { symbol: string; kind: string }[]
   return rows.filter((r) => SYMBOL_OK.test(r.symbol)).map((r) => `${r.kind === 'crypto' ? 'c' : 's'}:${r.symbol}`)
 }
 
 let inflight: Promise<HistoryRun> | null = null
 export const isHistoryBuilding = () => inflight !== null
-
-/** Milliseconds from `now` to the next UTC midnight: when a day's budget resets and a refusal's pause ends. */
-export const untilNextUtcDay = (now: Date): number =>
-  Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()
 
 /**
  * The build in progress, or a new one if a build is due — when there is no
@@ -474,21 +484,9 @@ function dueBuild(db: DbLike, now: Date): BuildState | 'current' | 'no-basket' {
   const today = dayOf(now)
   const head = readHead(db)
   if (head && head.final >= addMonthsToMonth(today.slice(0, 7), -1)) return 'current'
-  const keys = universe(db)
+  const keys = basketUniverse(db)
   if (keys.length === 0) return 'no-basket'
-  const fresh: BuildState = {
-    v: 1,
-    startedOn: today,
-    start: addMonthsToMonth(today.slice(0, 7), -12 * HISTORY_YEARS),
-    next: 0,
-    parts: 0,
-    day: today,
-    calls: 0,
-    lastRunAt: null,
-    blockedOn: null,
-    missing: 0,
-    errors: [],
-  }
+  const fresh: BuildState = { v: 1, startedOn: today, start: addMonthsToMonth(today.slice(0, 7), -12 * HISTORY_YEARS), next: 0, parts: 0, missing: 0, errors: [] }
   db.transaction(() => {
     clearBuild(db)
     setMeta(db, KEYS_KEY, JSON.stringify(keys))
@@ -502,14 +500,7 @@ export function historyGate(db: DbLike, now = new Date(), opts: HistoryRunOption
   if (inflight) return { ready: false, why: 'running' }
   const state = dueBuild(db, now)
   if (typeof state === 'string') return { ready: false, why: state }
-  const today = dayOf(now)
-  if (state.blockedOn === today) return { ready: false, why: 'blocked', waitMs: untilNextUtcDay(now) }
-  if (state.lastRunAt) {
-    const wait = Date.parse(state.lastRunAt) + (opts.gapMs ?? HISTORY_RUN_GAP_MS) - now.getTime()
-    if (wait > 0) return { ready: false, why: 'gap', waitMs: wait }
-  }
-  if (state.day === today && state.calls >= (opts.dayCalls ?? HISTORY_DAY_CALLS)) return { ready: false, why: 'day', waitMs: untilNextUtcDay(now) }
-  return { ready: true }
+  return budgetGate(db, now, opts)
 }
 
 /**
@@ -543,12 +534,8 @@ async function runBuild(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
     clearBuild(db) // unreadable build state: the next call starts over
     return { calls: 0, fetched: 0, done: false, blocked: false, errors: ['history: build state unreadable; starting over'] }
   }
-  if (state.day !== today) {
-    state.day = today
-    state.calls = 0
-  }
-  state.lastRunAt = now.toISOString()
-  setMeta(db, BUILD_KEY, JSON.stringify(state))
+  noteRunStart(db, now)
+  let dayUsed = readBudget(db, today).calls
 
   let part: Book = { stock: {}, crypto: {} }
   let batches = 0
@@ -568,19 +555,19 @@ async function runBuild(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
     part = { stock: {}, crypto: {} }
     batches = 0
   }
-  while (state.next < keys.length && calls < runCalls && state.calls < dayCalls) {
+  while (state.next < keys.length && calls < runCalls && dayUsed < dayCalls) {
     if (calls > 0) await sleep(pace)
     if (o.deadline !== undefined && Date.now() >= o.deadline) break // out of request time: the next run resumes here
     const batch = keys.slice(state.next, state.next + HISTORY_BATCH)
     calls++
-    state.calls++
+    dayUsed = noteCall(db, today)
     const got = await fetchBatch(batch, f, today)
     let found = 0
     if ('error' in got) {
       errors.push(got.error)
       if (got.blocked) {
         blocked = true
-        state.blockedOn = today
+        noteRefusal(db, today)
         break // this batch is retried by the next run
       }
     } else
