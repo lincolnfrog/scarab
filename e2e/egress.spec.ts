@@ -53,9 +53,17 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /* ---------- what the shell is allowed to ask for besides the API ---------- */
 
-/** Static paths the built client references (index.html, public/): the shell, its assets, the manifest and icons. */
+/**
+ * Static paths the built client references (index.html, public/, the build manifest): the shell, its assets, the
+ * web manifest and icons, and /build.json — what the server serves, read by Data & Vault's Advanced card.
+ */
 const STATIC_OK = (path: string): boolean =>
-  path === '/' || path === '/index.html' || path.startsWith('/assets/') || path === '/manifest.webmanifest' || path.startsWith('/icons/')
+  path === '/' ||
+  path === '/index.html' ||
+  path.startsWith('/assets/') ||
+  path === '/manifest.webmanifest' ||
+  path.startsWith('/icons/') ||
+  path === '/build.json'
 
 /** Schemes that never reach a network: the favicon is a data: URI, downloads are blob: URLs. */
 const LOCAL_SCHEMES = new Set(['data:', 'blob:', 'about:'])
