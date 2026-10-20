@@ -782,9 +782,11 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
    checked across two CI builds and the image, Sigstore attestations on the
    image digest and the manifest, deploy by verified digest,
    `scripts/verify-served.sh`, CSP on every response — PRIVACY.md "The trust
-   root"). Still to do: the one-time GCP setup (`bootstrap-gcp.sh
-   trust-chain`, the four repository variables) and the first `v*` tag, after
-   which deploys are attested releases; and a proper ZK-only build target.
+   root"). Live since 2026-10-20: v0.1.0 was the first attested release,
+   deployed by digest and checked by `verify-served.sh` against scarab.one.
+   Still open: a proper ZK-only build target, and a browser-side check (an
+   extension in the style of Code Verify) for a response tailored to one
+   person, which the script's service-account vantage point can't see.
 6. **ZK market data**: an anonymous-add path for off-universe symbols (today:
    a hand-entered price), and daily history through hashed symbol buckets
    once the monthly file has proved itself (see PRIVACY.md).
