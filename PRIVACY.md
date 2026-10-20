@@ -426,7 +426,20 @@ the operator can observe:
   step and Data & Vault → Advanced link to (`public/terms.html`,
   `public/privacy.html`) are static files of this origin — served, hashed and
   attested like the rest, no JavaScript — and say this in fewer words; they
-  carry an `OPERATOR_CONTACT` placeholder the operator fills before opening.
+  carry an `OPERATOR_CONTACT` placeholder the operator fills before opening
+  (the egress proof opens both and holds them to the same policy).
+  `scripts/open-signup.sh --open` reads the live service's environment first
+  and refuses unless `SCARAB_ZK_ONLY` is set there: a household-mode server
+  has no gate of its own behind IAP, so opening IAP on one would hand every
+  Google account the household's plaintext.
+- **Request logs, and the one cookie**: the app logs no requests — only a
+  handler's failure with its method and path (`server/http.ts`), and the
+  boot lines. Google's infrastructure in front of it does: Cloud Run's
+  request log carries each request's route, size, time, status and client
+  address, and with Cloud Audit Logs on for IAP, the signed-in identity of
+  each request too — as for any site behind IAP, in the operator's project.
+  The app sets no cookies; the one cookie scarab.one leaves in a browser is
+  IAP's sign-in session cookie, which Google sets and reads.
 - **Quote symbols**: in household mode price fetches name the held symbols to
   the server (which already holds the ledger). In zero-knowledge mode the
   server instead publishes a **daily price basket** — the whole US-listed

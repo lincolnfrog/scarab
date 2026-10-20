@@ -27,8 +27,8 @@
             </mask>
             <rect width="64" height="64" fill="#e3b23c" mask="url(#mark)" />
           </svg>
+          <span>SCARAB</span>
         </a>
-        <a href="/"><span>SCARAB</span></a>
       </div>
 
       <p class="eyebrow">scarab.one</p>
@@ -61,14 +61,14 @@
 
       <h2>Who else sees it</h2>
       <ul>
-        <li><b>Google.</b> Identity-Aware Proxy authenticates every request, so Google sees the same sign-ins, times and request sizes it would for any site behind it, and your Google account keeps its own sign-in history. Cloud Run hosts the server, Cloud Storage holds the replicated database, and the project's logs carry request metadata (who, when, which route, how large), not request bodies.</li>
+        <li><b>Google.</b> Identity-Aware Proxy authenticates every request, so Google sees the same sign-ins, times and request sizes it would for any site behind it, and your Google account keeps its own sign-in history. Cloud Run hosts the server and Cloud Storage holds the replicated database. The app itself logs no requests, only a failure and its route; Google's infrastructure in front of it, Cloud Run and IAP, keeps request logs with the route, size, time, status and client address of each request and, with audit logging on for IAP, the signed-in identity. Those logs live in the operator's project.</li>
         <li><b>Apple or Google, for passkeys.</b> Your passkey syncs through your platform account, end-to-end encrypted by the platform. The secret it yields never leaves your browser, and the account alone does not decrypt Scarab.</li>
-        <li><b>Yahoo Finance.</b> The server fetches the price basket from it, 20 symbols at a time from a fixed universe. Never your holdings, never your identity.</li>
-        <li><b>Nobody else.</b> No analytics, no advertising, no tracking scripts, no third-party fonts or scripts. The server's Content-Security-Policy lets the page load from and talk to scarab.one only. The app sets no cookies of its own; the only cookie is the proxy's sign-in cookie.</li>
+        <li><b>Three market-data sources</b>, public and keyless: NASDAQ Trader's symbol directory (the universe of US listings), Yahoo Finance (quotes for that universe in batches, and ten years of monthly history) and CoinGecko (the top crypto assets). The server asks each for the same fixed universe on everyone's behalf. Never your holdings, never your identity.</li>
+        <li><b>No trackers.</b> No analytics, no advertising, no tracking scripts, no third-party fonts or scripts. The server's Content-Security-Policy lets the page load from and talk to scarab.one only. The app sets no cookies; the one cookie scarab.one leaves in your browser is Identity-Aware Proxy's sign-in session cookie.</li>
       </ul>
 
       <h2>What stays in your browser</h2>
-      <p>Bookkeeping, never household data: the last version and hash this device saw of your vault, the credential ids of this device's passkeys, your idle auto-lock setting, and reminders that a new recovery code is owed. The decrypted database lives only in the tab's memory and is gone when the tab closes or locks. Scarab's addresses carry only screen names, numeric ids and months, so your browser's synced history learns no tickers, search text or amounts.</p>
+      <p>Bookkeeping, not household data, with one exception named here. In <code>localStorage</code>: the last version and ciphertext hash this device saw of each vault (<code>scarab:seen</code>), the credential ids of this device's own passkeys (<code>scarab:device-creds</code>), your idle auto-lock setting (<code>scarab:idle-lock</code>), a reminder that a new recovery code is owed (<code>scarab:recovery-owed</code>) and, the exception, the email of a removed member whose re-key is still owed (<code>scarab:rotation-owed</code>), on the owner's device until the re-key happens. Per tab, in <code>sessionStorage</code>: a note of why the last session locked, a reload guard, the household-mode choice and the day prices were last refreshed. The decrypted database lives only in the tab's memory and is gone when the tab closes or locks. Scarab's addresses carry only screen names, numeric ids and months, so your browser's synced history learns no tickers, search text or amounts.</p>
 
       <h2>Your data</h2>
       <ul>

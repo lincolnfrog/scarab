@@ -258,7 +258,7 @@ function TermsAndPrivacy() {
         <a {...ext} href="/privacy.html">
           privacy
         </a>
-        . The same text is in the repository (<span className="num">PRIVACY.md</span>, <span className="num">LICENSE</span>).
+        . The same text is in the repository (<code className="zk-code">PRIVACY.md</code>, <code className="zk-code">LICENSE</code>).
       </p>
     </div>
   )

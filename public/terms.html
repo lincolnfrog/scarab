@@ -26,8 +26,8 @@
             </mask>
             <rect width="64" height="64" fill="#e3b23c" mask="url(#mark)" />
           </svg>
+          <span>SCARAB</span>
         </a>
-        <a href="/"><span>SCARAB</span></a>
       </div>
 
       <p class="eyebrow">scarab.one</p>
@@ -40,7 +40,7 @@
 
       <h2>What Scarab is</h2>
       <p>Scarab is a household finance app: cash and budget, investments and tax lots, real estate, a home-purchase plan, a Monte Carlo future. On scarab.one it runs entirely in your browser tab. You import statements, the tab parses them, and every number you see is computed there.</p>
-      <p>The server does three things. It stores your vault, one encrypted blob it cannot read, with the earlier versions it keeps. It publishes a daily price basket, the same file for everyone. And it relays invitations between households. It answers nothing else; the complete list is one short file, <code>server/zk-routes.ts</code>.</p>
+      <p>The server answers exactly six things: who you are, which mode it runs in, your vault (one encrypted blob it cannot read, with the earlier versions it keeps), your household's members and invitations, the daily price basket with its monthly history (the same files for everyone), and a health check. Nothing else; the complete list is one short file, <code>server/zk-routes.ts</code>.</p>
 
       <h2>Your account and your keys</h2>
       <p>You sign in with a Google account. Google's Identity-Aware Proxy checks it before any request reaches Scarab, so Scarab has no passwords and no sign-up form of its own. Signing in and creating a vault is the whole account.</p>
@@ -59,13 +59,13 @@
       <p>Scarab is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="noreferrer">GNU Affero General Public License, version 3</a>. The complete source is at <a href="https://github.com/lincolnfrog/scarab" rel="noreferrer">github.com/lincolnfrog/scarab</a>, and the code running on scarab.one is built from it. You may read it, change it and run your own copy; the repository deploys with two scripts.</p>
 
       <h2>How to check what runs here</h2>
-      <p>Every deploy is a tagged release built by GitHub's runners from a public commit, twice, on two machines, and accepted only when both builds match byte for byte. Sigstore attests the image and the manifest of every served file. The operator deploys by image digest after verifying that attestation, and the server sends a Content-Security-Policy that lets the page load and talk to this origin only. Anyone can check that scarab.one serves the files of the release it names: the commands are in <a href="https://github.com/lincolnfrog/scarab/blob/main/PRIVACY.md#the-trust-root-served-javascript" rel="noreferrer">PRIVACY.md, “The trust root”</a> and in <code>scripts/verify-served.sh</code>. The commit served to you is shown in the app under Data &amp; Vault → Advanced → Served code.</p>
+      <p>Every release is tagged and attested: built by GitHub's runners from a public commit, twice, on two machines, and accepted only when both builds match byte for byte, with Sigstore attesting the image and the manifest of every served file. The operator deploys a release by its attested image digest. The one unattested path, a build from a laptop's checkout, exists for the first deploy of a fresh project; the app says so when it is running one. The server sends a Content-Security-Policy that lets the page load from and talk to this origin only. Anyone can check that scarab.one serves the files of the release it names: the commands are in <a href="https://github.com/lincolnfrog/scarab/blob/main/PRIVACY.md#the-trust-root-served-javascript" rel="noreferrer">PRIVACY.md, “The trust root”</a> and in <code>scripts/verify-served.sh</code>. The release and commit served to you are shown in the app under Data &amp; Vault → Advanced → Served code.</p>
 
       <h2>The service may end</h2>
-      <p>scarab.one is run by one person at their own cost. It may be shut down, with notice at the front door ahead of time. Your data is yours to take out at any moment, not only then: Data &amp; Vault → Backups exports everything as one readable JSON file, and makes an encrypted <code>.scarab</code> backup that opens with your passkey or recovery code on any Scarab, including one you run yourself.</p>
+      <p>scarab.one is run by one person at their own cost. It may be shut down. Notice would be given ahead of time on this site and in the repository's releases; there is no other channel, so keep a backup of your own now and then. Your data is yours to take out at any moment, not only then: Data &amp; Vault → Backups exports everything as one readable JSON file, and makes an encrypted <code>.scarab</code> backup that opens with your passkey or recovery code on any Scarab, including one you run yourself.</p>
 
       <h2>Changes</h2>
-      <p>These pages are files in the repository, so every change to them is a public commit, and the version you read is the one in the release that runs here. A change that matters will be announced at the front door.</p>
+      <p>These pages are files in the repository, so every change to them is a public commit, and the version you read is the one in the release that runs here. There is no separate announcement channel: a change that matters arrives the same way, as a release of this site and in the repository.</p>
 
       <h2>Contact</h2>
       <p>Questions, a problem, or a request to have everything the server holds for your account deleted: <span class="placeholder">OPERATOR_CONTACT</span>.</p>

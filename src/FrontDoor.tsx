@@ -756,11 +756,12 @@ export default function FrontDoor({ mode: booted, onEnter, onHousehold }: { mode
           </>
         )}
 
-        {/* Creating a vault is the whole sign-up, so the terms are agreed here — on both steps that end in a new vault. The pages are static
-            files of this origin (public/terms.html, public/privacy.html), opened in a new tab; the app itself stays where it is. */}
-        {(view === 'name' || view === 'backup-new') && (
+        {/* Creating a vault — or joining a household that invited you — is the whole sign-up, so the terms are agreed here, on the steps
+            that end in one. The pages are static files of this origin (public/terms.html, public/privacy.html), opened in a new tab; the
+            app itself stays where it is. */}
+        {(view === 'name' || view === 'backup-new' || view === 'invite') && (
           <p className="zk-door-terms">
-            By creating a vault you agree to the{' '}
+            {view === 'invite' ? 'By joining a household' : 'By creating a vault'} you agree to the{' '}
             <a href="/terms.html" target="_blank" rel="noreferrer">
               terms
             </a>{' '}

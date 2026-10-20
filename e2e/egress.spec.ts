@@ -13,8 +13,8 @@
  * canary data on every screen that takes input (a cash account and an
  * imported transaction, an investment account and a trade, a property and
  * its valuation, the Dream Home target), lets autosave run, reloads, unlocks
- * with the passkey, and browses every screen plus detail views, the vault's
- * history and both backups.
+ * with the passkey, browses every screen plus detail views, the vault's
+ * history and both backups, and opens the terms and privacy pages.
  *
  * What it asserts (the numbers match PRIVACY.md's "Runnable proof"):
  *   a. every request is same-origin, and its path is the shell, an asset, the
@@ -55,9 +55,8 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
  * Static paths the built client references (index.html, public/, the build manifest): the shell, its assets, the
- * web manifest and icons, /build.json — what the server serves, read by Data & Vault's Advanced card — and the terms
- * and privacy pages the front door and Advanced link to (plain HTML, their stylesheet and its font; opened in a new
- * tab, so a session never fetches them on its own).
+ * web manifest and icons, /build.json — what the server serves, read by Data & Vault's Advanced card — and exactly
+ * what the terms and privacy pages load when the scenario opens them (the page, its stylesheet, its font).
  */
 const STATIC_OK = (path: string): boolean =>
   path === '/' ||
@@ -66,10 +65,15 @@ const STATIC_OK = (path: string): boolean =>
   path === '/manifest.webmanifest' ||
   path.startsWith('/icons/') ||
   path === '/build.json' ||
-  path === '/terms.html' ||
-  path === '/privacy.html' ||
+  LEGAL_PAGES.has(path) ||
   path === '/legal.css' ||
-  path.startsWith('/fonts/')
+  path === '/fonts/marcellus.woff2'
+
+/** The terms and privacy pages the front door and Advanced link to (public/*.html): opened in a new tab, like the links do. */
+const LEGAL_PAGES = new Map([
+  ['/terms.html', 'Terms'],
+  ['/privacy.html', 'Privacy'],
+])
 
 /** Schemes that never reach a network: the favicon is a data: URI, downloads are blob: URLs. */
 const LOCAL_SCHEMES = new Set(['data:', 'blob:', 'about:'])
@@ -291,15 +295,18 @@ test('a zero-knowledge session sends only ciphertext, and only to PUT /api/vault
   let phase = 'boot'
   const context = await browser.newContext({ baseURL: server.origin })
   const { recs, settle } = recordRequests(context, () => phase)
-  const page = await context.newPage()
   const pageErrors: string[] = []
-  page.on('pageerror', (e) => pageErrors.push(e.message))
   // The Content-Security-Policy (server/app.ts) is part of the claim: a violation surfaces only as a console error,
   // so one anywhere in the session — a blocked inline style, a script or a fetch off this origin — fails the test here.
   const cspViolations: string[] = []
-  page.on('console', (m) => {
-    if (m.type() === 'error' && /Content Security Policy/i.test(m.text())) cspViolations.push(m.text())
-  })
+  const watch = (p: Page) => {
+    p.on('pageerror', (e) => pageErrors.push(e.message))
+    p.on('console', (m) => {
+      if (m.type() === 'error' && /Content Security Policy/i.test(m.text())) cspViolations.push(m.text())
+    })
+  }
+  const page = await context.newPage()
+  watch(page)
   const cdp = await context.newCDPSession(page)
   const cdpSeen = await recordCdp(cdp)
   // A platform passkey with PRF, answering without a prompt — what a Mac's Touch ID or a phone does for a person.
@@ -439,6 +446,19 @@ test('a zero-knowledge session sends only ciphertext, and only to PUT /api/vault
     const [plain] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download export (JSON)' }).click()])
     const plainPath = join(server.dir, 'export.json')
     await plain.saveAs(plainPath)
+
+    /* ----- the terms and privacy pages: static files, opened in a new tab as the links open them ----- */
+    // Same context, so their requests — the page, its stylesheet, its font — are judged with the rest and the policy
+    // is held to them too (no script, no inline style: a violation on either page fails the test like one in the app).
+    phase = 'pages'
+    for (const [path, title] of LEGAL_PAGES) {
+      const legal = await context.newPage()
+      watch(legal)
+      await legal.goto(path)
+      await expect(legal.getByRole('heading', { level: 1 })).toHaveText(title)
+      await expect(legal.locator('script'), `${path} ships no JavaScript`).toHaveCount(0)
+      await legal.close()
+    }
 
     const after = await fetchMode(server.origin)
     const storage = await page.evaluate(() => ({ local: JSON.stringify({ ...localStorage }), session: JSON.stringify({ ...sessionStorage }) }))
