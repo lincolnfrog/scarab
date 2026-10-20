@@ -12,7 +12,8 @@
     "start": "node dist-server/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "seed:history": "tsx scripts/build-history-pack.ts"
+    "seed:history": "tsx scripts/build-history-pack.ts",
+    "test:egress": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
@@ -23,6 +24,7 @@
     "sql.js": "^1.14.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",

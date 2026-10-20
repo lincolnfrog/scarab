@@ -12,3 +12,7 @@ dist-server/
 # Yahoo-derived market data: shipped in the image, never committed (see .gcloudignore)
 seed/*
 !seed/.gitkeep
+
+# Playwright (npm run test:egress)
+test-results/
+playwright-report/

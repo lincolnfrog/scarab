@@ -352,6 +352,21 @@ Consequences, stated plainly:
   on current macOS, iOS, Android and Windows. A browser without it can open
   the vault only with the recovery code, and the front door says so.
 
+**Runnable proof.** `npm run test:egress` (`e2e/egress.spec.ts`, run on every
+push by `.github/workflows/egress.yml`) builds the app, starts the real
+vault-only server and drives a whole session in headless Chromium with a
+virtual passkey — create a vault, enter data on every screen that takes input,
+let autosave run, reload, unlock, browse every screen plus the history and
+both backups — while recording every request the browser makes. It then
+asserts (a) every request was same-origin and either a static file or on the
+`server/zk-routes.ts` allowlist, imported, not copied; (b) the only writes were
+`PUT /api/vault`; (c) every upload opens with the recovery code to a snapshot
+holding the test's canary data, and no canary — nor the code — appears in
+clear in any request, in `localStorage` or in `sessionStorage`; (d) browsing
+alone uploaded nothing and left the stored version where it was; (e) the
+server's plaintext tables stayed empty. A screen that calls a plaintext route
+fails it, naming the request — even though the server would have refused it.
+
 ## What the server still learns (honesty section)
 
 Zero-knowledge is a statement about *content*, not existence. Even in ZK mode
