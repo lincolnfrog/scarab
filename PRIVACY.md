@@ -258,8 +258,8 @@ Consequences, stated plainly:
   `SCARAB_ZK_ONLY=1`, the server answers exactly six things: identity, the
   mode probe, the encrypted-blob courier (with the versions it keeps), its
   membership list and invitations (emails it already knows from IAP), the
-  price basket with its monthly market history (both identical for every
-  caller), and health. Every other route returns 403 before any handler runs,
+  price basket with its market history (the monthly file, identical for every
+  caller, and the scheduled trigger that builds it), and health. Every other route returns 403 before any handler runs,
   and the server refuses to boot at all if its database holds plaintext (a
   one-time `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data,
   keeping the ciphertext, its membership routing and the shared price data). The
@@ -574,10 +574,34 @@ crypto), about 1.5 MB gzipped.
   (one request every 1.5 s, at most 160 per run, runs at least 20 minutes
   apart, 640 a day; the first refusal pauses it until the next day), starts
   only when someone asks for the file (or a household server's series
-  catalog), and never runs twice at once. It is rebuilt each month once a
+  catalog) or when the scheduled crawl below asks, and never runs twice at
+  once. It is rebuilt each month once a
   month has closed; in between, each daily basket build folds its quotes into
   the month in progress. Until the first build completes, the route answers
   202 with its progress, and a benchmark says why it is greyed out.
+- **Who keeps it built.** Cloud Run gives the server CPU only while a request
+  is open, so a build that outlives the request that started it crawls and
+  dies with the idle instance — and nobody browsing keeps a request open for
+  ~600 paced calls. So the build is driven by a schedule:
+  `.github/workflows/history.yml` calls **`POST /api/basket/crawl`** every six
+  hours during the first five days of a month (when a rebuild is due) and
+  once a day otherwise, and the server runs the build *inside that request*
+  for up to four minutes, saving progress, then answers with how far it got
+  and when to call again (`retryAfter`); the job repeats until the file is
+  current or the day's 640 calls are spent. The caller is a dedicated
+  service account, `scarab-history`, on the IAP allowlist like a member
+  (`scripts/history-sa.sh` creates it, once); the workflow signs in through
+  Workload Identity Federation as the release workflow's `scarab-ci` and
+  signs a ten-minute JWT as `scarab-history` — no key exists anywhere. What
+  the server learns from it: that `scarab-history` called, and when (the
+  schedule above, and a manual run of the workflow). The request carries no
+  body the server reads and the answer is the build's public progress; the
+  route is a trigger and idempotent — any member may call it, and a call
+  when nothing is due, or too soon after a run, does nothing. `basket/crawl`
+  is the pattern this adds to the vault-only allowlist. (The alternative,
+  `--no-cpu-throttling` on the service, was not taken: it bills the instance
+  for every idle minute, still loses the build when the instance scales to
+  zero, and starts nothing by itself.)
 - **Where it is kept.** In the server's `app_meta` under `basket:history:*`
   keys — shared infrastructure like the basket itself: never part of anyone's
   snapshot or export, and kept by the zero-knowledge purge.

@@ -59,7 +59,8 @@ image and the asset manifest and publish the release, then
 image by digest. `./scripts/verify-served.sh` checks that the site serves the
 release's files; PRIVACY.md ("The trust root") has the whole chain. An
 existing install adds the CI identity once with `./scripts/bootstrap-gcp.sh
-trust-chain`.
+trust-chain`, and the identity the scheduled market-history crawl runs as
+(`.github/workflows/history.yml`) once with `./scripts/history-sa.sh`.
 
 **Vault-only (zero-knowledge) deploy**: add `SCARAB_ZK_ONLY=1` to `.env.gcp`.
 The vault unlocks with a passkey (fingerprint/face; Chrome or Safari on

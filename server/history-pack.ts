@@ -27,8 +27,10 @@ import { upstreamSignal } from './upstream'
  *     next run picks up where the last one stopped;
  *   - Yahoo refusing (429/403/5xx, an unreadable reply, a network error) ends
  *     the run and pauses the build until the next day.
- * Runs are started only by someone wanting the history (GET /basket/history,
- * GET /series/catalog), never on a timer, and never twice at once.
+ * Runs are started by someone wanting the history (GET /basket/history,
+ * GET /series/catalog) or by the scheduled crawl (POST /basket/crawl,
+ * server/crawl.ts — the one that reliably finishes on Cloud Run, where a
+ * build gets CPU only while a request is open), never twice at once.
  *
  * A full build happens when there is no file, and again each month once a new
  * month has closed (so the months since the last build become true month-end
@@ -89,7 +91,26 @@ export type HistoryRunOptions = {
   dayCalls?: number
   gapMs?: number
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Epoch ms: the run makes no further call once the clock passes it, and
+   * returns what it has (progress saved). POST /api/basket/crawl sets it so a
+   * run fits inside the request that gives it CPU (server/crawl.ts).
+   */
+  deadline?: number
 }
+
+/**
+ * Whether a run may start now — and when it may not, why, and (where it is a
+ * matter of time) how long until it may. The scheduled crawl's answer to its
+ * caller (server/crawl.ts) is built from this.
+ *   running   a run is in progress (a caller joins it: ensureHistoryPack)
+ *   current   the file is current through last month: nothing to build
+ *   no-basket no universe yet (the basket hasn't been built)
+ *   blocked   Yahoo refused today: the build waits for the next UTC day
+ *   gap       the last run ended less than HISTORY_RUN_GAP_MS ago
+ *   day       today's HISTORY_DAY_CALLS are spent
+ */
+export type HistoryGate = { ready: true } | { ready: false; why: 'running' | 'current' | 'no-basket' } | { ready: false; why: 'blocked' | 'gap' | 'day'; waitMs: number }
 
 /* ---------------- app_meta ---------------- */
 
@@ -438,11 +459,63 @@ function universe(db: DbLike): string[] {
 let inflight: Promise<HistoryRun> | null = null
 export const isHistoryBuilding = () => inflight !== null
 
+/** Milliseconds from `now` to the next UTC midnight: when a day's budget resets and a refusal's pause ends. */
+export const untilNextUtcDay = (now: Date): number =>
+  Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()
+
 /**
- * Start or continue a build if one is due and allowed now; otherwise null.
- * Never two runs at once (a caller during a run gets the running one). A new
- * build is due when there is no file, or when a month has closed since the
- * last build's `final`. It needs a basket: the universe is today's basket.
+ * The build in progress, or a new one if a build is due — when there is no
+ * file, or a month has closed since the last build's `final` — else why there
+ * is none. A new build needs a basket: the universe is today's basket.
+ */
+function dueBuild(db: DbLike, now: Date): BuildState | 'current' | 'no-basket' {
+  const state = readState(db)
+  if (state) return state
+  const today = dayOf(now)
+  const head = readHead(db)
+  if (head && head.final >= addMonthsToMonth(today.slice(0, 7), -1)) return 'current'
+  const keys = universe(db)
+  if (keys.length === 0) return 'no-basket'
+  const fresh: BuildState = {
+    v: 1,
+    startedOn: today,
+    start: addMonthsToMonth(today.slice(0, 7), -12 * HISTORY_YEARS),
+    next: 0,
+    parts: 0,
+    day: today,
+    calls: 0,
+    lastRunAt: null,
+    blockedOn: null,
+    missing: 0,
+    errors: [],
+  }
+  db.transaction(() => {
+    clearBuild(db)
+    setMeta(db, KEYS_KEY, JSON.stringify(keys))
+    setMeta(db, BUILD_KEY, JSON.stringify(fresh))
+  })()
+  return fresh
+}
+
+/** May a run start now? (Starts the bookkeeping of a build that is due, as ensureHistoryPack would.) */
+export function historyGate(db: DbLike, now = new Date(), opts: HistoryRunOptions = {}): HistoryGate {
+  if (inflight) return { ready: false, why: 'running' }
+  const state = dueBuild(db, now)
+  if (typeof state === 'string') return { ready: false, why: state }
+  const today = dayOf(now)
+  if (state.blockedOn === today) return { ready: false, why: 'blocked', waitMs: untilNextUtcDay(now) }
+  if (state.lastRunAt) {
+    const wait = Date.parse(state.lastRunAt) + (opts.gapMs ?? HISTORY_RUN_GAP_MS) - now.getTime()
+    if (wait > 0) return { ready: false, why: 'gap', waitMs: wait }
+  }
+  if (state.day === today && state.calls >= (opts.dayCalls ?? HISTORY_DAY_CALLS)) return { ready: false, why: 'day', waitMs: untilNextUtcDay(now) }
+  return { ready: true }
+}
+
+/**
+ * Start or continue a build if one is due and allowed now (historyGate);
+ * otherwise null. Never two runs at once (a caller during a run gets the
+ * running one).
  */
 export function ensureHistoryPack(
   db: DbLike,
@@ -451,36 +524,7 @@ export function ensureHistoryPack(
   opts: HistoryRunOptions = {},
 ): Promise<HistoryRun> | null {
   if (inflight) return inflight
-  const today = dayOf(now)
-  let state = readState(db)
-  if (!state) {
-    const head = readHead(db)
-    if (head && head.final >= addMonthsToMonth(today.slice(0, 7), -1)) return null
-    const keys = universe(db)
-    if (keys.length === 0) return null
-    const fresh: BuildState = {
-      v: 1,
-      startedOn: today,
-      start: addMonthsToMonth(today.slice(0, 7), -12 * HISTORY_YEARS),
-      next: 0,
-      parts: 0,
-      day: today,
-      calls: 0,
-      lastRunAt: null,
-      blockedOn: null,
-      missing: 0,
-      errors: [],
-    }
-    db.transaction(() => {
-      clearBuild(db)
-      setMeta(db, KEYS_KEY, JSON.stringify(keys))
-      setMeta(db, BUILD_KEY, JSON.stringify(fresh))
-    })()
-    state = fresh
-  }
-  if (state.blockedOn === today) return null
-  if (state.lastRunAt && now.getTime() - Date.parse(state.lastRunAt) < (opts.gapMs ?? HISTORY_RUN_GAP_MS)) return null
-  if (state.day === today && state.calls >= (opts.dayCalls ?? HISTORY_DAY_CALLS)) return null
+  if (!historyGate(db, now, opts).ready) return null
   inflight = runBuild(db, f, now, opts).finally(() => {
     inflight = null
   })
@@ -526,6 +570,7 @@ async function runBuild(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
   }
   while (state.next < keys.length && calls < runCalls && state.calls < dayCalls) {
     if (calls > 0) await sleep(pace)
+    if (o.deadline !== undefined && Date.now() >= o.deadline) break // out of request time: the next run resumes here
     const batch = keys.slice(state.next, state.next + HISTORY_BATCH)
     calls++
     state.calls++

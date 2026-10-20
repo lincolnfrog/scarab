@@ -6,6 +6,7 @@ import * as svc from '../engine/services'
 import { handle } from './api'
 import { ensureDailyHistory } from './charts'
 import { db as rawDb } from './db'
+import { runCrawl } from './crawl'
 import { applyServerHistory, ensureHistoryPack, packResponse, serverMarket } from './history-pack'
 import { backfillMonthlyHistory, fetchCryptoQuotes, fetchStockQuotes } from './prices'
 
@@ -72,6 +73,11 @@ api10.get('/basket/history', (c) => {
   wantHistory()
   return packResponse(db, c.req.header('accept-encoding'), c.req.header('if-none-match'))
 })
+// Run the market-history build inside this request, so it has CPU on Cloud
+// Run (./crawl.ts). Called on a schedule by .github/workflows/history.yml as
+// the scarab-history identity; a trigger only — no body is read, the answer
+// is the build's progress. Vault-only servers answer it (server/zk-routes.ts).
+api10.post('/basket/crawl', async (c) => c.json(await runCrawl(db, fetch, new Date())))
 // Write the history's month-end closes for this household's own assets into
 // its quote table (a tab does the same with the file it downloaded).
 api10.post('/prices/history', (c) => handle(c, () => applyServerHistory(db)))

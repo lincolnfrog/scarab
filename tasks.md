@@ -629,9 +629,14 @@ Decisions for the user:
       Yahoo-derived data; shipped via `.gcloudignore` + Dockerfile), stored at
       boot by `seedHistoryPack` when newer than the server's. Re-run and
       redeploy to refresh it.
-- [ ] Monthly rebuilds on Cloud Run still crawl under request-based CPU (the
-      served file stays current meanwhile via daily basket merges). If that
-      matters: `--no-cpu-throttling` or a scheduled ping; never `--max-instances`.
+- [x] Monthly rebuilds on Cloud Run crawled under request-based CPU (the
+      served file stayed current meanwhile via daily basket merges). Decided
+      2026-10-20 for a scheduled trigger over `--no-cpu-throttling`:
+      `.github/workflows/history.yml` → `POST /api/basket/crawl`
+      (`server/crawl.ts`) runs the build inside the request, four minutes at a
+      time, as the `scarab-history` service account (`scripts/history-sa.sh`,
+      one-time). `--no-cpu-throttling` bills idle minutes, still loses the
+      build at scale-to-zero, and starts nothing. Never `--max-instances`.
 - [x] Money trend charts fit the data (TimeChart default `baseline="fit"`;
       stacks keep $0) and carry a Lin/Log switch (2026-09-24).
 

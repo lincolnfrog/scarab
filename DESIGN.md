@@ -663,7 +663,9 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
 - `./scripts/deploy.sh` — gcloud run deploy from source (config in `.env.gcp`).
 - `./scripts/bootstrap-gcp.sh` — one-time project setup. Non-org projects
   must complete IAP's OAuth client once via the Cloud Run console Security
-  tab (script prints this).
+  tab (script prints this). `./scripts/history-sa.sh` — one-time: the
+  `scarab-history` identity the scheduled market-history crawl calls the
+  site as (below).
 - **Backups**: Litestream streams to GCS continuously. To restore locally for
   analysis: copy the replica dir, find the generation with the newest WAL
   (`gcloud storage ls -l …/wal/`), then
@@ -677,10 +679,18 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
   waits for it (≤120s), and a tab asks for it — its Investments refresh — as
   soon as the basket it sees is from an earlier day. A day whose build was cut
   off is retried an hour later (`BASKET_RETRY_MS`). The market history build
-  resumes from saved progress, so it still finishes, but the first full build
-  (~600 Yahoo calls) can take several visits or days. Undecided:
-  `--no-cpu-throttling`, or a scheduled ping to `GET /api/basket/history`.
-  Never change `--max-instances`.
+  resumes from saved progress, but a full build (~600 Yahoo calls, paced over
+  runs 20 minutes apart) never finished on visits alone. **Decided
+  2026-10-20: a scheduled trigger, not `--no-cpu-throttling`.**
+  `.github/workflows/history.yml` calls `POST /api/basket/crawl`
+  (`server/crawl.ts`) through IAP as the `scarab-history` service account
+  (`scripts/history-sa.sh`, once) — every six hours in a month's first five
+  days, daily otherwise — and the server runs the build inside that request
+  for up to four minutes (`CRAWL_REQUEST_BUDGET_MS`, under Cloud Run's 300 s
+  request timeout), answering with progress and `retryAfter`; the job loops
+  on it. `--no-cpu-throttling` would bill the instance for every idle minute,
+  still lose the build when the instance scales to zero, and start nothing by
+  itself. Never change `--max-instances`.
 - **Request size**: Cloud Run's HTTP/1 front end refuses request bodies over
   32 MiB before they reach the container, below the app's 64 MB restore cap
   (`server/api4.ts` BODY_LIMITS). A household restore bigger than that needs a
@@ -772,9 +782,10 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
    body cap on every route, on top of the 10MB blob cap), ~~the vault-only
    cut-over~~ (done 2026-10-01: the household re-entered through the front
    door; tasks.md), ~~the daily basket build from Cloud Run~~ (it serves the
-   live vault's prices); still to do: the market history's monthly rebuild
-   under request-based CPU (the CPU-throttling decision, §6), IAP
-   `allAuthenticatedUsers`, ToS/privacy pages.
+   live vault's prices), ~~the market history's monthly rebuild under
+   request-based CPU~~ (done 2026-10-20: the scheduled crawl, §6 — decided
+   against `--no-cpu-throttling`); still to do: IAP `allAuthenticatedUsers`,
+   ToS/privacy pages.
 4. **Declare production**: the floor is rolling — v28 since 2026-10-19
    (`engine/fixtures/README.md`). It stops rising once a second household
    keeps a vault; from then on every tier-C migration ships an upgrade.
