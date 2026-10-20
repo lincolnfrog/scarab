@@ -404,6 +404,14 @@ components render to static markup. The structural ones:
   history, backups, idle lock, v3 and rollback. `server/app.test.ts` covers the
   ZK allowlist, the courier's versioning and history, invitations and body
   caps.
+- **Egress, in a browser.** `e2e/egress.spec.ts` (`npm run test:egress`,
+  Playwright, apart from vitest; `.github/workflows/egress.yml` runs it on every
+  push) builds the app, starts the real vault-only server and drives a whole
+  session in headless Chromium with a CDP virtual passkey, recording every
+  request: nothing but static files and `ZK_ROUTES`, the only write
+  `PUT /api/vault`, every upload decrypted with the recovery code to a snapshot
+  holding the canaries, no canary in clear anywhere, browsing uploads nothing,
+  the server's tables stay empty. PRIVACY.md calls it the runnable proof.
 
 Everything else covers parsers, lots edge cases (the anniversary, oversells,
 specific lots, per-account pools), tax, money parsing, series and returns

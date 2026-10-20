@@ -1,0 +1,62 @@
+# The runnable form of PRIVACY.md's zero-knowledge claim: a real build, the real
+# vault-only server, headless Chromium with a virtual passkey, and every request
+# the tab makes recorded and judged (e2e/egress.spec.ts). Its own workflow, so a
+# failure here reads as what it is — plaintext leaving the tab — and so the
+# browser download is cached apart from everything else.
+name: egress
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: egress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  egress:
+    name: zero-knowledge session sends only ciphertext
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The Playwright browser, keyed on the Playwright version the lockfile pins.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: browser-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install Chromium
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium's system dependencies
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # Builds dist/ and dist-server/, starts the vault-only server, drives the session.
+      - run: npm run test:egress
+
+      - name: Keep the trace and the request log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: egress-failure
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
