@@ -35,6 +35,23 @@ SERVICE="scarab"
 #
 # Idempotent — every step tolerates "already exists".
 # ---------------------------------------------------------------------------
+# A service account that was created a moment ago is not yet visible to IAM
+# everywhere: the next binding can fail with "does not exist" for some seconds.
+# Retry such a failure a few times; any other error is final.
+bind_with_retry() { # <gcloud … add-iam-policy-binding …>
+  local attempt out
+  for attempt in 1 2 3 4 5 6; do
+    if out=$("$@" 2>&1); then return 0; fi
+    if [[ $attempt -lt 6 && "$out" == *"does not exist"* ]]; then
+      echo "    (IAM hasn't seen the new service account yet — retrying in 10s)"
+      sleep 10
+    else
+      echo "$out" >&2
+      return 1
+    fi
+  done
+}
+
 setup_trust_chain() { # uses PROJECT_ID, REGION; GITHUB_REPO (owner/name) or the origin remote
   local repo="${GITHUB_REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')}"
   [[ "$repo" == */* ]] || { echo "Set GITHUB_REPO=owner/name (couldn't read it from the origin remote)" >&2; exit 1; }
@@ -55,8 +72,8 @@ setup_trust_chain() { # uses PROJECT_ID, REGION; GITHUB_REPO (owner/name) or the
   echo "==> The CI service account: may push images, nothing else"
   gcloud iam service-accounts create scarab-ci --project "$PROJECT_ID" --display-name "Scarab CI (GitHub Actions: push release images)" \
     || echo "    (service account already exists — fine)"
-  gcloud artifacts repositories add-iam-policy-binding scarab --project "$PROJECT_ID" --location "$REGION" \
-    --member "serviceAccount:${ci_sa}" --role roles/artifactregistry.writer >/dev/null
+  bind_with_retry gcloud artifacts repositories add-iam-policy-binding scarab --project "$PROJECT_ID" --location "$REGION" \
+    --member "serviceAccount:${ci_sa}" --role roles/artifactregistry.writer
 
   echo "==> Workload Identity Federation: GitHub's OIDC issuer, trusted for runs of ${repo} only"
   gcloud iam workload-identity-pools create "$pool" --project "$PROJECT_ID" --location global --display-name "GitHub Actions" \
@@ -68,9 +85,9 @@ setup_trust_chain() { # uses PROJECT_ID, REGION; GITHUB_REPO (owner/name) or the
     --attribute-condition "assertion.repository == '${repo}'" \
     || echo "    (provider already exists — fine)"
   # Only this repository's runs may become scarab-ci (a fork's runs carry a different assertion.repository).
-  gcloud iam service-accounts add-iam-policy-binding "$ci_sa" --project "$PROJECT_ID" \
+  bind_with_retry gcloud iam service-accounts add-iam-policy-binding "$ci_sa" --project "$PROJECT_ID" \
     --role roles/iam.workloadIdentityUser \
-    --member "principalSet://iam.googleapis.com/projects/${number}/locations/global/workloadIdentityPools/${pool}/attribute.repository/${repo}" >/dev/null
+    --member "principalSet://iam.googleapis.com/projects/${number}/locations/global/workloadIdentityPools/${pool}/attribute.repository/${repo}"
 
   echo "==> IAP: accept the gcloud CLI's identity tokens (for scripts/verify-served.sh; same allowlist)"
   local iap_yaml
