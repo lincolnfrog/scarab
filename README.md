@@ -57,7 +57,9 @@ origin v0.2.0`), let `.github/workflows/release.yml` build it twice, attest the
 image and the asset manifest and publish the release, then
 `./scripts/deploy.sh v0.2.0` — which verifies the attestation and deploys that
 image by digest. `./scripts/verify-served.sh` checks that the site serves the
-release's files; PRIVACY.md ("The trust root") has the whole chain. An
+release's files, and the Scarab Verify extension (`verifier/`, loaded unpacked)
+checks the same from your own browser, with your own session; PRIVACY.md
+("The trust root") has the whole chain. An
 existing install adds the CI identity once with `./scripts/bootstrap-gcp.sh
 trust-chain`.
 

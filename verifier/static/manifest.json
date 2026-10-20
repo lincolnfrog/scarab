@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Scarab Verify",
+  "version": "0.1.0",
+  "description": "Checks that the Scarab page you are looking at is the release its repository attested — from your own browser, with your own session.",
+  "minimum_chrome_version": "110",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://scarab.one/*",
+    "https://github.com/*",
+    "https://objects.githubusercontent.com/*",
+    "https://release-assets.githubusercontent.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "worker.js", "type": "module" },
+  "content_scripts": [{ "matches": ["https://scarab.one/*"], "js": ["content.js"], "run_at": "document_start" }],
+  "action": {
+    "default_title": "Scarab Verify",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+  },
+  "options_ui": { "page": "options.html", "open_in_tab": false },
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+}

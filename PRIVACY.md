@@ -481,6 +481,25 @@ auditable, and this is what exists (since 2026-10-19):
    tried to call home would be refused by the browser before a verifier
    caught it.
 
+   **From your own browser** — `verifier/` is Scarab Verify, a Chrome
+   extension (loaded unpacked from this repository, never from a store) that
+   runs the same check from the vantage point the script lacks: your tab, your
+   session. On scarab.one it records every file the page loads — the
+   document, each script, stylesheet and chunk as screens open, the fonts, the
+   wasm, the web manifest, with the byte counts the browser reports — fetches
+   `/build.json` to learn which release the site claims to be, fetches that
+   release's attested `build.json` from the GitHub release (an origin the site
+   cannot answer for), then re-fetches every recorded URL as you and hashes it
+   with its own crypto. A green check on the toolbar names the release; a red
+   cross names the files that differ or that the release does not ship; a
+   grey question mark means nothing to check against. A response tailored to
+   one person is what it exists to catch. `verifier/README.md` says what it
+   still cannot prove: the re-fetch is a second request (narrowed by
+   comparing the files and byte counts the page saw with what it re-fetched),
+   the Sigstore attestation is not checked (the GitHub release is its anchor;
+   `gh attestation verify` goes further), and it cannot tell an old attested
+   release from the current one.
+
 The exact commands, for anyone with a GitHub account and the GitHub CLI:
 
 ```
@@ -509,9 +528,11 @@ Residual risk, stated plainly:
   fetches as `scarab-verify`, not as you: a server that singled out one
   person's responses could still serve the verifier the honest files. The
   browser is the only vantage point that sees exactly what you get, so the
-  manual check in the script's header — view-source, the asset URLs, your
-  own hashing tools — is the one that catches that, and each member of the
-  household should run it now and then, and after any deploy.
+  check that catches that runs there: the Scarab Verify extension
+  (`verifier/`), or by hand the procedure in the script's header —
+  view-source, the asset URLs, your own hashing tools. Each member of the
+  household should keep the extension on, or run the check now and then and
+  after any deploy.
 - The verifier must run outside the page. A malicious bundle can patch
   `fetch`, `crypto.subtle` and the DOM from inside the tab, so a "verify"
   button in the app would prove nothing; the script fetches the origin with

@@ -11,9 +11,11 @@
     "build": "vite build && esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/index.js && node scripts/build-manifest.mjs",
     "start": "node dist-server/index.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p verifier --noEmit",
     "seed:history": "tsx scripts/build-history-pack.ts",
-    "test:egress": "playwright test -c e2e/playwright.config.ts"
+    "test:egress": "playwright test -c e2e/playwright.config.ts",
+    "build:verifier": "node verifier/build.mjs",
+    "test:verifier": "playwright test -c verifier/e2e/playwright.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

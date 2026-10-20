@@ -9,8 +9,8 @@ export default defineConfig({
     },
   },
   test: {
-    // e2e/ is Playwright's (npm run test:egress): a build, a server and a browser, not a unit test.
+    // e2e/ and verifier/e2e/ are Playwright's (npm run test:egress, test:verifier): a build, a server and a browser, not a unit test.
     // Sessions working in worktrees keep them under .claude/ (gitignored): never run their copies of the suite.
-    exclude: [...configDefaults.exclude, 'e2e/**', '.claude/**'],
+    exclude: [...configDefaults.exclude, 'e2e/**', 'verifier/e2e/**', '.claude/**'],
   },
 })
