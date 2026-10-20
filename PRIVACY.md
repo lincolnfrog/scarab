@@ -424,23 +424,85 @@ the operator can observe:
 No architecture can *prove* a server runs the code in a repository. What ZK
 mode does instead is make the server irrelevant to confidentiality — which
 moves the entire trust root to the JavaScript served to the browser. That is
-auditable, and the plan is:
+auditable, and this is what exists (since 2026-10-19):
 
-1. **Open source** — this repository.
-2. **Reproducible builds** — pinned toolchain, deterministic output, published
-   bundle hashes per release.
-3. **Build provenance attestations** — CI-signed (sigstore) statements binding
-   each deployed bundle hash to a public commit, verifiable with
-   `gh attestation verify`.
-4. **Asset manifest** — a signed list of every served file's hash, so third
-   parties (or a verifier extension, à la WhatsApp's Code Verify) can check
-   what scarab.one actually serves.
+1. **Open source** — this repository, AGPL-3.0.
+2. **Reproducible builds** — `npm run build` is deterministic (a lockfile with
+   an integrity hash for every package, no timestamps or absolute paths in the
+   output) and ends by writing `dist/build.json`: the sha256 of every served
+   file, with the commit, tag and repository it was built from
+   (`scripts/build-manifest.mjs`). The release workflow
+   (`.github/workflows/release.yml`) builds the app twice, on two runners, and
+   fails unless the two manifests are byte-identical; it then builds the
+   Docker image (`Dockerfile`, base images pinned by digest, Litestream by
+   checksum) and fails unless the manifest inside the image is that same
+   file. Every push to `main` runs all of this as a dry run.
+3. **Build provenance attestations** — on a `v*` tag the workflow pushes the
+   image to Artifact Registry through Workload Identity Federation (no key
+   exists anywhere; the CI identity can push images and nothing else), signs
+   SLSA provenance for the image digest *and* for `build.json` with Sigstore
+   (`actions/attest-build-provenance`), checks both with `gh attestation
+   verify`, and publishes a GitHub release with `build.json` attached.
+   Deploying stays a human act: `./scripts/deploy.sh vX.Y.Z` verifies that
+   the image's attestation names that tag and this workflow, then deploys by
+   digest, never by tag and never from a laptop's working tree
+   (`--source` remains only for the first deploy of a fresh project, and is
+   labelled unattested everywhere it shows).
+4. **Asset manifest, served and checkable** — the server serves `/build.json`
+   as a static file, `/api/health` reports `build.commit`, and Data & Vault
+   → Advanced → *Served code* shows the release and commit, linked to GitHub.
+   `scripts/verify-served.sh` is the check, and it runs **outside the page**:
+   it fetches scarab.one's `index.html` and `/build.json` through IAP with
+   your own identity (`gcloud auth print-identity-token`; IAP accepts the
+   gcloud client's tokens for allowlisted people — `bootstrap-gcp.sh
+   trust-chain`), verifies the release's `build.json` attestation, then
+   downloads every file that manifest lists and compares hashes — the
+   `index.html` included, so a shell that loaded any other script fails too.
+   The server also sends a Content-Security-Policy on every response
+   (`server/app.ts`): scripts, styles, fonts and every fetch from this
+   origin only, the one inline style by hash, no framing — a bundle that
+   tried to call home would be refused by the browser before a verifier
+   caught it.
 
-Residual risk, stated plainly: a malicious deployment could serve a poisoned
-bundle to a targeted user. The measures above make that detectable after the
-fact and expensive to do quietly; they cannot make it impossible. Users with
-the highest requirements should self-host (the repo deploys with two scripts)
-or run a verified local build.
+The exact commands, for anyone with a GitHub account and the GitHub CLI:
+
+```
+# The release's manifest was built by GitHub's runners from the tagged commit
+# by .github/workflows/release.yml (the attestation is public):
+gh attestation verify build.json --repo lincolnfrog/scarab
+
+# The image a deploy will run (its digest is in the release notes); deploy.sh
+# does this before every deploy:
+gh attestation verify oci://<region>-docker.pkg.dev/<project>/scarab/scarab@sha256:… --repo lincolnfrog/scarab
+
+# What scarab.one serves is that manifest, file by file (an allowlisted
+# person, with gcloud signed in):
+./scripts/verify-served.sh --tag vX.Y.Z
+
+# Or rebuild the release yourself and compare the asset hashes:
+git checkout vX.Y.Z && npm ci && npm run build && diff <(jq .assets dist/build.json) <(jq .assets build.json)
+```
+
+Residual risk, stated plainly:
+
+- A malicious deployment could still serve a poisoned bundle, to everyone or
+  to one targeted user. The chain makes that **detectable after the fact**,
+  not impossible: the poisoned response either fails the manifest check or
+  comes with a `build.json` that no public release attests. A response
+  tailored to one user is seen only by a verifier running as that user, so
+  each member of the household should run the check themselves, now and
+  then, and after any deploy.
+- The verifier must run outside the page. A malicious bundle can patch
+  `fetch`, `crypto.subtle` and the DOM from inside the tab, so a "verify"
+  button in the app would prove nothing; the script fetches the origin with
+  its own HTTP client and hashes with its own tools.
+- The attestations prove *what was built from which commit*, not that the
+  source is good. The source is the audit; the chain only makes sure the
+  audit and the deployment are about the same bytes.
+- The Node base images and npm packages are pinned by digest, not rebuilt
+  from source; Cloud Run, IAP and the browser are trusted as platforms.
+- Users with the highest requirements should self-host (the repo deploys
+  with two scripts) or run a verified local build.
 
 ## Data portability
 

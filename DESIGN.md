@@ -770,9 +770,13 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
 4. **Declare production**: the floor is rolling — v28 since 2026-10-19
    (`engine/fixtures/README.md`). It stops rising once a second household
    keeps a vault; from then on every tier-C migration ships an upgrade.
-5. **Trust chain** — open-source the repo, reproducible builds, sigstore/
-   GitHub attestations binding served bundle hashes to public commits,
-   published asset manifest (and, with it, a proper ZK-only build target).
+5. ~~**Trust chain**~~ (built 2026-10-19: reproducible `build.json` manifest
+   checked across two CI builds and the image, Sigstore attestations on the
+   image digest and the manifest, deploy by verified digest,
+   `scripts/verify-served.sh`, CSP on every response — PRIVACY.md "The trust
+   root"). Still to do: the one-time GCP setup (`bootstrap-gcp.sh
+   trust-chain`, the four repository variables) and the first `v*` tag, after
+   which deploys are attested releases; and a proper ZK-only build target.
 6. **ZK market data**: an anonymous-add path for off-universe symbols (today:
    a hand-entered price), and daily history through hashed symbol buckets
    once the monthly file has proved itself (see PRIVACY.md).

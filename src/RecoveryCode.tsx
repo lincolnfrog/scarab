@@ -13,13 +13,23 @@ const today = () => new Date().toISOString().slice(0, 10)
 export function printRecoveryCode(code: string): boolean {
   const w = window.open('', '_blank', 'width=560,height=420')
   if (!w) return false
-  w.document.write(
-    `<title>Scarab recovery code</title><body style="font-family:system-ui;padding:32px;color:#111">` +
-      `<h2 style="margin:0 0 6px">Scarab vault — recovery code</h2>` +
-      `<p style="margin:0 0 18px;color:#555">Printed ${today()}. Opens the vault without a passkey. There is no reset: keep this somewhere real.</p>` +
-      `<pre style="font:18px/1.6 ui-monospace,monospace;letter-spacing:1px;white-space:pre-wrap">${code.replace(/(.{24})-/g, '$1-\n')}</pre></body>`,
+  // The window is about:blank, so it inherits this page's Content-Security-Policy
+  // (server/app.ts), which allows no inline style markup: the page is built as
+  // elements and styled through the CSSOM, which the policy permits.
+  const d = w.document
+  const el = (tag: 'h2' | 'p' | 'pre', css: string, text: string) => {
+    const e = d.createElement(tag)
+    e.style.cssText = css
+    e.textContent = text
+    return e
+  }
+  d.title = 'Scarab recovery code'
+  d.body.style.cssText = 'font-family:system-ui;padding:32px;color:#111'
+  d.body.append(
+    el('h2', 'margin:0 0 6px', 'Scarab vault — recovery code'),
+    el('p', 'margin:0 0 18px;color:#555', `Printed ${today()}. Opens the vault without a passkey. There is no reset: keep this somewhere real.`),
+    el('pre', 'font:18px/1.6 ui-monospace,monospace;letter-spacing:1px;white-space:pre-wrap', code.replace(/(.{24})-/g, '$1-\n')),
   )
-  w.document.close()
   w.focus()
   w.print()
   return true

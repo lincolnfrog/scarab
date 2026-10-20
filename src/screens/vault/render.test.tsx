@@ -84,8 +84,24 @@ describe('Data & Vault cards', () => {
     expect(adv).toMatch(/Start a zero-knowledge session/)
     expect(adv).toMatch(/Start empty in this tab/)
     expect(adv).not.toMatch(/Rotate key/)
+    expect(adv).toMatch(/Served code Loading…/) // no /build.json answer yet
     expect(text(renderToStaticMarkup(<ui.RecoveryCard />))).toMatch(/Unlock the vault to see the code/)
     expect(text(renderToStaticMarkup(<ui.BackupsCard />))).toMatch(/Restore from an export…/)
+  })
+
+  it('served code: the release and commit the server reports, linked to the repository, with the verify hint; or that it reports none', () => {
+    const commit = 'c0ffee1234567890c0ffee1234567890c0ffee12'
+    const props = { open: true, info: null, members: null, refetching: false, basket: null, onToggle: () => {}, reload: () => {} }
+    const html = renderToStaticMarkup(<ui.AdvancedCard {...props} build={{ repo: 'https://github.com/o/r', commit, tag: 'v1.2.0' }} />)
+    expect(text(html)).toMatch(/Served code Release v1\.2\.0 · commit c0ffee1 Verify from outside the page/)
+    expect(html).toContain('href="https://github.com/o/r/releases/tag/v1.2.0"')
+    expect(html).toContain(`href="https://github.com/o/r/commit/${commit}"`)
+    expect(html).toMatch(/rel="noreferrer"/)
+    const untagged = text(renderToStaticMarkup(<ui.AdvancedCard {...props} build={{ repo: null, commit, tag: null }} />))
+    expect(untagged).toMatch(/Served code commit c0ffee1/)
+    expect(untagged).not.toMatch(/Release/)
+    const none = text(renderToStaticMarkup(<ui.AdvancedCard {...props} build={null} />))
+    expect(none).toMatch(/doesn’t say which commit it was built from/)
   })
 
   it('in a session: people with their passkeys by identity, this device marked, the owner’s actions, and the add form', async () => {

@@ -871,6 +871,8 @@ Follow-ups:
 - [ ] Continuity export: "if something happens to me" document generated from
       the ledger (accounts, institutions, recovery-key locations). Pairs with
       the two-member vault roadmap item.
-- [ ] Trust chain (DESIGN.md roadmap) treated as a headline feature of
+- [x] Trust chain (DESIGN.md roadmap) treated as a headline feature of
       scarab.one, not a chore: reproducible builds + attestations are the
-      differentiator.
+      differentiator. (2026-10-19: `build.json` manifest, two-build
+      reproducibility check, digest-pinned image attested with Sigstore,
+      deploy by verified digest, `verify-served.sh`, CSP; PRIVACY.md.)

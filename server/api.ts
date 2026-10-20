@@ -7,7 +7,7 @@ const db = rawDb as unknown as DbLike
 
 // Thin HTTP shell over engine/services — the same functions the browser's
 // local dispatcher calls. All handlers assume IAP already authenticated.
-export const api = new Hono<{ Variables: { userEmail: string } }>()
+export const api = new Hono<{ Variables: { userEmail: string; build: svc.BuildInfo | null } }>()
 
 export function handle(c: { json: (o: object, s?: number) => Response }, fn: () => unknown): Response {
   try {
@@ -18,7 +18,7 @@ export function handle(c: { json: (o: object, s?: number) => Response }, fn: () 
   }
 }
 
-api.get('/health', (c) => handle(c, () => svc.health()))
+api.get('/health', (c) => handle(c, () => svc.health(c.get('build'))))
 
 api.get('/accounts', (c) => handle(c, () => svc.listAccounts(db)))
 api.post('/accounts', async (c) => {

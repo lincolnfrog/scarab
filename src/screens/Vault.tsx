@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { localMode } from '../local'
 import { fetchMembers, fetchMode, fetchVaultInfo, follow, type Members, type VaultInfo } from '../session'
 import { prefersReducedMotion } from '../ui/motion'
-import { AdvancedCard, type BasketStatus } from './vault/Advanced'
+import { AdvancedCard, type BasketStatus, type ServedBuild } from './vault/Advanced'
 import { BackupsCard } from './vault/Backups'
 import { RecoveryCodeHost } from './vault/codeSheet'
 import { HistoryCard } from './vault/History'
@@ -18,7 +18,7 @@ import './vault/vault.css'
  * History (earlier versions the server keeps: open, compare, restore — in a
  * session with a vault), and Advanced, collapsed (the
  * stored copy and this device's memory of it, key rotation, the price basket,
- * the engine check, and the household → session switch).
+ * the engine check, the served code's commit, and the household → session switch).
  *
  * What the server holds is fetched once per visit — one download of the blob
  * (its header lists the passkeys) — and again after this tab saves a new
@@ -31,6 +31,8 @@ export default function Vault() {
   /** Whose vault the stored one is: this identity's own (null), another household's (their email), or unknown yet. */
   const [household, setHousehold] = useState<string | null | undefined>(undefined)
   const [basket, setBasket] = useState<BasketStatus | null>(null)
+  /** What the server says it serves (/build.json): undefined while loading; null when it has no manifest. */
+  const [build, setBuild] = useState<ServedBuild | null | undefined>(undefined)
   const [advanced, setAdvanced] = useState(false)
   /** The stored vault couldn't be fetched (offline, a server restarting): unknown, not "none". */
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -57,6 +59,11 @@ export default function Vault() {
       .then((r) => (r.ok ? (r.json() as Promise<BasketStatus>) : null))
       .then(setBasket)
       .catch(() => setBasket(null))
+    // A static file, not an API route, so it always comes from the server — in a session too (src/api.ts answers only /api in the tab).
+    fetch('/build.json', { cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<ServedBuild>) : null))
+      .then((b) => setBuild(b && typeof b === 'object' ? { repo: b.repo ?? null, commit: b.commit ?? null, tag: b.tag ?? null } : null))
+      .catch(() => setBuild(null))
   }, [loadMembers])
 
   useEffect(() => {
@@ -118,7 +125,7 @@ export default function Vault() {
       <BackupsCard />
       <HistoryCard />
       <div id="zk-advanced" className="c12 zk-adv-wrap">
-        <AdvancedCard open={advanced} onToggle={setAdvanced} info={info} members={members} refetching={refetching} basket={basket} reload={load} />
+        <AdvancedCard open={advanced} onToggle={setAdvanced} info={info} members={members} refetching={refetching} basket={basket} build={build} reload={load} />
       </div>
       <RecoveryCodeHost />
     </div>
