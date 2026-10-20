@@ -288,6 +288,12 @@ test('a zero-knowledge session sends only ciphertext, and only to PUT /api/vault
   const page = await context.newPage()
   const pageErrors: string[] = []
   page.on('pageerror', (e) => pageErrors.push(e.message))
+  // The Content-Security-Policy (server/app.ts) is part of the claim: a violation surfaces only as a console error,
+  // so one anywhere in the session — a blocked inline style, a script or a fetch off this origin — fails the test here.
+  const cspViolations: string[] = []
+  page.on('console', (m) => {
+    if (m.type() === 'error' && /Content Security Policy/i.test(m.text())) cspViolations.push(m.text())
+  })
   const cdp = await context.newCDPSession(page)
   const cdpSeen = await recordCdp(cdp)
   // A platform passkey with PRF, answering without a prompt — what a Mac's Touch ID or a phone does for a person.
@@ -441,6 +447,7 @@ test('a zero-knowledge session sends only ciphertext, and only to PUT /api/vault
     expect(recs.length, 'requests were recorded').toBeGreaterThan(20)
     expect(cdpSeen.length, 'CDP recorded requests too').toBeGreaterThan(20)
     expect(pageErrors, 'no uncaught errors in the page').toEqual([])
+    expect(cspViolations, 'the Content-Security-Policy refused nothing the app does').toEqual([])
 
     // (a) Same origin, and only the shell, its assets, the manifest, icons, or a vault-only route.
     const judgeUrl = (url: string): string | null => {
