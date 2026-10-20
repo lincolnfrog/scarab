@@ -125,7 +125,9 @@ fetch() { # <path> <file> — a status code on failure, no body echoed
 
 echo "Site:    $ORIGIN"
 fetch /index.html "$WORK/served/index.html" || fetch / "$WORK/served/index.html" || exit 1
-if fetch /build.json "$WORK/served/build.json"; then
+# An unknown path comes back as the SPA shell with a 200 (server/app.ts), so a server built before the trust
+# chain answers /build.json with HTML: that is "no manifest", not a parse error.
+if fetch /build.json "$WORK/served/build.json" && [[ "$(head -c1 "$WORK/served/build.json")" == "{" ]]; then
   served_commit=$(json_get .commit "$WORK/served/build.json")
   served_tag=$(json_get .tag "$WORK/served/build.json")
   echo "Serves:  commit ${served_commit:-unknown}${served_tag:+ · release $served_tag}"
