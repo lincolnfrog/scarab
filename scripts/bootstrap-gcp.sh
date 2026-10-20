@@ -26,12 +26,14 @@ SERVICE="scarab"
 # IAP: deploying stays scripts/deploy.sh on a laptop, under your own account,
 # after `gh attestation verify` has checked the image.
 #
-# It also lets IAP accept the gcloud CLI's own identity tokens, so an
-# allowlisted person can run scripts/verify-served.sh against scarab.one from
-# a terminal (IAP otherwise accepts only tokens minted for its own OAuth
-# client, which a user account can't request). This widens nothing: IAP still
-# checks the caller against the same allowlist, so only the people who can
-# open the site in a browser can fetch it from a shell.
+# It also creates scarab-verify, a service account on the IAP allowlist that
+# scripts/verify-served.sh fetches the site as. IAP in front of Cloud Run uses
+# a Google-managed OAuth client, and with one of those IAP takes no
+# programmatic clients at all (and a personal project has no organization to
+# own one) — but it accepts a service account's short-lived self-signed JWT.
+# Only an account allowed to sign as scarab-verify can use it: yours, granted
+# here on that one account. So this adds one identity that the operator
+# already is, and widens nothing.
 #
 # Idempotent — every step tolerates "already exists".
 # ---------------------------------------------------------------------------
@@ -94,19 +96,20 @@ setup_trust_chain() { # uses PROJECT_ID, REGION; GITHUB_REPO (owner/name) or the
     --role roles/iam.workloadIdentityUser \
     --member "principalSet://iam.googleapis.com/projects/${number}/locations/global/workloadIdentityPools/${pool}/attribute.repository/${repo}"
 
-  echo "==> IAP: accept the gcloud CLI's identity tokens (for scripts/verify-served.sh; same allowlist)"
-  local iap_yaml
-  iap_yaml=$(mktemp)
-  # `gcloud iap settings set` writes the fields given here; the service has no other IAP settings.
-  # 32555940559.apps.googleusercontent.com is the gcloud CLI's own OAuth client, the audience of `gcloud auth print-identity-token`.
-  cat > "$iap_yaml" <<YAML
-accessSettings:
-  oauthSettings:
-    programmaticClients:
-    - 32555940559.apps.googleusercontent.com
-YAML
-  gcloud iap settings set "$iap_yaml" --project "$PROJECT_ID" --resource-type cloud-run --service "$SERVICE" --region "$REGION" >/dev/null
-  rm -f "$iap_yaml"
+  echo "==> The verifier: scarab-verify may fetch the site through IAP, and only you may sign as it"
+  local verify_sa me
+  verify_sa="scarab-verify@${PROJECT_ID}.iam.gserviceaccount.com"
+  me=$(gcloud config get-value account 2>/dev/null)
+  [[ -n "$me" ]] || { echo "gcloud has no active account — gcloud auth login first" >&2; exit 1; }
+  gcloud iam service-accounts create scarab-verify --project "$PROJECT_ID" \
+    --display-name "Scarab verifier (fetches the site through IAP for scripts/verify-served.sh)" \
+    || echo "    (service account already exists — fine)"
+  # On the site's allowlist like a member: IAP lets it through, the app sees it as an identity like any other.
+  bind_with_retry gcloud beta iap web add-iam-policy-binding --project "$PROJECT_ID" --region "$REGION" \
+    --resource-type=cloud-run --service="$SERVICE" --member "serviceAccount:${verify_sa}" --role roles/iap.httpsResourceAccessor
+  # Signing as it (gcloud iam service-accounts sign-jwt) is granted to this one account, on this one service account.
+  bind_with_retry gcloud iam service-accounts add-iam-policy-binding "$verify_sa" --project "$PROJECT_ID" \
+    --member "user:${me}" --role roles/iam.serviceAccountTokenCreator
 
   echo "==> Recording the repository in .env.gcp"
   if [[ -f .env.gcp ]] && ! grep -q '^REPO=' .env.gcp; then echo "REPO=${repo}" >> .env.gcp; fi

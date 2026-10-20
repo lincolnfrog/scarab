@@ -7,9 +7,13 @@
 #
 # What it does, from outside the page (a bundle that lied about itself could
 # patch fetch and crypto inside the page, so the check never runs there):
-#   1. fetches the site's index.html and /build.json through IAP with your own
-#      Google identity (`gcloud auth print-identity-token`; you must be on the
-#      site's allowlist — bootstrap-gcp.sh lets IAP accept gcloud's tokens);
+#   1. fetches the site's index.html and /build.json through IAP as the
+#      verifier service account (scarab-verify, which `bootstrap-gcp.sh
+#      trust-chain` put on the site's allowlist): a short-lived JWT that gcloud
+#      signs as that account — IAP's Google-managed OAuth client takes no
+#      programmatic clients, but it accepts a service account's self-signed
+#      JWT. You must be allowed to sign as it (the bootstrap grants that to
+#      the account that ran it);
 #   2. downloads build.json from that release on GitHub and checks its Sigstore
 #      attestation with `gh attestation verify`: GitHub's runners built it from
 #      the tagged commit by .github/workflows/release.yml;
@@ -18,9 +22,11 @@
 #      other script would fail too — and prints the table.
 # Exit 0 only when every file matches. Needs curl, jq (or python3), gh, gcloud.
 #
-# Options: --no-auth (no IAP in front; a local server) · --manifest FILE (use this
-# manifest instead of the release's) · --unattested (skip step 2; only with
-# --manifest, for testing a build you made yourself) · --keep DIR (keep downloads).
+# Options: --as EMAIL (the verifier service account; default
+# scarab-verify@<PROJECT_ID>… with PROJECT_ID from .env.gcp) · --no-auth (no IAP
+# in front; a local server) · --manifest FILE (use this manifest instead of the
+# release's) · --unattested (skip step 2; only with --manifest, for testing a
+# build you made yourself) · --keep DIR (keep downloads).
 #
 # Without gcloud: sign in to the site in a browser, open view-source: on it and
 # save the page as index.html; open each /assets/… URL it references (and the
@@ -35,6 +41,11 @@ ORIGIN="https://scarab.one"
 REPO="lincolnfrog/scarab"
 TAG=""
 AUTH=1
+VERIFY_SA=""
+if [[ -f .env.gcp ]]; then
+  # shellcheck disable=SC1091
+  source .env.gcp # PROJECT_ID, for the verifier's default name
+fi
 MANIFEST=""
 ATTEST=1
 KEEP=""
@@ -43,15 +54,17 @@ while [[ $# -gt 0 ]]; do
     --origin) ORIGIN="${2%/}"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --tag) TAG="$2"; shift 2 ;;
+    --as) VERIFY_SA="$2"; shift 2 ;;
     --no-auth) AUTH=0; shift ;;
     --manifest) MANIFEST="$2"; shift 2 ;;
     --unattested) ATTEST=0; shift ;;
     --keep) KEEP="$2"; shift 2 ;;
-    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h | --help) sed -n "2,37p" "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 if [[ $ATTEST -eq 0 && -z "$MANIFEST" ]]; then echo "--unattested only makes sense with --manifest FILE" >&2; exit 2; fi
+VERIFY_SA="${VERIFY_SA:-${PROJECT_ID:+scarab-verify@${PROJECT_ID}.iam.gserviceaccount.com}}"
 
 # ---- tools ----
 need() { command -v "$1" >/dev/null || { echo "needs $1: $2" >&2; exit 1; }; }
@@ -75,24 +88,35 @@ mkdir -p "$WORK/served" "$WORK/release"
 chmod 700 "$WORK"
 
 # ---- the site, through IAP ----
-# The identity token goes into a curl config file (mode 600, deleted on exit),
+# The signed JWT goes into a curl config file (mode 600, deleted on exit),
 # never onto a command line, and is never printed.
 CURL=(curl -sS --fail-with-body --max-time 60)
 if [[ $AUTH -eq 1 ]]; then
-  need gcloud "https://cloud.google.com/sdk/docs/install, then gcloud auth login (as a person on the site's allowlist); or --no-auth for a server without IAP"
-  token=$(gcloud auth print-identity-token 2>/dev/null) || { echo "gcloud auth print-identity-token failed — gcloud auth login first" >&2; exit 1; }
+  need gcloud "https://cloud.google.com/sdk/docs/install, then gcloud auth login as the account bootstrap-gcp.sh trust-chain ran under; or --no-auth for a server without IAP"
+  [[ -n "$VERIFY_SA" ]] || { echo "Which verifier? --as scarab-verify@<project>.iam.gserviceaccount.com, or run from the checkout whose .env.gcp names the project." >&2; exit 1; }
   umask 077
-  printf 'header = "Authorization: Bearer %s"\n' "$token" > "$WORK/.curlrc"
-  unset token
+  # A self-signed service-account JWT, as IAP's programmatic-access docs describe: iss and sub are the account,
+  # aud is this origin with the path wildcard, and it is good for ten minutes (IAP allows up to an hour).
+  now=$(date +%s)
+  printf '{"iss":"%s","sub":"%s","aud":"%s/*","iat":%s,"exp":%s}\n' "$VERIFY_SA" "$VERIFY_SA" "$ORIGIN" "$now" $((now + 600)) > "$WORK/claim.json"
+  if ! gcloud iam service-accounts sign-jwt --iam-account "$VERIFY_SA" "$WORK/claim.json" "$WORK/token.jwt" >/dev/null 2> "$WORK/sign.err"; then
+    echo "Couldn't sign a JWT as ${VERIFY_SA}:" >&2
+    cat "$WORK/sign.err" >&2
+    echo "(gcloud auth login as the account that ran bootstrap-gcp.sh trust-chain, or grant this account roles/iam.serviceAccountTokenCreator on ${VERIFY_SA}.)" >&2
+    exit 1
+  fi
+  printf 'header = "Authorization: Bearer %s"\n' "$(cat "$WORK/token.jwt")" > "$WORK/.curlrc"
+  rm -f "$WORK/token.jwt" "$WORK/claim.json"
   CURL+=(--config "$WORK/.curlrc")
+  echo "As:      $VERIFY_SA (through IAP)"
 fi
 fetch() { # <path> <file> — a status code on failure, no body echoed
   local code
   code=$("${CURL[@]}" -o "$2" -w '%{http_code}' "$ORIGIN$1" 2>/dev/null) || true
   [[ "$code" == 200 ]] && return 0
   if [[ "$code" == 401 || "$code" == 302 || "$code" == 403 ]]; then
-    echo "GET $ORIGIN$1 → $code: IAP refused this identity. You must be on the site's allowlist, and IAP must accept" >&2
-    echo "gcloud's identity tokens (scripts/bootstrap-gcp.sh trust-chain sets that; the error is otherwise 'Invalid JWT audience')." >&2
+    echo "GET $ORIGIN$1 → $code: IAP refused the verifier. ${VERIFY_SA:-It} must be on the site's IAP allowlist" >&2
+    echo "(scripts/bootstrap-gcp.sh trust-chain puts it there), and the JWT's audience must be this origin (--origin)." >&2
   else
     echo "GET $ORIGIN$1 → ${code:-no response}" >&2
   fi

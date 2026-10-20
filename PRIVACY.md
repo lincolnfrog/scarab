@@ -467,10 +467,12 @@ auditable, and this is what exists (since 2026-10-19):
    as a static file, `/api/health` reports `build.commit`, and Data & Vault
    → Advanced → *Served code* shows the release and commit, linked to GitHub.
    `scripts/verify-served.sh` is the check, and it runs **outside the page**:
-   it fetches scarab.one's `index.html` and `/build.json` through IAP with
-   your own identity (`gcloud auth print-identity-token`; IAP accepts the
-   gcloud client's tokens for allowlisted people — `bootstrap-gcp.sh
-   trust-chain`), verifies the release's `build.json` attestation, then
+   it fetches scarab.one's `index.html` and `/build.json` through IAP as the
+   verifier service account (`scarab-verify`, on the IAP allowlist like a
+   member — IAP's Google-managed OAuth client takes no programmatic clients,
+   but it accepts a service account's short-lived self-signed JWT, which only
+   the operator's account may sign; `bootstrap-gcp.sh trust-chain` sets both
+   up), verifies the release's `build.json` attestation, then
    downloads every file that manifest lists and compares hashes — the
    `index.html` included, so a shell that loaded any other script fails too.
    The server also sends a Content-Security-Policy on every response
@@ -490,8 +492,8 @@ gh attestation verify build.json --repo lincolnfrog/scarab
 # does this before every deploy:
 gh attestation verify oci://<region>-docker.pkg.dev/<project>/scarab/scarab@sha256:… --repo lincolnfrog/scarab
 
-# What scarab.one serves is that manifest, file by file (an allowlisted
-# person, with gcloud signed in):
+# What scarab.one serves is that manifest, file by file (the operator, with
+# gcloud signed in as the account allowed to sign for the verifier):
 ./scripts/verify-served.sh --tag vX.Y.Z
 
 # Or rebuild the release yourself and compare the asset hashes:
@@ -503,10 +505,13 @@ Residual risk, stated plainly:
 - A malicious deployment could still serve a poisoned bundle, to everyone or
   to one targeted user. The chain makes that **detectable after the fact**,
   not impossible: the poisoned response either fails the manifest check or
-  comes with a `build.json` that no public release attests. A response
-  tailored to one user is seen only by a verifier running as that user, so
-  each member of the household should run the check themselves, now and
-  then, and after any deploy.
+  comes with a `build.json` that no public release attests. The script
+  fetches as `scarab-verify`, not as you: a server that singled out one
+  person's responses could still serve the verifier the honest files. The
+  browser is the only vantage point that sees exactly what you get, so the
+  manual check in the script's header — view-source, the asset URLs, your
+  own hashing tools — is the one that catches that, and each member of the
+  household should run it now and then, and after any deploy.
 - The verifier must run outside the page. A malicious bundle can patch
   `fetch`, `crypto.subtle` and the DOM from inside the tab, so a "verify"
   button in the app would prove nothing; the script fetches the origin with
