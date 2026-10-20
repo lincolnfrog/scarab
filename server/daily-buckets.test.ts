@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DbLike } from '../engine/db'
@@ -5,7 +6,7 @@ import { decodeDaily, encodeDaily, type DayClose } from '../engine/prices'
 import { DAILY_BUCKETS, dailyBucket } from '../shared/buckets'
 import type { DailyBucket } from '../shared/series-api'
 import { readBudget } from './crawl-budget'
-import { appendDailyQuotes, bucketResponse, dailyPending, dailyStatus, ensureDailyBuckets, loadBucket, mergeDailyQuotes, parseSparkDaily, storeBuckets } from './daily-buckets'
+import { appendDailyQuotes, BODY_CACHE_MAX, bucketResponse, cachedBodies, dailyPending, dailyStatus, ensureDailyBuckets, loadBucket, mergeDailyQuotes, parseSparkDaily, storeBuckets } from './daily-buckets'
 import { HISTORY_BATCH, type HistoryRunOptions } from './history-pack'
 import { openDb } from './migrations'
 
@@ -71,11 +72,15 @@ describe('mergeDailyQuotes / appendDailyQuotes', () => {
     expect(decodeDaily(START, f.stock.NEW!)).toEqual([{ d: '2026-10-05', c: 1_234 }])
     expect(decodeDaily(START, f.crypto.BTC!)).toEqual([{ d: '2026-10-05', c: 6_000_000 }])
     expect(f.asOf).toBe('2026-10-05')
+    // A quote stamped tomorrow in UTC (a late session) is today's close, never tomorrow's.
+    expect(mergeDailyQuotes(f, [q('VTI', '2026-10-06', 30_600)], '2026-10-05')).toBe(true)
+    expect(decodeDaily(START, f.stock.VTI!)!.at(-1)).toEqual({ d: '2026-10-05', c: 30_600 })
+    expect(f.asOf).toBe('2026-10-05')
     const before = JSON.stringify(f)
     const ignored = [
       q('VTI', '2026-09-30', 1), // a day the crawl settled
-      q('VTI', '2026-10-05', 30_500), // the same close again
-      q('VTI', '2026-10-05', 30_500, 'bond'),
+      q('VTI', '2026-10-05', 30_600), // the same close again
+      q('VTI', '2026-10-05', 30_600, 'bond'),
       q('__proto__', '2026-10-05', 5),
       q('brk.b', '2026-10-05', 5),
       q('VTI', '2026-10-05', 0),
@@ -87,6 +92,20 @@ describe('mergeDailyQuotes / appendDailyQuotes', () => {
     expect(mergeDailyQuotes(f, ignored, '2026-10-05')).toBe(false)
     expect(JSON.stringify(f)).toBe(before)
     expect(Object.getPrototypeOf(f.stock)).toBe(Object.prototype)
+  })
+
+  it('keys the head’s ETags by bucket whatever order the files are stored in, and wants the whole deal', () => {
+    const db = mem()
+    const files = Array.from({ length: DAILY_BUCKETS }, (_, b) => file(b))
+    files[5]!.stock.ONLY5 = encodeDaily(START, [{ d: '2026-10-01', c: 1 }])
+    storeBuckets(db, [...files].reverse(), '2026-10-01T12:00:00.000Z')
+    const head = JSON.parse(db.prepare("SELECT value FROM app_meta WHERE key = 'basket:daily:head'").get()!['value' as never]) as { etags: string[]; of: number }
+    expect(head.of).toBe(DAILY_BUCKETS)
+    const etagOf = (f: DailyBucket) => `"${createHash('sha256').update(JSON.stringify(f)).digest('hex').slice(0, 32)}"`
+    expect(head.etags[5]).toBe(etagOf(files[5]!))
+    expect(head.etags[0]).toBe(etagOf(files[0]!))
+    expect(loadBucket(db, 5)!.stock.ONLY5).toBeDefined()
+    for (const bad of [[], [file(0), file(0)], [file(1)], files.slice(0, 63)]) expect(() => storeBuckets(db, bad, 'x'), String(bad.length)).toThrow(/expected buckets/)
   })
 
   it('deals the basket’s quotes to their buckets, rewrites only the files that changed, and moves the head on', () => {
@@ -285,5 +304,14 @@ describe('GET /api/basket/daily/:bucket', () => {
     expect(household.headers.get('etag')).toBe(etag)
     expect(await household.json()).toEqual(files[3])
     expect(network).not.toHaveBeenCalled()
+  })
+
+  it('keeps the bodies of the most recently asked-for buckets only', async () => {
+    const zk = mod.createApp({ zkOnly: true })
+    for (let b = 0; b < DAILY_BUCKETS; b++) expect((await zk.request(`/api/basket/daily/${b}`, as('a@example.com'))).status).toBe(200)
+    expect(cachedBodies()).toBe(BODY_CACHE_MAX)
+    // Bucket 3 again: served from the store once more (its body was evicted), then cached again at the back.
+    expect((await zk.request('/api/basket/daily/3', as('a@example.com'))).status).toBe(200)
+    expect(cachedBodies()).toBe(BODY_CACHE_MAX)
   })
 })

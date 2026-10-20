@@ -312,3 +312,22 @@ describe('the daily price chart reads the hashed bucket a held symbol falls in',
     expect(bucketFetches()).toEqual([])
   })
 })
+
+describe('the vault remembers a sent basket ask', () => {
+  it('PUT /prices/asked dirties the tab once, rides the vault, and reads back; the same ask again writes nothing', async () => {
+    expect(await call('GET', '/api/prices/asked')).toEqual({})
+    events.length = 0
+    expect(await call('PUT', '/api/prices/asked', { symbol: 'VFIAX', k: 32 })).toEqual({ ok: true, symbol: 'VFIAX', on: today, k: 32 })
+    expect(local.localMode.dirty).toBe(true)
+    expect(events).toEqual(['scarab-mode', 'scarab-write'])
+    local.localMode.markSaved(2)
+    events.length = 0
+    await call('PUT', '/api/prices/asked', { symbol: 'VFIAX', k: 32 })
+    expect(local.localMode.dirty).toBe(false)
+    expect(events).toEqual([])
+    expect(await call('GET', '/api/prices/asked')).toEqual({ VFIAX: { on: today, k: 32 } })
+    const dump = await local.localDump()
+    expect(dump.tables.app_meta!.map((r) => r.key)).toEqual(['ui:basket-asks']) // household data: in the snapshot
+    await expect(call('PUT', '/api/prices/asked', { symbol: 'VFIAX', k: 1 })).rejects.toThrow(/k:/)
+  })
+})

@@ -283,63 +283,67 @@ const setMeta = (db: DbLike, key: string, value: string) =>
  * The universe is the exchange directory; a mutual fund isn't in it. A tab
  * may ask the basket to cover one — POST /api/basket/suggest (api8.ts),
  * naming the wanted fund among chaff drawn from the same population
- * (PRIVACY.md "Anonymous add") — and every symbol named is added here, to
- * `basket:extra:symbols`: a plain list of symbols with a miss count, no
- * identity and no time. The next build quotes them along with the universe;
- * one that Yahoo can't quote in EXTRA_MISSES consecutive builds (a retired
- * share class, a typo) drops out. A `basket:*` key: never in a snapshot,
- * kept by the zero-knowledge purge.
+ * (PRIVACY.md "Anonymous add") — and the request's symbols are kept
+ * together as one ask in `basket:extra:asks`: a list of asks, each a list of
+ * symbols, oldest first, with no identity and no time. Every build quotes
+ * their union with the universe. An ask's symbols stay together for as long
+ * as the ask is kept: a symbol Yahoo never quotes is NOT dropped on its own,
+ * since which of an ask's symbols survived would say which were real
+ * (quotable by construction) — the basket itself already shows that much,
+ * PRIVACY.md says so, and the server shouldn't keep a second copy of it. The
+ * list is bounded by MAX_BASKET_EXTRAS distinct symbols; past it the oldest
+ * asks go, whole. A `basket:*` key: never in a snapshot, kept by the
+ * zero-knowledge purge.
  */
-const EXTRAS_KEY = 'basket:extra:symbols'
-/** Builds in a row an extra may go unquoted before it is dropped. */
-export const EXTRA_MISSES = 3
-/** How many extras the list holds at most (≈ 125 asks of 32); past it a request is refused. */
+const ASKS_KEY = 'basket:extra:asks'
+/** How many extra symbols the list holds at most (≈ 125 asks of 32); past it the oldest asks are evicted, whole. */
 export const MAX_BASKET_EXTRAS = 4_000
 /** A symbol the list can carry: a US ticker — letters, then letters or digits, a dot or dash for a class (BRK.B); never a prototype name. */
 export const EXTRA_SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/
 
-export type BasketExtra = { symbol: string; misses: number }
-
-export function basketExtras(db: DbLike): BasketExtra[] {
-  const raw = meta(db, EXTRAS_KEY)
+/** The asks as kept: each one list of symbols, oldest ask first. */
+export function basketAsks(db: DbLike): string[][] {
+  const raw = meta(db, ASKS_KEY)
   if (!raw) return []
   try {
     const x: unknown = JSON.parse(raw)
     if (!Array.isArray(x)) return []
-    return x.filter(
-      (e): e is BasketExtra =>
-        !!e && typeof e === 'object' && typeof (e as BasketExtra).symbol === 'string' && EXTRA_SYMBOL.test((e as BasketExtra).symbol) && Number.isSafeInteger((e as BasketExtra).misses),
-    )
+    return x
+      .filter((ask): ask is string[] => Array.isArray(ask))
+      .map((ask) => ask.filter((s): s is string => typeof s === 'string' && EXTRA_SYMBOL.test(s)))
+      .filter((ask) => ask.length > 0)
   } catch {
     return []
   }
 }
 
-const writeExtras = (db: DbLike, extras: readonly BasketExtra[]) => setMeta(db, EXTRAS_KEY, JSON.stringify(extras))
-
-/**
- * Add symbols to the list (each in Yahoo spelling; a symbol already there, or
- * in the basket, is left as it is). Returns how many are new, or null when
- * the list can't take them (MAX_BASKET_EXTRAS). Records nothing else — not who
- * asked, not when.
- */
-export function addBasketExtras(db: DbLike, symbols: readonly string[]): { added: number; total: number } | null {
-  const extras = basketExtras(db)
-  const have = new Set(extras.map((e) => e.symbol))
-  const inBasket = new Set((db.prepare("SELECT symbol FROM basket_quotes WHERE kind = 'stock'").all() as { symbol: string }[]).map((r) => r.symbol))
-  const fresh = [...new Set(symbols.map(toYahooSymbol))].filter((s) => EXTRA_SYMBOL.test(s) && !have.has(s) && !inBasket.has(s))
-  if (extras.length + fresh.length > MAX_BASKET_EXTRAS) return null
-  if (fresh.length > 0) writeExtras(db, [...extras, ...fresh.map((symbol) => ({ symbol, misses: 0 }))])
-  return { added: fresh.length, total: extras.length + fresh.length }
+/** Every symbol the asks name, each once, in the order first asked. */
+export function basketExtras(db: DbLike): string[] {
+  return [...new Set(basketAsks(db).flat())]
 }
 
-/** After a build that fetched stock quotes: an extra that was quoted stays (misses reset); one that wasn't is a miss closer to dropping out. */
-function settleExtras(db: DbLike, extras: readonly BasketExtra[], quoted: ReadonlySet<string>): void {
-  if (extras.length === 0) return
-  const next = extras
-    .map((e) => (quoted.has(e.symbol) ? { symbol: e.symbol, misses: 0 } : { symbol: e.symbol, misses: e.misses + 1 }))
-    .filter((e) => e.misses < EXTRA_MISSES)
-  writeExtras(db, next)
+const writeAsks = (db: DbLike, asks: readonly (readonly string[])[]) => setMeta(db, ASKS_KEY, JSON.stringify(asks))
+
+/**
+ * Keep one ask: its symbols (each in Yahoo spelling), together. Returns how
+ * many of them the list didn't already have (nor the basket), how many
+ * symbols the list holds now, and how many older asks had to go to make
+ * room. Records nothing else — not who asked, not when.
+ */
+export function addBasketAsk(db: DbLike, symbols: readonly string[]): { added: number; total: number; evicted: number } {
+  const ask = [...new Set(symbols.map(toYahooSymbol))].filter((s) => EXTRA_SYMBOL.test(s)).slice(0, MAX_BASKET_EXTRAS)
+  const asks = basketAsks(db)
+  const inBasket = new Set((db.prepare("SELECT symbol FROM basket_quotes WHERE kind = 'stock'").all() as { symbol: string }[]).map((r) => r.symbol))
+  const known = new Set(asks.flat())
+  const added = ask.filter((s) => !known.has(s) && !inBasket.has(s)).length
+  let kept = [...asks, ask]
+  let evicted = 0
+  while (new Set(kept.flat()).size > MAX_BASKET_EXTRAS && kept.length > 1) {
+    kept = kept.slice(1)
+    evicted++
+  }
+  writeAsks(db, kept)
+  return { added, total: new Set(kept.flat()).size, evicted }
 }
 
 export function basketStatus(db: DbLike): BasketStatus {
@@ -402,9 +406,8 @@ export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<
   const t0 = Date.now()
   const { listings, errors } = await fetchUniverse(f)
   // The universe, plus the symbols the basket was asked to cover (funds the directory doesn't list).
-  const extras = basketExtras(db)
   const listed = new Set(listings.map((l) => l.symbol))
-  const symbols = [...listings.map((l) => l.symbol), ...extras.map((e) => e.symbol).filter((s) => !listed.has(s))]
+  const symbols = [...listings.map((l) => l.symbol), ...basketExtras(db).filter((s) => !listed.has(s))]
   const [stocks, crypto] = await Promise.all([
     symbols.length > 0 ? fetchStockBasket(symbols, f) : { quotes: [], errors: ['quotes: no universe, skipped'] },
     fetchCryptoBasket(f),
@@ -415,7 +418,6 @@ export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<
     const l = listing.get(q.symbol)
     return l ? { ...q, name: l.name || null, etf: l.etf } : q
   })
-  if (stocks.quotes.length > 0) settleExtras(db, extras, new Set(stocks.quotes.map((q) => q.symbol)))
   const all = [...named, ...crypto.quotes]
   const allErrors = [...errors, ...stocks.errors, ...crypto.errors]
   const builtAt = new Date().toISOString()

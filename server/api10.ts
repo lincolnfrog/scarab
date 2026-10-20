@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getChartViews, getSeries, getSeriesCatalog, parseSeriesQuery, putChartViews } from '../engine/analytics'
+import { listBasketAsks, recordBasketAsk } from '../engine/basket-asks'
 import type { DbLike } from '../engine/db'
 import { getHoldingsReturns } from '../engine/returns'
 import * as svc from '../engine/services'
@@ -91,6 +92,13 @@ api10.post('/basket/crawl', async (c) => c.json(await runCrawl(db, fetch, new Da
 // Write the history's month-end closes for this household's own assets into
 // its quote table (a tab does the same with the file it downloaded).
 api10.post('/prices/history', (c) => handle(c, () => applyServerHistory(db)))
+// The household's memory of the funds it asked the basket to cover (engine/basket-asks.ts): household data, so a
+// tab keeps it in the vault; a household server keeps it with the rest of its settings.
+api10.get('/prices/asked', (c) => handle(c, () => listBasketAsks(db)))
+api10.put('/prices/asked', async (c) => {
+  const b = (await c.req.json()) as { symbol?: unknown; k?: unknown }
+  return handle(c, () => recordBasketAsk(db, b, today()))
+})
 
 /** Start or continue the history build in the background, if one is due and allowed now. */
 function wantHistory() {

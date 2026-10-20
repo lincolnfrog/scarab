@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { DbLike } from '../engine/db'
 import { handle } from './api'
 import { householdOf, invitesFor } from './api4'
-import { addBasketExtras, basketStatus, ensureBasket, EXTRA_SYMBOL, getBasket, isBuilding, toYahooSymbol } from './basket'
+import { addBasketAsk, basketStatus, ensureBasket, EXTRA_SYMBOL, getBasket, isBuilding, toYahooSymbol } from './basket'
 import { db as rawDb } from './db'
 
 const db = rawDb as unknown as DbLike
@@ -125,14 +125,14 @@ const SUGGEST_AT = 'basket:suggest_at'
 /**
  * Ask the basket to cover symbols the exchange directory doesn't list
  * (mutual funds). The body names the wanted fund among chaff the tab drew
- * from the same population (src/invest/chaff.ts), and every symbol named is
- * added to the extras the next build quotes (./basket.ts addBasketExtras) —
- * all of them alike, so the server has nothing to pick the real one by beyond
- * the k it was given. It records no identity and no time with the symbols;
- * the one thing it keeps is when the last suggestion arrived, to take one a
- * minute at most. The answer says how many symbols were new to the list and
- * nothing about which (PRIVACY.md "Anonymous add"). On the vault-only
- * allowlist (server/zk-routes.ts).
+ * from the same population (src/invest/chaff.ts), and the request is kept as
+ * one ask, its symbols together, for the next build to quote (./basket.ts
+ * addBasketAsk) — all of them alike, so the server has nothing to pick the
+ * real one by beyond the k it was given. It records no identity and no time
+ * with the symbols; the one thing it keeps is when the last suggestion
+ * arrived, to take one a minute at most. The answer says how many symbols
+ * were new to the list and nothing about which (PRIVACY.md "Anonymous add").
+ * On the vault-only allowlist (server/zk-routes.ts).
  */
 api8.post('/basket/suggest', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { symbols?: unknown }
@@ -147,8 +147,7 @@ api8.post('/basket/suggest', async (c) => {
     c.header('retry-after', String(retryAfter))
     return c.json({ error: 'the basket took a suggestion less than a minute ago', retryAfter }, 429)
   }
-  const r = addBasketExtras(db, symbols)
-  if (!r) return c.json({ error: 'the basket is not taking more symbols for now' }, 429)
+  const r = addBasketAsk(db, symbols)
   db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(SUGGEST_AT, new Date().toISOString())
   return c.json({ ok: true, named: symbols.length, added: r.added })
 })

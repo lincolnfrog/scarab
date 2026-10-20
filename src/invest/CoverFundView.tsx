@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import type { BasketAsks } from '../../engine/basket-asks'
+import { get } from '../api'
 import { localMode } from '../local'
 import { Link, useRouteState } from '../router'
 import { Button } from '../ui/Button'
@@ -19,13 +21,18 @@ type Suggest = typeof import('./suggest')
  *
  * What it says, honestly: the request names this fund among 31 others drawn
  * from the same population, so the server learns that this household named
- * one of 32 funds, and when — not which (PRIVACY.md "Anonymous add").
+ * one of 32 funds, and when — not which (PRIVACY.md "Anonymous add"). A fund
+ * the vault remembers asking for (GET /api/prices/asked) is not offered
+ * again: a second list would name it by intersection.
  */
 export default function CoverFundView() {
   const [symbol] = useRouteState<string | null>('coverSymbol', null)
   const market = useMarketSymbols()
   const [mod, setMod] = useState<Suggest | null>(null)
   const [, bump] = useState(0)
+  // What this household has asked for already (the vault's memory), read on open and again after a send.
+  const [asked, setAsked] = useState<BasketAsks | null>(null)
+  const [askedRev, setAskedRev] = useState(0)
   useEffect(() => {
     let live = true
     import('./suggest').then((m) => live && setMod(m)).catch(() => undefined)
@@ -33,7 +40,25 @@ export default function CoverFundView() {
       live = false
     }
   }, [])
-  useEffect(() => (mod ? mod.onSuggestChange(() => bump((n) => n + 1)) : undefined), [mod])
+  useEffect(() => {
+    let live = true
+    get<BasketAsks>('/api/prices/asked')
+      .then((a) => live && setAsked(a))
+      .catch(() => live && setAsked({}))
+    return () => {
+      live = false
+    }
+  }, [askedRev])
+  useEffect(
+    () =>
+      mod
+        ? mod.onSuggestChange(() => {
+            bump((n) => n + 1)
+            if (symbol && mod.suggestState(symbol.toUpperCase())?.state === 'sent') setAskedRev((n) => n + 1)
+          })
+        : undefined,
+    [mod, symbol],
+  )
   // While an ask is scheduled, the "in about N min" line counts down (the state itself changes only when it is sent).
   const scheduled = !!symbol && mod?.suggestState(symbol.toUpperCase())?.state === 'scheduled'
   useEffect(() => {
@@ -55,8 +80,9 @@ export default function CoverFundView() {
       </DetailView>
     )
   const sym = symbol.toUpperCase()
-  const can = mod ? mod.canSuggest(sym, market) : null
   const state = mod?.suggestState(sym) ?? null
+  // Decided only once the fund list, the vault's memory and (for the ask itself) the market list are in hand.
+  const can = mod && asked ? mod.canSuggest(sym, market, state?.state === 'sent' ? { ...asked, [sym]: asked[sym] ?? { on: '', k: state.k } } : asked) : null
   const k = mod?.SUGGEST_K ?? 32
   const hasSecret = localMode.vault !== null
 
@@ -69,6 +95,15 @@ export default function CoverFundView() {
           <>
             <h2>{sym} is already in the basket</h2>
             <p className="sub2">The next price refresh quotes it; nothing to ask for. {back}</p>
+          </>
+        ) : can === 'asked' && state?.state !== 'sent' ? (
+          <>
+            <h2>{sym} was asked for{asked?.[sym]?.on ? ` on ${asked[sym]!.on}` : ''}</h2>
+            <p className="sub2">
+              This household already named it to the basket, among {Math.max(1, (asked?.[sym]?.k ?? k) - 1)} others. It gets a quote at the next daily build; the
+              hand-entered price stands until then. Asking again — from any device — would hand the server a second list, and the one fund on both would be
+              this one, so Scarab won’t. {back}
+            </p>
           </>
         ) : can === 'not-a-fund' ? (
           <>
@@ -88,15 +123,17 @@ export default function CoverFundView() {
             </p>
             <p className="sub2">
               {hasSecret
-                ? `The ${k - 1} others are drawn from your vault’s key and the symbol, so asking again — later, or from another device — names the same ${k} and tells the server nothing new.`
-                : `There is no vault yet, so the ${k - 1} others are random: ask once, and don’t ask again from another device before tomorrow, or the two lists would narrow it down.`}{' '}
-              The request is sent after a random wait of up to ten minutes, while this tab stays open.
+                ? `The ${k - 1} others are drawn from your vault’s key and the symbol over the whole fund list, so the same ask names the same ${k} — and a fund the basket has started quoting since swaps out one of them, not the lot.`
+                : `There is no vault yet, so the ${k - 1} others are random.`}{' '}
+              Once sent, the ask is remembered with your data, so neither this device nor another offers it again. The request goes out after a random
+              wait of up to ten minutes, while this tab stays open.
             </p>
             {state === null || state.state === 'failed' ? (
               <div className="formrow inv-cover-actions">
-                <Button variant="gold" busy={ask.busy} onClick={() => void ask.run()}>
+                <Button variant="gold" busy={ask.busy} disabled={market === null} onClick={() => void ask.run()}>
                   Ask for {sym} among {k - 1} others
                 </Button>
+                {market === null && <span className="sub2 muted">Waiting for the market list — the others are drawn from funds it doesn’t quote.</span>}
                 {state?.state === 'failed' && <span className="sub2 neg">Not sent: {state.error}. Try again in a minute.</span>}
               </div>
             ) : state.state === 'scheduled' ? (

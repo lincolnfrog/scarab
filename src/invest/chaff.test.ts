@@ -51,6 +51,31 @@ describe('pickChaff: the wanted fund among k−1 others from the same population
     expect(shared.length).toBeLessThan(4) // VFIAX itself, and at most a coincidence or two
   })
 
+  it('a changed exclusion — a fund the basket has started quoting — swaps out that one member and no other', async () => {
+    const base = await pickChaff({ symbol: 'VFIAX', population, exclude: new Set(['VTSAX']), secret: key(1), digest: sha256 })
+    // Excluding a symbol the draw didn't pick changes nothing.
+    const untouched = await pickChaff({ symbol: 'VFIAX', population, exclude: new Set(['VTSAX', 'ZZZZX']), secret: key(1), digest: sha256 })
+    expect(untouched).toEqual(base)
+    // Excluding one it did pick swaps exactly that member for one new one; the rest are the same 30.
+    const gone = base.find((s) => s !== 'VFIAX')!
+    const shifted = await pickChaff({ symbol: 'VFIAX', population, exclude: new Set(['VTSAX', gone]), secret: key(1), digest: sha256 })
+    expect(shifted).not.toContain(gone)
+    expect(shifted).toContain('VFIAX')
+    expect(shifted.filter((s) => base.includes(s))).toHaveLength(SUGGEST_K - 1)
+    expect(shifted.filter((s) => !base.includes(s))).toHaveLength(1)
+    // Several exclusions at once: still one-for-one.
+    const three = base.filter((s) => s !== 'VFIAX').slice(0, 3)
+    const shifted3 = await pickChaff({ symbol: 'VFIAX', population, exclude: new Set(['VTSAX', ...three]), secret: key(1), digest: sha256 })
+    expect(shifted3.filter((s) => base.includes(s))).toHaveLength(SUGGEST_K - 3)
+    for (const s of three) expect(shifted3).not.toContain(s)
+  })
+
+  it('finishes even when the numbers are stuck, by stepping along the list', async () => {
+    const stuck = await pickChaff({ symbol: 'VFIAX', population, exclude: new Set(), secret: null, random: () => 0.5 })
+    expect(stuck).toHaveLength(SUGGEST_K)
+    expect(new Set(stuck).size).toBe(SUGGEST_K)
+  })
+
   it('without a secret draws at random from the same population', async () => {
     let n = 0.001
     const random = () => (n = (n * 97 + 0.137) % 1)

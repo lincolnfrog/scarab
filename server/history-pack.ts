@@ -523,6 +523,10 @@ export function ensureHistoryPack(
 }
 
 async function runBuild(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOptions): Promise<HistoryRun> {
+  // `now` is the caller's clock; the run's own clock moves on from it, so a run that crosses midnight UTC counts its
+  // later calls against the new day (the budget is per UTC day) rather than the day it started on.
+  const started = Date.now()
+  const clock = () => new Date(now.getTime() + (Date.now() - started))
   const today = dayOf(now)
   const pace = o.paceMs ?? HISTORY_PACE_MS
   const runCalls = o.runCalls ?? HISTORY_RUN_CALLS
@@ -559,15 +563,16 @@ async function runBuild(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
     if (calls > 0) await sleep(pace)
     if (o.deadline !== undefined && Date.now() >= o.deadline) break // out of request time: the next run resumes here
     const batch = keys.slice(state.next, state.next + HISTORY_BATCH)
+    const callDay = dayOf(clock())
     calls++
-    dayUsed = noteCall(db, today)
-    const got = await fetchBatch(batch, f, today)
+    dayUsed = noteCall(db, callDay)
+    const got = await fetchBatch(batch, f, callDay)
     let found = 0
     if ('error' in got) {
       errors.push(got.error)
       if (got.blocked) {
         blocked = true
-        noteRefusal(db, today)
+        noteRefusal(db, callDay)
         break // this batch is retried by the next run
       }
     } else
@@ -586,7 +591,7 @@ async function runBuild(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
   state.errors = [...state.errors, ...errors].slice(-20)
   save()
   if (state.next < keys.length) return { calls, fetched, done: false, blocked, errors }
-  assemble(db, state, now)
+  assemble(db, state, clock())
   return { calls, fetched, done: true, blocked, errors }
 }
 

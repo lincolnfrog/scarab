@@ -3,7 +3,14 @@ import { fundTickers } from './fundTickers'
 import type { MarketSymbols } from './marketSymbols'
 import { canSuggest, onSuggestChange, resetSuggestions, scheduleSuggest, SUGGEST_DELAY_MAX_MS, SUGGEST_DELAY_MIN_MS, SUGGEST_K, suggestState } from './suggest'
 
-vi.mock('../local', () => ({ localMode: { vault: null, active: true } }))
+const recorded: { method: string; url: string; body: unknown }[] = []
+vi.mock('../local', () => ({
+  localMode: { vault: null, active: true },
+  localDispatch: async (method: string, url: string, body: unknown) => {
+    recorded.push({ method, url, body })
+    return { ok: true }
+  },
+}))
 
 const market = (stocks: string[], crypto: string[] = []): MarketSymbols => ({
   stocks: new Set(stocks),
@@ -22,6 +29,9 @@ describe('canSuggest', () => {
     expect(canSuggest('BTC', m)).toBe('in-basket')
     expect(canSuggest('ACME', m)).toBe('not-a-fund') // private stock
     expect(canSuggest('VFIAX', null)).toBe('yes') // the market list not loaded yet: the fund list decides
+    // The vault remembers a sent ask: not offered again, unless the basket has it by now.
+    expect(canSuggest('VFIAX', m, { VFIAX: { on: '2026-10-19', k: 32 } })).toBe('asked')
+    expect(canSuggest('SPY', m, { SPY: { on: '2026-10-19', k: 32 } })).toBe('in-basket')
   })
 })
 
@@ -29,6 +39,12 @@ describe('scheduleSuggest', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     resetSuggestions()
+    recorded.length = 0
+  })
+
+  it('refuses to schedule without the market list (the chaff would include symbols the basket quotes)', async () => {
+    await expect(scheduleSuggest('VFIAX', null, { send: async () => ({ added: 0 }) })).rejects.toThrow(/market list/)
+    expect(suggestState('VFIAX')).toBeNull()
   })
   afterEach(() => vi.useRealTimers())
 
@@ -59,6 +75,8 @@ describe('scheduleSuggest', () => {
     expect(sent[0]!.every((s) => fundTickers().includes(s))).toBe(true)
     expect(suggestState('VFIAX')).toEqual({ state: 'sent', symbol: 'VFIAX', k: SUGGEST_K, added: SUGGEST_K })
     expect(seen).toEqual(['scheduled', 'sending', 'sent'])
+    // Once sent, the ask is recorded in the vault through the tab's own dispatch (PUT /api/prices/asked).
+    expect(recorded).toEqual([{ method: 'PUT', url: '/api/prices/asked', body: { symbol: 'VFIAX', k: SUGGEST_K } }])
     // Sent: asking again in this tab does nothing more.
     expect((await scheduleSuggest('VFIAX', market(['SPY']), { send, random })).state).toBe('sent')
     await vi.advanceTimersByTimeAsync(SUGGEST_DELAY_MAX_MS)
@@ -70,10 +88,11 @@ describe('scheduleSuggest', () => {
     const send = vi.fn(async () => {
       throw new Error('the basket took a suggestion less than a minute ago')
     })
-    await scheduleSuggest('SWPPX', null, { send, random: () => 0 })
+    await scheduleSuggest('SWPPX', market([]), { send, random: () => 0 })
     await vi.advanceTimersByTimeAsync(SUGGEST_DELAY_MIN_MS + 1)
     expect(suggestState('SWPPX')).toEqual({ state: 'failed', symbol: 'SWPPX', k: SUGGEST_K, error: 'the basket took a suggestion less than a minute ago' })
-    const again = await scheduleSuggest('SWPPX', null, { send, random: () => 0 })
+    expect(recorded).toEqual([]) // nothing was sent, so nothing is remembered
+    const again = await scheduleSuggest('SWPPX', market([]), { send, random: () => 0 })
     expect(again.state).toBe('scheduled')
   })
 
@@ -81,7 +100,7 @@ describe('scheduleSuggest', () => {
     const t0 = Date.now()
     for (const r of [0, 0.999_999, 0.42]) {
       resetSuggestions()
-      const s = await scheduleSuggest('VBTLX', null, { send: async () => ({ added: 0 }), random: () => r, now: () => t0 })
+      const s = await scheduleSuggest('VBTLX', market([]), { send: async () => ({ added: 0 }), random: () => r, now: () => t0 })
       expect(s.state === 'scheduled' && s.at - t0).toBeGreaterThanOrEqual(SUGGEST_DELAY_MIN_MS)
       expect(s.state === 'scheduled' && s.at - t0).toBeLessThan(SUGGEST_DELAY_MAX_MS)
     }

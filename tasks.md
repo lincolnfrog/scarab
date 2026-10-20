@@ -495,11 +495,15 @@ Follow-ups (not blocking):
       `scripts/fetch-fund-tickers.mjs`), seeded from the vault's key so a
       repeat names the same 32 and the server can't precompute the draw; sent
       after a random 30 s–10 min delay; the server adds all 32 to
-      `basket:extra:symbols` with no identity or time, quotes them from the
-      next build, drops one unquotable in three builds. UI: "Ask the basket to
+      `basket:extra:asks` with no identity or time, as whole asks (never a
+      symbol dropped on its own), quotes them from the next build. The draw
+      indexes the whole list with rejection, so a basket change swaps one
+      member, not the set; a sent ask is remembered in the vault
+      (`ui:basket-asks`) so no device repeats it. UI: "Ask the basket to
       cover this fund" in the holding drawer → `#/invest/cover`. Residual,
       stated in PRIVACY.md: the server learns one-of-32 and when; popularity
-      ranking and later bucket fetches can narrow it. CITs and private stock
+      ranking, later bucket fetches, and the quotable subset visible in the
+      basket can narrow it. CITs and private stock
       stay hand-priced (no public feed). Stronger alternative on the table:
       the whole SEC list in the basket (≈3× the files and crawls).
 - [ ] Decoy daily buckets from a per-vault secret (blunts both the bucket

@@ -23,7 +23,10 @@ name: Market history
 # Schedule: a rebuild is due once a month has closed, so the first five days
 # of a month get several chances a day (a dropped or late scheduled run is
 # ordinary on GitHub); the rest of the month one a day resumes a build Yahoo
-# paused and keeps the server warm for the daily basket.
+# paused and keeps the server warm for the daily basket. GitHub disables a
+# scheduled workflow after 60 days without a commit to the repository (it
+# emails the owner first); a push, or Actions → Market history → Enable
+# workflow, turns it back on — a Run workflow by hand always works.
 #
 # Repository variables (none secret; shared with release.yml):
 #   GCP_PROJECT_ID, WIF_PROVIDER, WIF_SERVICE_ACCOUNT

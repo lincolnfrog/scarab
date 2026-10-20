@@ -16,6 +16,18 @@
  * would be exactly that lookup table). Without a vault yet there is no
  * secret: the draw is random, and the view says to ask once.
  *
+ * Each draw is an index over the WHOLE list, as bundled and sorted — never
+ * over a list filtered by what the basket quotes today. A drawn symbol that
+ * is the wanted one, one the basket already quotes (no chaff: the server has
+ * it) or one drawn before is rejected and the next draw taken. So a change in
+ * the basket between two asks — an ETF listed or delisted, a fund someone
+ * else asked for since — changes at most the members it touches, one for
+ * one, never the whole set: an earlier cut indexed a filtered list, and one
+ * extra exclusion shifted every index, leaving two asks with exactly the
+ * wanted fund in common. (A refreshed fund-tickers.txt is a new list and a
+ * new draw; the vault remembers a sent ask so it isn't repeated, src/invest/
+ * suggest.ts.)
+ *
  * Pure: the seed material comes in, the symbols go out; the digest is
  * WebCrypto's (this is the client, async is fine).
  */
@@ -60,23 +72,25 @@ export type ChaffInput = {
 export async function pickChaff(i: ChaffInput): Promise<string[]> {
   const k = i.k ?? SUGGEST_K
   const want = i.symbol.trim().toUpperCase()
-  const pool = i.population.filter((s) => s !== want && !i.exclude.has(s))
-  if (pool.length < k - 1) throw new Error(`not enough fund tickers to draw ${k - 1} others from`)
+  const list = i.population
+  const ok = (s: string | undefined): s is string => s !== undefined && s !== want && !i.exclude.has(s) && !chosen.has(s)
   const chosen = new Set<string>()
-  // A draw that lands on a symbol already chosen takes the next one along (linear probing): the draw stays
-  // deterministic, and it always finishes — however the numbers come out — once the pool can supply k−1.
-  const take = (n: number) => {
-    let at = n % pool.length
-    while (chosen.has(pool[at]!)) at = (at + 1) % pool.length
-    chosen.add(pool[at]!)
-  }
-  if (i.secret) {
-    const digest = i.digest ?? ((data: Uint8Array) => crypto.subtle.digest('SHA-256', data as BufferSource))
-    const stream = draws(i.secret, want, digest)
-    while (chosen.size < k - 1) take((await stream.next()).value as number)
-  } else {
-    const random = i.random ?? Math.random
-    while (chosen.size < k - 1) take(Math.floor(random() * pool.length))
+  if (list.filter((s) => s !== want && !i.exclude.has(s)).length < k - 1) throw new Error(`not enough fund tickers to draw ${k - 1} others from`)
+  const stream = i.secret ? draws(i.secret, want, i.digest ?? ((data: Uint8Array) => crypto.subtle.digest('SHA-256', data as BufferSource))) : null
+  const random = i.random ?? Math.random
+  // Rejection keeps the draw stable under a changed exclusion; a bound on rejections keeps it finite whatever the
+  // numbers are (a stuck random would otherwise loop): past it, the rest is taken by stepping along the list.
+  const maxDraws = 64 * k
+  let drawn = 0
+  let at = 0
+  while (chosen.size < k - 1) {
+    if (drawn < maxDraws) {
+      drawn++
+      const n = stream ? ((await stream.next()).value as number) : Math.floor(random() * list.length)
+      at = n % list.length
+    } else at = (at + 1) % list.length
+    const s = list[at]
+    if (ok(s)) chosen.add(s)
   }
   return [want, ...chosen].sort()
 }

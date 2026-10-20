@@ -672,6 +672,12 @@ falls in, never for the symbol — **`GET /api/basket/daily/:bucket`**
   then the buckets; wanting a bucket also starts or resumes the crawl on a
   server nothing schedules. Until the first crawl completes the route answers
   202 with its progress and the chart draws what the tab has.
+- **Honest scope.** Daily closes, split-adjusted as of the crawl, no
+  dividends. Between crawls the folded basket quotes are what the market
+  printed: after a split the quotes drop to the new price while the crawled
+  history before it stays unadjusted until the next monthly crawl — a cliff
+  in the chart for up to a month, the same one the monthly file has between
+  rebuilds.
 - **Not done, and why.** Decoy buckets — a tab also fetching a few fixed
   buckets it has no holding in, chosen from a secret so the server can't
   tell them apart — would blur the *k* above; they need a per-vault secret
@@ -704,27 +710,38 @@ chunk that loads only when the view opens.
   random wait of 30 seconds to ten minutes while the tab stays open — so
   the request doesn't trail the vault save that recorded the fund.
 - **Which 31.** A draw seeded from the vault's data key and the symbol
-  (SHA-256 over both, with a counter; `pickChaff`), with the basket's own
-  symbols excluded (they would be no chaff — the server has them). Secret-
-  seeded, so the server cannot run the draw for every fund and match the set
-  it received — a draw seeded from the symbol alone would be exactly that
-  lookup table. Deterministic, so asking again — tomorrow, from the other
-  member's phone — names the same 32 and gives an observer nothing to
-  intersect. Before a vault exists there is no secret: the draw is random,
-  and the view says to ask once. (A new build of the app with a refreshed
-  list changes the draw; a second ask after that is a second set.)
-- **What the server does.** It adds every symbol it was given to a plain
-  list, `basket:extra:symbols` (`server/basket.ts`), alike — no identity, no
-  time, nothing to tell the wanted one by. The next daily build quotes the
-  extras with the universe (the fund's name comes from the quote source,
-  since no directory lists it), the monthly file and the daily buckets pick
-  them up at their next crawls, and a symbol Yahoo can't quote in three
-  builds running drops out. The route refuses a request naming fewer than
-  two or more than 64 symbols, takes one request a minute from everyone
-  together (a brake that records the time of the last request and nothing
-  else), and caps the list at 4,000. Its answer says how many of the symbols
-  were new to the list, not which. `basket/suggest` is the pattern this adds
-  to the vault-only allowlist.
+  (SHA-256 over both, with a counter; `pickChaff`). Each draw is an index
+  over the whole bundled list — never over a list filtered by what the
+  basket quotes today — and a drawn symbol that is the wanted one, one the
+  basket already quotes (no chaff: the server has it) or one drawn before is
+  rejected and the next draw taken. So a change in the basket between two
+  asks — an ETF listed or delisted, a fund someone else asked for since —
+  swaps out at most the members it touches, one for one, never the whole
+  set. Secret-seeded, so the server cannot run the draw for every fund and
+  match the set it received — a draw seeded from the symbol alone would be
+  exactly that lookup table. And asked for **once**: a sent ask is recorded
+  with the household's data (`ui:basket-asks`, through
+  `PUT /api/prices/asked` in the tab, so it rides the next save), and
+  neither this device nor the other member's offers that fund again — a
+  second request with a different list would name the fund by intersection.
+  Before a vault exists there is no secret: the draw is random, and the
+  memory is the tab's until a vault is created. A refreshed
+  `fund-tickers.txt` is a new list and a new draw, which the memory covers
+  too.
+- **What the server does.** It keeps the request as one ask, its symbols
+  together, in a plain list of asks, `basket:extra:asks` (`server/basket.ts`)
+  — no identity, no time, nothing to tell the wanted one by. Every daily
+  build quotes the asks' symbols with the universe (the fund's name comes
+  from the quote source, since no directory lists it), and the monthly file
+  and the daily buckets pick them up at their next crawls. A symbol Yahoo
+  never quotes is **not** dropped on its own: which of an ask's symbols
+  survived would be a record of which were real, so an ask stays whole until
+  the list's cap (4,000 symbols) forces the oldest asks out, whole. The route
+  refuses a request naming fewer than two or more than 64 symbols and takes
+  one request a minute from everyone together (a brake that records the time
+  of the last request and nothing else). Its answer says how many of the
+  symbols were new to the list, not which. `basket/suggest` is the pattern
+  this adds to the vault-only allowlist.
 - **What the server learns — the residual, exactly.** That this identity
   named one of these 32 registered funds, and when. Not which: the request
   gives it no way to tell, and nothing it stores helps later. Two honest
@@ -737,7 +754,12 @@ chunk that loads only when the view opens.
   and a household's later requests — the basket, a bucket — are the same as
   anyone's; but the operator who saw the ask can watch for *that* fund's
   bucket being fetched by *that* identity later, which narrows 32 toward
-  one over time. (Decoy buckets, above, would blunt this too.) Every
+  one over time. (Decoy buckets, above, would blunt this too.) Third, the
+  chaff is drawn from the SEC's whole list, most of which Yahoo may not
+  quote, while the wanted fund is quotable by construction; after the next
+  build the public basket shows which of the 32 got a quote, and *that*
+  subset — not 32 — is the real set. The server keeps no second copy of it
+  (asks stay whole, above), but the basket is for everyone to read. Every
   household that holds a fund someone already asked for pays nothing: it is
   simply in the basket.
 - **The alternative, and why not now.** Putting the whole SEC list in the

@@ -114,18 +114,29 @@ function newestDay(file: DailyBucket): string {
  * never sees a head whose files aren't there.
  */
 export function storeBuckets(db: DbLike, files: readonly DailyBucket[], builtAt: string): void {
-  const jsons = files.map((f) => JSON.stringify(f))
+  // The whole deal, each bucket once and each file agreeing on how many there are: the head's ETags are keyed by
+  // bucket number, whatever order the files come in.
+  const seen = new Set(files.map((f) => f.bucket))
+  if (files.length === 0 || seen.size !== files.length || files.some((f) => f.of !== files.length || !Number.isInteger(f.bucket) || f.bucket < 0 || f.bucket >= files.length))
+    throw new Error(`storeBuckets: expected buckets 0–${files.length - 1} once each, every file with of = ${files.length}`)
+  const etags: string[] = new Array<string>(files.length)
+  const jsons = new Map<number, string>()
+  for (const f of files) {
+    const json = JSON.stringify(f)
+    jsons.set(f.bucket, json)
+    etags[f.bucket] = etagOf(json)
+  }
   const head: Head = {
     v: 1,
     of: files.length,
-    start: files[0]?.start ?? dayOf(new Date()),
-    asOf: files.reduce((m, f) => (f.asOf > m ? f.asOf : m), files[0]?.start ?? ''),
+    start: files[0]!.start,
+    asOf: files.reduce((m, f) => (f.asOf > m ? f.asOf : m), files[0]!.start),
     builtAt,
-    etags: jsons.map(etagOf),
+    etags,
   }
   db.transaction(() => {
     db.prepare(`DELETE FROM app_meta WHERE key LIKE '${FILE_PREFIX}%'`).run()
-    files.forEach((f, i) => setMeta(db, `${FILE_PREFIX}${f.bucket}`, jsons[i]!))
+    for (const [b, json] of jsons) setMeta(db, `${FILE_PREFIX}${b}`, json)
     setMeta(db, HEAD_KEY, JSON.stringify(head))
   })()
   bodies.clear()
@@ -173,8 +184,9 @@ export function dailyPending(db: DbLike, today = dayOf(new Date())): DailyPendin
  * older than the symbol's latest day is ignored (the crawl's closes are the
  * record), as is one before the file's first day or dated past tomorrow. A
  * symbol the file doesn't have yet (added to the basket since the crawl)
- * starts a series. Returns whether anything changed. The caller has already
- * dealt the quotes to this file's bucket.
+ * starts a series. A quote stamped tomorrow in UTC (a late US session) is
+ * today's close, never tomorrow's. Returns whether anything changed. The
+ * caller has already dealt the quotes to this file's bucket.
  */
 export function mergeDailyQuotes(
   file: DailyBucket,
@@ -187,16 +199,17 @@ export function mergeDailyQuotes(
     if (q.kind !== 'stock' && q.kind !== 'crypto') continue
     if (typeof q.symbol !== 'string' || !SYMBOL_OK.test(q.symbol) || !Number.isSafeInteger(q.cents) || q.cents <= 0) continue
     if (typeof q.pricedOn !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(q.pricedOn) || q.pricedOn > latest || q.pricedOn < file.start) continue
+    const day = q.pricedOn > today ? today : q.pricedOn
     const book = file[q.kind]
     const rows = (Object.hasOwn(book, q.symbol) ? decodeDaily(file.start, book[q.symbol]) : null) ?? []
     const last = rows[rows.length - 1]
-    if (last && q.pricedOn < last.d) continue
-    if (last && q.pricedOn === last.d) {
+    if (last && day < last.d) continue
+    if (last && day === last.d) {
       if (last.c === q.cents) continue
       last.c = q.cents
-    } else rows.push({ d: q.pricedOn, c: q.cents })
+    } else rows.push({ d: day, c: q.cents })
     book[q.symbol] = encodeDaily(file.start, rows)
-    if (q.pricedOn > file.asOf) file.asOf = q.pricedOn
+    if (day > file.asOf) file.asOf = day
     changed = true
   }
   return changed
@@ -243,7 +256,13 @@ export function appendDailyQuotes(
 /* ---------------- serving ---------------- */
 
 type Body = { etag: string; json: string; gz: Promise<Uint8Array<ArrayBuffer> | null> }
-/** One gzip per bucket, by bucket number, compressed off the event loop on first request (as the monthly file is). */
+/**
+ * One gzip per bucket, by bucket number, compressed off the event loop on
+ * first request (as the monthly file is) — for the BODY_CACHE_MAX buckets
+ * most recently asked for, so the cache is bounded (~0.7 MB a bucket, JSON
+ * and gzip together) rather than every bucket a session ever opened.
+ */
+export const BODY_CACHE_MAX = 16
 const bodies = new Map<number, Body>()
 const gzipAsync = promisify(gzip)
 
@@ -251,7 +270,11 @@ function bucketBody(db: DbLike, head: Head, b: number): Body | null {
   const etag = head.etags[b]
   if (!etag) return null
   const cached = bodies.get(b)
-  if (cached?.etag === etag) return cached
+  if (cached?.etag === etag) {
+    bodies.delete(b) // to the back: the most recently used
+    bodies.set(b, cached)
+    return cached
+  }
   const json = getMeta(db, `${FILE_PREFIX}${b}`)
   if (!json) return null
   const body: Body = {
@@ -266,8 +289,12 @@ function bucketBody(db: DbLike, head: Head, b: number): Body | null {
     ),
   }
   bodies.set(b, body)
+  while (bodies.size > BODY_CACHE_MAX) bodies.delete(bodies.keys().next().value!) // the least recently used
   return body
 }
+
+/** Tests only: how many buckets' bodies are cached right now. */
+export const cachedBodies = () => bodies.size
 
 /**
  * GET /api/basket/daily/:bucket: the same bytes for everyone — gzip when the
@@ -385,6 +412,9 @@ export function ensureDailyBuckets(db: DbLike, f: typeof fetch = fetch, now = ne
 }
 
 async function runCrawl(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOptions): Promise<HistoryRun> {
+  // The run's clock moves on from the caller's `now`: a run across midnight UTC counts its later calls against the new day.
+  const started = Date.now()
+  const clock = () => new Date(now.getTime() + (Date.now() - started))
   const today = dayOf(now)
   const pace = o.paceMs ?? CRAWL_PACE_MS
   const runCalls = o.runCalls ?? CRAWL_RUN_CALLS
@@ -419,15 +449,16 @@ async function runCrawl(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
     if (calls > 0) await sleep(pace)
     if (o.deadline !== undefined && Date.now() >= o.deadline) break
     const batch = keys.slice(state.next, state.next + HISTORY_BATCH)
+    const callDay = dayOf(clock())
     calls++
-    dayUsed = noteCall(db, today)
-    const got = await fetchBatch(batch, f, today)
+    dayUsed = noteCall(db, callDay)
+    const got = await fetchBatch(batch, f, callDay)
     let found = 0
     if ('error' in got) {
       errors.push(got.error)
       if (got.blocked) {
         blocked = true
-        noteRefusal(db, today)
+        noteRefusal(db, callDay)
         break
       }
     } else
@@ -446,7 +477,7 @@ async function runCrawl(db: DbLike, f: typeof fetch, now: Date, o: HistoryRunOpt
   state.errors = [...state.errors, ...errors].slice(-20)
   save()
   if (state.next < keys.length) return { calls, fetched, done: false, blocked, errors }
-  assemble(db, state, now)
+  assemble(db, state, clock())
   return { calls, fetched, done: true, blocked, errors }
 }
 

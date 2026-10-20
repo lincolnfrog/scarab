@@ -1,30 +1,39 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DbLike } from '../engine/db'
-import { addBasketExtras, basketExtras, buildBasket, EXTRA_MISSES, MAX_BASKET_EXTRAS, parseSpark } from './basket'
+import { addBasketAsk, basketAsks, basketExtras, buildBasket, MAX_BASKET_EXTRAS, parseSpark } from './basket'
 import { openDb } from './migrations'
 
 const mem = () => openDb(':memory:') as unknown as DbLike
 const appMeta = (db: DbLike) => db.prepare('SELECT key, value FROM app_meta ORDER BY key').all() as { key: string; value: string }[]
 
-describe('basket extras: the symbols the basket was asked to cover', () => {
-  it('keeps a plain list of symbols — no identity, no time — skipping what the basket already quotes, and caps it', () => {
+describe('basket extras: the asks, kept whole', () => {
+  it('keeps each ask’s symbols together — no identity, no time — and evicts the oldest asks whole when the cap forces it', () => {
     const db = mem()
     db.prepare("INSERT INTO basket_quotes (symbol, kind, cents, priced_on) VALUES ('SPY', 'stock', 1, '2026-10-02')").run()
-    expect(basketExtras(db)).toEqual([])
-    expect(addBasketExtras(db, ['VFIAX', 'vfiax', 'SPY', 'brk.b', 'SWPPX', '__proto__', 'bad symbol', 'TOOLONGTICKER'])).toEqual({ added: 3, total: 3 })
-    expect(basketExtras(db)).toEqual([{ symbol: 'VFIAX', misses: 0 }, { symbol: 'BRK-B', misses: 0 }, { symbol: 'SWPPX', misses: 0 }])
-    expect(addBasketExtras(db, ['VFIAX', 'FXAIX'])).toEqual({ added: 1, total: 4 })
+    expect(basketAsks(db)).toEqual([])
+    expect(addBasketAsk(db, ['VFIAX', 'vfiax', 'SPY', 'brk.b', 'SWPPX', '__proto__', 'bad symbol', 'TOOLONGTICKER'])).toEqual({ added: 3, total: 4, evicted: 0 })
+    expect(basketAsks(db)).toEqual([['VFIAX', 'SPY', 'BRK-B', 'SWPPX']]) // the ask as named (SPY counts as nothing new, but stays with its ask)
+    expect(basketExtras(db)).toEqual(['VFIAX', 'SPY', 'BRK-B', 'SWPPX'])
+    expect(addBasketAsk(db, ['VFIAX', 'FXAIX'])).toEqual({ added: 1, total: 5, evicted: 0 })
+    expect(basketAsks(db)).toEqual([['VFIAX', 'SPY', 'BRK-B', 'SWPPX'], ['VFIAX', 'FXAIX']])
     const rows = appMeta(db)
-    expect(rows.map((r) => r.key)).toEqual(['basket:extra:symbols'])
-    expect(rows[0]!.value).not.toMatch(/@|\d{4}-\d{2}-\d{2}T/) // nothing that looks like an email or a time
-    const many = Array.from({ length: MAX_BASKET_EXTRAS }, (_, i) => `Z${i.toString(36).toUpperCase()}`)
-    expect(addBasketExtras(db, many)).toBeNull() // past the cap: refused, nothing added
-    expect(basketExtras(db)).toHaveLength(4)
+    expect(rows.map((r) => r.key)).toEqual(['basket:extra:asks'])
+    expect(rows[0]!.value).not.toMatch(/@|\d{4}-\d{2}-\d{2}/) // nothing that looks like an email or a time
+    // The cap: asks of 32, 125 of them fill it; the next evicts the two oldest asks, whole, and the first ask's
+    // symbols go with it even though one of them (VFIAX) was also in the second — that one stays, with its ask.
+    for (let a = 0; a < 123; a++) addBasketAsk(db, Array.from({ length: 32 }, (_, i) => `Z${(a * 32 + i).toString(36).toUpperCase()}`))
+    expect(basketExtras(db)).toHaveLength(5 + 123 * 32) // 3941
+    const r = addBasketAsk(db, Array.from({ length: 64 }, (_, i) => `Y${i.toString(36).toUpperCase()}`))
+    expect(r.evicted).toBe(2)
+    expect(r.total).toBeLessThanOrEqual(MAX_BASKET_EXTRAS)
+    expect(basketAsks(db)[0]).toEqual(Array.from({ length: 32 }, (_, i) => `Z${i.toString(36).toUpperCase()}`)) // the first Z ask is now the oldest
+    expect(basketExtras(db)).not.toContain('SWPPX')
+    expect(basketExtras(db)).not.toContain('FXAIX')
   })
 
-  it('the build quotes the extras with the universe, names them from the quote source, and drops one Yahoo can’t quote after three builds', async () => {
+  it('the build quotes the extras with the universe, names them from the quote source, and keeps one Yahoo can’t quote', async () => {
     const db = mem()
-    addBasketExtras(db, ['VFIAX', 'GONEX'])
+    addBasketAsk(db, ['VFIAX', 'GONEX'])
     const asked: string[][] = []
     const f = (async (input: string | URL | Request) => {
       const url = String(input)
@@ -44,17 +53,18 @@ describe('basket extras: the symbols the basket was asked to cover', () => {
       }
       throw new Error(`unexpected ${url}`)
     }) as typeof fetch
-    const r = await buildBasket(db, f)
-    expect(r.stocks).toBe(2)
+    for (let i = 0; i < 4; i++) {
+      const r = await buildBasket(db, f)
+      expect(r.stocks).toBe(2)
+    }
     expect(asked[0]).toEqual(['AAPL', 'VFIAX', 'GONEX']) // the universe, then the extras
     const rows = db.prepare("SELECT symbol, name, etf FROM basket_quotes WHERE kind = 'stock' ORDER BY symbol").all()
     expect(rows).toEqual([
       { symbol: 'AAPL', name: 'Apple Inc.', etf: 0 },
       { symbol: 'VFIAX', name: 'Vanguard 500 Index Fund Admiral Shares', etf: 0 }, // the fund: named by Yahoo, since no directory lists it
     ])
-    expect(basketExtras(db)).toEqual([{ symbol: 'VFIAX', misses: 0 }, { symbol: 'GONEX', misses: 1 }])
-    for (let i = 1; i < EXTRA_MISSES; i++) await buildBasket(db, f)
-    expect(basketExtras(db)).toEqual([{ symbol: 'VFIAX', misses: 0 }]) // GONEX is gone
+    // GONEX is still asked for after four builds without a quote: the ask stays whole (which symbols quoted is the basket's to show, not a second record).
+    expect(basketAsks(db)).toEqual([['VFIAX', 'GONEX']])
     // A spark reply with no name leaves the quote nameless (the directory names listed symbols).
     expect(parseSpark({ spark: { result: [{ symbol: 'X', response: [{ meta: { regularMarketPrice: 1, longName: '  ' } }] }] } })[0]).not.toHaveProperty('name')
   })
@@ -91,7 +101,7 @@ describe('POST /api/basket/suggest', () => {
     const ok = await post(app, 'a@example.com', { symbols: ['VFIAX', 'SWPPX', 'FXAIX'] })
     expect(ok.status).toBe(200)
     expect(await ok.json()).toEqual({ ok: true, named: 3, added: 3 })
-    expect(basketExtras(db).map((e) => e.symbol)).toEqual(['VFIAX', 'SWPPX', 'FXAIX'])
+    expect(basketAsks(db)).toEqual([['VFIAX', 'SWPPX', 'FXAIX']])
     const stored = appMeta(db)
       .filter((r) => r.key.startsWith('basket:'))
       .map((r) => r.value)
@@ -102,6 +112,7 @@ describe('POST /api/basket/suggest', () => {
     expect(soon.status).toBe(429)
     expect(soon.headers.get('retry-after')).toMatch(/^\d+$/)
     expect(basketExtras(db)).toHaveLength(3)
+    expect(basketAsks(db)).toHaveLength(1)
     // A household server takes it too (the same list); the body cap applies before the handler.
     expect((await post(mod.createApp({ zkOnly: false }), 'max@example.com', { symbols: ['A', 'B'] })).status).toBe(429)
     expect(network).not.toHaveBeenCalled()

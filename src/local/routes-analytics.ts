@@ -1,4 +1,5 @@
 import { getChartViews, getSeries, getSeriesCatalog, parseSeriesQuery, putChartViews, type MarketHistory } from '../../engine/analytics'
+import { listBasketAsks, recordBasketAsk } from '../../engine/basket-asks'
 import { applyBasket, applyMonthlyHistory, bucketCloses, getChartData, getRecentCloses, isDailyBucket, isHistoryPack, needsMonthlyHistory, packMarket, type DayClose } from '../../engine/prices'
 import { getHoldingsReturns } from '../../engine/returns'
 import { dailyBucket, marketSymbolOf, type MarketKind } from '../../shared/buckets'
@@ -202,6 +203,11 @@ export const ANALYTICS: LocalRoute[] = [
     const market = asset ? await marketCloses(asset.kind, symbol) : null
     return getChartData(c.db, symbol, [], market)
   }),
+
+  // The funds this household asked the basket to cover: household data (it rides the vault), so a sent ask isn't
+  // repeated from another device. Recording one dirties the tab; recording it again the same day writes nothing.
+  r('GET', '/prices/asked', (c) => listBasketAsks(c.db)),
+  r('PUT', '/prices/asked', (c) => recordBasketAsk(c.db, c.body, c.today)),
 
   r('GET', '/series/catalog', async (c) => getSeriesCatalog(c.db, c.today, await marketFor())),
   r('GET', '/series', async (c) => {

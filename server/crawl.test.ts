@@ -158,6 +158,21 @@ describe('runCrawl: the build inside one request', () => {
     expect(Object.keys(loadPack(db)!.stock)).toHaveLength(99)
   })
 
+  it('a run that crosses midnight UTC counts its later calls against the new day', async () => {
+    const db = mem()
+    seedBasket(db, 99) // 5 calls
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    const lateNight = new Date('2026-10-02T23:59:58Z')
+    vi.setSystemTime(lateNight)
+    // Each Yahoo call takes a second of wall clock: the third call falls on October 3rd.
+    const { f } = fakeYahoo(() => null, () => vi.advanceTimersByTime(1_000))
+    const r = await runCrawl(db, f, lateNight, quiet())
+    expect(r.run).toMatchObject({ calls: 5, done: true })
+    const { readBudget } = await import('./crawl-budget')
+    expect(readBudget(db, '2026-10-03')).toMatchObject({ day: '2026-10-03', calls: 3 }) // not 0, and not 5 on the old day
+    expect(loadPack(db)!.asOf).toBe('2026-10-03')
+  })
+
   it('lends its request to a run someone else started, and reports it still running when the budget ends first', async () => {
     const db = mem()
     seedBasket(db, 45)

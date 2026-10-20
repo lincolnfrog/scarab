@@ -261,9 +261,11 @@ export type HistoryStatus = { ready: boolean; etag: string | null; final: string
 // `first` its close in cents, each later entry the change from the previous
 // close, and null a day without one (weekends and holidays for a stock).
 // engine/prices.ts decodeDaily reads it.
-//   - Days through the last full crawl are Yahoo's daily closes (split-adjusted,
-//     no dividends); later days are the daily basket's quotes, folded in each
-//     day; the newest is `asOf`.
+//   - Days through the last full crawl are Yahoo's daily closes (split-adjusted
+//     as of that crawl, no dividends); later days are the daily basket's quotes,
+//     folded in each day, the newest `asOf`. A split between crawls shows as a
+//     cliff — the quotes after it at the new price, the crawled days before it
+//     unadjusted — until the next monthly crawl, as with the monthly file.
 //   - Keys: Yahoo spelling for stocks (BRK-B), the bare ticker for crypto.
 export type DailySeries = (number | null)[]
 export type DailyBucket = {
