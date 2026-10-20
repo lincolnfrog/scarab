@@ -27,7 +27,16 @@ export * from './prices'
 /** Calendar-month arithmetic on ISO dates, clamping the day (shared/dates.ts); the name paychecks and tax import. */
 export const addMonths = addMonthsIso
 
-export const health = () => ({ ok: true, db: 'ready', schemaVersion: migrations.length })
+/**
+ * What the running code was built from: the provenance fields of the build
+ * manifest (dist/build.json, written by scripts/build-manifest.mjs and
+ * attested by the release workflow). Null on a server that has no manifest —
+ * a dev server, a source deploy — and in a tab, which answers its own
+ * /api/health; the tab reads /build.json from the server instead.
+ */
+export type BuildInfo = { repo: string | null; commit: string | null; tag: string | null }
+
+export const health = (build: BuildInfo | null = null) => ({ ok: true, db: 'ready', schemaVersion: migrations.length, build })
 
 /* ---------- accounts ---------- */
 

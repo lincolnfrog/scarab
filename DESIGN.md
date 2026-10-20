@@ -766,9 +766,11 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
 4. **Declare production**: freeze the first snapshot fixture and lower
    `SNAPSHOT_COMPAT.minReadable` to it (`engine/fixtures/README.md`); from
    then on every tier-C migration ships an upgrade.
-5. **Trust chain** — open-source the repo, reproducible builds, sigstore/
-   GitHub attestations binding served bundle hashes to public commits,
-   published asset manifest (and, with it, a proper ZK-only build target).
+5. ~~**Trust chain**~~ (done 2026-10-19: reproducible `build.json` manifest
+   checked across two CI builds and the image, Sigstore attestations on the
+   image digest and the manifest, deploy by verified digest,
+   `scripts/verify-served.sh`, CSP on every response — PRIVACY.md "The trust
+   root"); still open: a proper ZK-only build target.
 6. **ZK market data**: an anonymous-add path for off-universe symbols (today:
    a hand-entered price), and daily history through hashed symbol buckets
    once the monthly file has proved itself (see PRIVACY.md).

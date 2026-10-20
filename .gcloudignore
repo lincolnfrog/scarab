@@ -5,6 +5,7 @@
 .git
 .gitignore
 .claude/
+.github/
 node_modules/
 dist/
 dist-server/

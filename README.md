@@ -52,7 +52,14 @@ You → Identity-Aware Proxy → Cloud Run (this app) → SQLite ⇄ Litestream 
 3. `./scripts/bootstrap-gcp.sh <PROJECT_ID> you@… partner@…`
 4. Walk the checklist the script prints (both accounts in, third account blocked).
 
-After that, every deploy is just `./scripts/deploy.sh`.
+After that, a deploy is a release: tag a commit (`git tag v0.2.0 && git push
+origin v0.2.0`), let `.github/workflows/release.yml` build it twice, attest the
+image and the asset manifest and publish the release, then
+`./scripts/deploy.sh v0.2.0` — which verifies the attestation and deploys that
+image by digest. `./scripts/verify-served.sh` checks that the site serves the
+release's files; PRIVACY.md ("The trust root") has the whole chain. An
+existing install adds the CI identity once with `./scripts/bootstrap-gcp.sh
+trust-chain`.
 
 **Vault-only (zero-knowledge) deploy**: add `SCARAB_ZK_ONLY=1` to `.env.gcp`.
 The vault unlocks with a passkey (fingerprint/face; Chrome or Safari on

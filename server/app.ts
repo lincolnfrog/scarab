@@ -1,8 +1,10 @@
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { compress } from 'hono/compress'
+import { secureHeaders } from 'hono/secure-headers'
 import type { DbLike } from '../engine/db'
 import { migrations } from '../engine/migrations'
+import type { BuildInfo } from '../engine/services'
 import { loadDump } from '../engine/snapshot'
 import { api } from './api'
 import { api2 } from './api2'
@@ -20,8 +22,14 @@ import { detectTransfers } from './import'
 import { runRepairs } from './repairs'
 import { ZK_ROUTES } from './zk-routes'
 
-export type Variables = { userEmail: string; zkOnly: boolean }
-export type ServerOptions = { zkOnly: boolean }
+export type Variables = { userEmail: string; zkOnly: boolean; build: BuildInfo | null }
+export type ServerOptions = {
+  zkOnly: boolean
+  /** What this server was built from (server/build-info.ts); /api/health reports it. */
+  build?: BuildInfo | null
+  /** CSP hashes for index.html's inline <style> blocks (server/build-info.ts inlineStyleHashes). */
+  inlineStyleHashes?: readonly string[]
+}
 
 // The vault-only allowlist lives in its own file, one section per stream.
 export { ZK_ROUTES }
@@ -69,11 +77,47 @@ export function prepareDatabase(db: DbLike, opts: ServerOptions & { purge: boole
 export function createApp(opts: ServerOptions): Hono<{ Variables: Variables }> {
   const app = new Hono<{ Variables: Variables }>()
 
+  // Security headers on every response, the SPA shell included. The policy
+  // is the app's actual shape, nothing looser: scripts, styles, fonts, the
+  // manifest and every fetch come from this origin; the only inline style is
+  // index.html's boot block, allowed by hash (not 'unsafe-inline', and not a
+  // nonce — the HTML must stay a static file whose hash the release manifest
+  // lists); 'wasm-unsafe-eval' is the in-tab SQLite (sql.js); the favicon is a
+  // data: SVG; nothing frames the app and the app frames nothing. A served
+  // bundle that tried to call home would be refused by connect-src before it
+  // was caught by scripts/verify-served.sh.
+  app.use(
+    '*',
+    secureHeaders({
+      contentSecurityPolicy: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
+        styleSrc: ["'self'", ...(opts.inlineStyleHashes ?? [])],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        manifestSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+        frameSrc: ["'none'"],
+      },
+      xFrameOptions: 'DENY',
+      referrerPolicy: 'no-referrer',
+      // Nothing here needs a sensor, a camera or a payment handler; passkeys
+      // (publickey-credentials-get) keep their default of this origin. An empty
+      // allowlist is `camera=()` — Hono writes `false` as the invalid `none`.
+      permissionsPolicy: { camera: [], microphone: [], geolocation: [], payment: [], usb: [], bluetooth: [], serial: [], hid: [], midi: [] },
+    }),
+  )
+
   app.use('/api/*', async (c, next) => {
     const email = userEmail(c.req.header('x-goog-authenticated-user-email'))
     if (!email) return c.json({ error: 'unauthenticated' }, 401)
     c.set('userEmail', email)
     c.set('zkOnly', opts.zkOnly)
+    c.set('build', opts.build ?? null)
     if (opts.zkOnly && !ZK_ROUTES.test(c.req.path))
       return c.json({ error: 'this server is zero-knowledge only: it stores ciphertext and never handles plaintext' }, 403)
     await next()
@@ -105,7 +149,10 @@ export function createApp(opts: ServerOptions): Hono<{ Variables: Variables }> {
 
   // Built client, with SPA fallback for client-side routes. Hashed assets are
   // immutable; the HTML shell must never be cached or deploys leave users on
-  // stale bundles.
+  // stale bundles. dist/build.json — the manifest of what is served, with the
+  // commit it was built from — is served here like any other file: a static
+  // file, not an API route, so a vault-only server answers it without widening
+  // server/zk-routes.ts.
   app.use('/assets/*', async (c, next) => {
     await next()
     c.header('cache-control', 'public, max-age=31536000, immutable')

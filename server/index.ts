@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { serve } from '@hono/node-server'
 import type { DbLike } from '../engine/db'
 import { createApp, prepareDatabase } from './app'
+import { readBuildInfo, readInlineStyleHashes } from './build-info'
 import { db, schemaVersion } from './db'
 import { seedHistoryPack } from './history-pack'
 
@@ -21,8 +22,14 @@ if (existsSync(SEED)) {
   console.log(`market history seed (${SEED}): ${r === 'seeded' ? 'stored' : r === 'kept' ? 'stored file is as new or newer; kept it' : 'unreadable, ignored'}`)
 }
 
-const app = createApp({ zkOnly })
+// What is being served: the build manifest's provenance (dist/build.json) for
+// /api/health and the Data & Vault screen, and the hashes of index.html's
+// inline style blocks for the Content-Security-Policy. Both are read once, here.
+const DIST = './dist'
+const build = readBuildInfo(DIST)
+const app = createApp({ zkOnly, build, inlineStyleHashes: readInlineStyleHashes(DIST) })
 const port = Number(process.env.PORT ?? 8787)
 serve({ fetch: app.fetch, port }, () => {
-  console.log(`scarab listening on :${port} (db schema v${schemaVersion}, ${zkOnly ? 'zero-knowledge only' : 'household mode'})`)
+  const built = build?.commit ? `commit ${build.commit.slice(0, 7)}${build.tag ? ` · ${build.tag}` : ''}` : 'no build manifest'
+  console.log(`scarab listening on :${port} (db schema v${schemaVersion}, ${zkOnly ? 'zero-knowledge only' : 'household mode'}, ${built})`)
 })

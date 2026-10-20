@@ -15,13 +15,16 @@ import { SeenLine } from './SeenLine'
 import './vault.css'
 
 export type BasketStatus = { builtAt: string | null; count: number; errors: string[]; building: boolean }
+/** The provenance of what the server serves — /build.json's repo, commit and tag (scripts/build-manifest.mjs). */
+export type ServedBuild = { repo: string | null; commit: string | null; tag: string | null }
 
 const today = () => new Date().toISOString().slice(0, 10)
 
 /**
  * The Advanced card, collapsed by default: the stored copy and this device's
  * memory of it, rotating the key, the price basket, the engine parity check,
- * and — in household mode — the ways into a zero-knowledge session.
+ * the served code's commit, and — in household mode — the ways into a
+ * zero-knowledge session.
  */
 export function AdvancedCard(p: {
   open: boolean
@@ -31,6 +34,8 @@ export function AdvancedCard(p: {
   members: Members | null
   refetching: boolean
   basket: BasketStatus | null
+  /** What the server serves (/build.json): undefined while loading, null when it has no manifest. */
+  build?: ServedBuild | null
   reload: () => void
 }) {
   const local = localMode.active
@@ -138,7 +143,7 @@ export function AdvancedCard(p: {
     <details className="card zk-card zk-adv" open={p.open} onToggle={(e) => p.onToggle((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className="zk-adv-sum">
         <h2>Advanced</h2>
-        <span className="muted">this device’s memory of the vault · key rotation · price basket · engine check{!local ? ' · start a session' : ''}</span>
+        <span className="muted">this device’s memory of the vault · key rotation · price basket · engine check · served code{!local ? ' · start a session' : ''}</span>
       </summary>
 
       <div className="zk-adv-grid">
@@ -208,6 +213,8 @@ export function AdvancedCard(p: {
           )}
         </div>
 
+        <ServedCode build={p.build} />
+
         {!local && (
           <div className="zk-adv-sec">
             <h3 className="zk-h3">Start a zero-knowledge session</h3>
@@ -227,5 +234,49 @@ export function AdvancedCard(p: {
         )}
       </div>
     </details>
+  )
+}
+
+/**
+ * Which commit the JavaScript running this page was built from, as the server
+ * reports it (/build.json — the manifest the build writes and the release
+ * workflow attests), with the way to check it. The check has to run outside
+ * the page: a bundle that lied about itself could patch fetch and crypto
+ * here, so PRIVACY.md's verifier is a script against the origin, not a button.
+ */
+function ServedCode(p: { build: ServedBuild | null | undefined }) {
+  const b = p.build
+  const ext = { target: '_blank', rel: 'noreferrer', className: 'zk-link zk-link-inline' } as const
+  return (
+    <div className="zk-adv-sec">
+      <h3 className="zk-h3">Served code</h3>
+      {b === undefined ? (
+        <p className="sub2">Loading…</p>
+      ) : !b?.commit ? (
+        <p className="sub2">This server doesn’t say which commit it was built from — a development server, or a deploy from source rather than a release.</p>
+      ) : (
+        <>
+          <p className="sub2">
+            {b.tag ? (
+              <>
+                Release {b.repo ? <a {...ext} href={`${b.repo}/releases/tag/${b.tag}`}>{b.tag}</a> : b.tag} ·{' '}
+              </>
+            ) : null}
+            commit{' '}
+            {b.repo ? (
+              <a {...ext} href={`${b.repo}/commit/${b.commit}`}>
+                <span className="num">{b.commit.slice(0, 7)}</span>
+              </a>
+            ) : (
+              <span className="num">{b.commit.slice(0, 7)}</span>
+            )}
+          </p>
+          <p className="sub2 muted">
+            Verify from outside the page: <span className="num">scripts/verify-served.sh</span> in the repository hashes every file this origin
+            serves against the release’s attested manifest (<span className="num">/build.json</span>).
+          </p>
+        </>
+      )}
+    </div>
   )
 }

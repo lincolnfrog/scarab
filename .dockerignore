@@ -8,3 +8,4 @@ dist-server
 .env.*
 .git
 seed/.build.db*
+.github
