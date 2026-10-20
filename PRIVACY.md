@@ -486,19 +486,28 @@ auditable, and this is what exists (since 2026-10-19):
    runs the same check from the vantage point the script lacks: your tab, your
    session. On scarab.one it records every file the page loads — the
    document, each script, stylesheet and chunk as screens open, the fonts, the
-   wasm, the web manifest, with the byte counts the browser reports — fetches
-   `/build.json` to learn which release the site claims to be, fetches that
-   release's attested `build.json` from the GitHub release (an origin the site
-   cannot answer for), then re-fetches every recorded URL as you and hashes it
-   with its own crypto. A green check on the toolbar names the release; a red
-   cross names the files that differ or that the release does not ship; a
-   grey question mark means nothing to check against. A response tailored to
-   one person is what it exists to catch. `verifier/README.md` says what it
-   still cannot prove: the re-fetch is a second request (narrowed by
-   comparing the files and byte counts the page saw with what it re-fetched),
-   the Sigstore attestation is not checked (the GitHub release is its anchor;
-   `gh attestation verify` goes further), and it cannot tell an old attested
-   release from the current one.
+   wasm, the web manifest, with the byte counts the browser reports — reads
+   the release tag from the site's `/build.json`, fetches that release's
+   attested `build.json` from **this repository's GitHub release, an address
+   fixed in the extension's code** (the site names a repository too, and it is
+   ignored: a server that chose its own trust anchor could point at a fork
+   whose release lists the hashes of whatever it serves), then re-fetches
+   every recorded URL as you and hashes it with its own crypto. A green check
+   on the toolbar names the release; a red cross names the files that differ
+   or that the release does not ship; a grey question mark means nothing to
+   check against; a site naming another repository gets a warning. What it
+   proves is that what the site serves *right now*, to a request carrying your
+   cookies from your browser, is the attested release — which catches a
+   deployment that targets one person by identity, the gap the service-account
+   script has. `verifier/README.md` says what it still cannot prove: its
+   re-fetch is a second request that the browser marks as an extension's
+   (`Sec-Fetch-Site: none`, no referrer), so a server keyed on those headers
+   rather than on identity could answer it honestly; the byte-count comparison
+   with what the page saw narrows that only weakly; the check is retrospective
+   (a chunk has run by the time the badge turns red); the Sigstore attestation
+   is not checked (the GitHub release is its anchor; `gh attestation verify`
+   goes further); and it cannot tell an old attested release from the current
+   one.
 
 The exact commands, for anyone with a GitHub account and the GitHub CLI:
 

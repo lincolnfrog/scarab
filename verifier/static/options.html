@@ -11,15 +11,21 @@
     <main>
       <p class="muted">
         On each of these sites the extension records what the page loads, re-fetches each file as you, and compares the hashes with
-        the manifest attached to the release the site says it serves.
+        the manifest attached to the release the site says it serves — a release of the repository configured here, never one the
+        site names. scarab.one's repository is fixed in the extension.
       </p>
       <ul id="origins"></ul>
       <form id="add">
         <label>Self-hosted Scarab <input id="origin" type="url" placeholder="https://scarab.example" required /></label>
         <label>
-          Attested manifests (optional)
+          Its GitHub repository
+          <input id="repo" type="text" placeholder="https://github.com/you/scarab" />
+          <small class="muted">The releases there carry the attested <code>build.json</code>; the release checked is the one the site names.</small>
+        </label>
+        <label>
+          Or the attested manifests' address
           <input id="manifest" type="text" placeholder="https://releases.example/{tag}/build.json" />
-          <small class="muted">Leave empty for the GitHub release of the repository the site names. <code>{tag}</code> is the release tag.</small>
+          <small class="muted">For releases that are not on GitHub. <code>{tag}</code> is the release tag.</small>
         </label>
         <button type="submit">Add</button>
       </form>

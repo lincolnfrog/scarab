@@ -1,20 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BUILT_IN,
+  PINNED_REPO,
   assetPath,
   describeFetchFailure,
+  isAppDocument,
   isBuildResource,
   judgeFile,
   manifestUrl,
   normalizeOrigin,
+  normalizeRepo,
   parseBuildInfo,
   parseManifest,
   releaseNotes,
+  releaseWarnings,
   settingFor,
   unchecked,
   verdict,
   withDefaults,
   type FileResult,
   type Manifest,
+  type OriginSetting,
 } from './verify'
 
 const ORIGIN = 'https://scarab.one'
@@ -72,26 +78,49 @@ describe('parseBuildInfo (what the site says it serves)', () => {
   })
 })
 
-describe('manifestUrl (where the attested copy is)', () => {
-  const served = { repo: 'https://github.com/lincolnfrog/scarab', commit: COMMIT, tag: 'v0.1.0' }
-  it('is the GitHub release asset by default', () => {
-    expect(manifestUrl(served, null)).toEqual({ url: 'https://github.com/lincolnfrog/scarab/releases/download/v0.1.0/build.json' })
+describe('manifestUrl (where the attested copy is: the setting says, never the site)', () => {
+  const served = { repo: PINNED_REPO, commit: COMMIT, tag: 'v0.1.0' }
+  const PINNED_URL = 'https://github.com/lincolnfrog/scarab/releases/download/v0.1.0/build.json'
+  it('is the configured repository\'s release asset for the tag the site names', () => {
+    expect(manifestUrl(served, BUILT_IN)).toEqual({ url: PINNED_URL })
+    expect(manifestUrl(served, { origin: 'https://my.example', repo: 'https://github.com/me/scarab', manifest: null })).toEqual({
+      url: 'https://github.com/me/scarab/releases/download/v0.1.0/build.json',
+    })
   })
-  it('fills {tag} into a configured address, encoded', () => {
-    expect(manifestUrl({ ...served, tag: 'v1/rc 1' }, 'https://releases.example/{tag}/build.json')).toEqual({ url: 'https://releases.example/v1%2Frc%201/build.json' })
-    expect(manifestUrl(served, 'https://releases.example/build.json')).toEqual({ url: 'https://releases.example/build.json' })
+  it('does not follow the repository the site names: a fork whose release lists a poisoned bundle is not a trust anchor', () => {
+    expect(manifestUrl({ ...served, repo: 'https://github.com/attacker/scarab' }, BUILT_IN)).toEqual({ url: PINNED_URL })
+    expect(manifestUrl({ ...served, repo: 'https://evil.example/x' }, BUILT_IN)).toEqual({ url: PINNED_URL })
+    expect(manifestUrl({ ...served, repo: null }, BUILT_IN)).toEqual({ url: PINNED_URL })
+  })
+  it('fills {tag} into a configured address, encoded; the address wins over the repository', () => {
+    const at = (manifest: string, repo: string | null = null): OriginSetting => ({ origin: 'https://my.example', repo, manifest })
+    expect(manifestUrl({ ...served, tag: 'v1/rc 1' }, at('https://releases.example/{tag}/build.json'))).toEqual({ url: 'https://releases.example/v1%2Frc%201/build.json' })
+    expect(manifestUrl(served, at('https://releases.example/build.json'))).toEqual({ url: 'https://releases.example/build.json' })
+    expect(manifestUrl(served, at('https://releases.example/{tag}/build.json', 'https://github.com/me/scarab'))).toEqual({ url: 'https://releases.example/v0.1.0/build.json' })
   })
   it('cannot name a release when the site does not', () => {
-    const r = manifestUrl({ ...served, tag: null }, null)
+    const r = manifestUrl({ ...served, tag: null }, BUILT_IN)
     expect('reason' in r && r.reason).toMatch(/no release/)
-    const t = manifestUrl({ ...served, tag: null }, 'https://releases.example/{tag}/build.json')
+    const t = manifestUrl({ ...served, tag: null }, { origin: 'https://my.example', repo: null, manifest: 'https://releases.example/{tag}/build.json' })
     expect('reason' in t && t.reason).toMatch(/no release/)
   })
-  it('needs a configured address when the repository is not on GitHub', () => {
-    expect('reason' in manifestUrl({ ...served, repo: 'https://gitea.example/me/scarab' }, null)).toBe(true)
-    expect('reason' in manifestUrl({ ...served, repo: null }, null)).toBe(true)
-    expect('reason' in manifestUrl({ ...served, repo: 'https://github.com/evil' }, null)).toBe(true)
-    expect('reason' in manifestUrl({ ...served, repo: 'https://github.com/a/b/c' }, null)).toBe(true)
+  it('needs a source for a self-hosted origin', () => {
+    const r = manifestUrl(served, { origin: 'https://my.example', repo: null, manifest: null })
+    expect('reason' in r && r.reason).toMatch(/settings/)
+  })
+})
+
+describe('releaseWarnings (the site naming another repository)', () => {
+  it('warns when the site says it was built elsewhere than the configured repository', () => {
+    const w = releaseWarnings({ repo: 'https://github.com/attacker/scarab', commit: COMMIT, tag: 'v0.1.0' }, BUILT_IN)
+    expect(w).toHaveLength(1)
+    expect(w[0]).toContain('attacker/scarab')
+    expect(w[0]).toContain(PINNED_REPO)
+  })
+  it('says nothing when they agree, when the site names none, or when the origin is checked by address only', () => {
+    expect(releaseWarnings({ repo: PINNED_REPO, commit: COMMIT, tag: 'v0.1.0' }, BUILT_IN)).toEqual([])
+    expect(releaseWarnings({ repo: null, commit: COMMIT, tag: 'v0.1.0' }, BUILT_IN)).toEqual([])
+    expect(releaseWarnings({ repo: 'https://github.com/attacker/scarab', commit: COMMIT, tag: 'v0.1.0' }, { origin: 'https://my.example', repo: null, manifest: 'https://m.example/{tag}' })).toEqual([])
   })
 })
 
@@ -112,6 +141,15 @@ describe('isBuildResource / assetPath (URL → path under dist/)', () => {
   it('ignores the fragment and keeps an SPA route distinct from the shell', () => {
     expect(assetPath('https://scarab.one/#/invest', ORIGIN)).toBe('index.html')
     expect(assetPath('https://scarab.one/somewhere', ORIGIN)).toBe('somewhere') // not in the manifest: the server's fallback shell is "missing", not the shell
+  })
+  it('knows the app\'s own page from a page of the server', () => {
+    expect(isAppDocument('https://scarab.one/', ORIGIN)).toBe(true)
+    expect(isAppDocument('https://scarab.one/#/invest', ORIGIN)).toBe(true)
+    expect(isAppDocument('https://scarab.one/index.html', ORIGIN)).toBe(true)
+    expect(isAppDocument('https://scarab.one/api/health', ORIGIN)).toBe(false)
+    expect(isAppDocument('https://scarab.one/build.json', ORIGIN)).toBe(false)
+    expect(isAppDocument('https://scarab.one/icons/icon-192.png', ORIGIN)).toBe(false)
+    expect(isAppDocument('https://evil.example/', ORIGIN)).toBe(false)
   })
   it('is null off the origin', () => {
     expect(assetPath('https://evil.example/assets/x.js', ORIGIN)).toBeNull()
@@ -173,23 +211,30 @@ describe('judgeFile', () => {
 describe('verdict', () => {
   const ok = (path: string): FileResult => ({ url: `${ORIGIN}/${path}`, path, status: 'ok', observedSize: 1, fetchedSize: 1, sha256: h('1'), expected: h('1'), note: null })
   const as = (status: FileResult['status'], path = 'assets/x.js'): FileResult => ({ ...ok(path), status })
-  it('ok only when every file is', () => {
-    expect(verdict([ok('index.html'), ok('assets/a.js')], true)).toBe('ok')
+  it('ok only when every file is, and the document has loaded', () => {
+    expect(verdict([ok('index.html'), ok('assets/a.js')], true, true)).toBe('ok')
   })
-  it('fails on any failing file, even when others could not be checked', () => {
-    expect(verdict([ok('index.html'), as('mismatch')], true)).toBe('fail')
-    expect(verdict([ok('index.html'), as('not-in-manifest')], true)).toBe('fail')
-    expect(verdict([ok('index.html'), as('shell')], true)).toBe('fail')
-    expect(verdict([ok('index.html'), as('size-differs'), as('unreachable', 'assets/y.js')], true)).toBe('fail')
+  it('is still checking before the document has loaded, however the files look: the shell alone proves nothing about its chunks', () => {
+    expect(verdict([ok('index.html')], true, false)).toBe('checking')
+    expect(verdict([ok('index.html'), ok('assets/a.js'), ok('assets/b.css')], true, false)).toBe('checking')
+    expect(verdict([ok('index.html'), as('unreachable')], true, false)).toBe('checking')
+  })
+  it('fails on any failing file, loaded or not, even when others could not be checked', () => {
+    expect(verdict([ok('index.html'), as('mismatch')], true, true)).toBe('fail')
+    expect(verdict([ok('index.html'), as('mismatch')], true, false)).toBe('fail')
+    expect(verdict([ok('index.html'), as('not-in-manifest')], true, true)).toBe('fail')
+    expect(verdict([ok('index.html'), as('shell')], true, true)).toBe('fail')
+    expect(verdict([ok('index.html'), as('size-differs'), as('unreachable', 'assets/y.js')], true, true)).toBe('fail')
   })
   it('is unverifiable without a manifest, or when a file could not be re-fetched', () => {
-    expect(verdict([unchecked(`${ORIGIN}/`, 'index.html', 700)], false)).toBe('unverifiable')
-    expect(verdict([], false)).toBe('unverifiable')
-    expect(verdict([ok('index.html'), as('unreachable')], true)).toBe('unverifiable')
+    expect(verdict([unchecked(`${ORIGIN}/`, 'index.html', 700)], false, true)).toBe('unverifiable')
+    expect(verdict([unchecked(`${ORIGIN}/`, 'index.html', 700)], false, false)).toBe('unverifiable')
+    expect(verdict([], false, true)).toBe('unverifiable')
+    expect(verdict([ok('index.html'), as('unreachable')], true, true)).toBe('unverifiable')
   })
   it('is still checking with nothing judged yet', () => {
-    expect(verdict([], true)).toBe('checking')
-    expect(verdict([ok('index.html'), as('unchecked')], true)).toBe('checking')
+    expect(verdict([], true, true)).toBe('checking')
+    expect(verdict([ok('index.html'), as('unchecked')], true, true)).toBe('checking')
   })
 })
 
@@ -216,18 +261,44 @@ describe('settings', () => {
     expect(normalizeOrigin('ftp://x')).toBeNull()
     expect(normalizeOrigin('chrome://extensions')).toBeNull()
   })
-  it('always includes scarab.one and keeps well-formed stored origins', () => {
-    expect(withDefaults(undefined)).toEqual([{ origin: 'https://scarab.one', manifest: null }])
-    expect(withDefaults([{ origin: 'https://my.example', manifest: 'https://my.example/releases/{tag}/build.json' }, { origin: 'nope' }, 7, { origin: 'https://a.example/path' }])).toEqual([
-      { origin: 'https://scarab.one', manifest: null },
-      { origin: 'https://my.example', manifest: 'https://my.example/releases/{tag}/build.json' },
+  it('normalizes a GitHub repository, and nothing else', () => {
+    expect(normalizeRepo('https://github.com/me/scarab')).toBe('https://github.com/me/scarab')
+    expect(normalizeRepo(' https://github.com/me/scarab.git/ ')).toBe('https://github.com/me/scarab')
+    expect(normalizeRepo('https://github.com/me/scarab/releases')).toBeNull()
+    expect(normalizeRepo('https://github.com/me')).toBeNull()
+    expect(normalizeRepo('http://github.com/me/scarab')).toBeNull()
+    expect(normalizeRepo('https://gitea.example/me/scarab')).toBeNull()
+    expect(normalizeRepo('me/scarab')).toBeNull()
+  })
+  it('always starts with scarab.one pinned to its repository, whatever is stored for it', () => {
+    expect(withDefaults(undefined)).toEqual([BUILT_IN])
+    expect(BUILT_IN).toEqual({ origin: 'https://scarab.one', repo: PINNED_REPO, manifest: null })
+    // a stored entry for scarab.one cannot move its trust anchor: it is ignored, not merged
+    expect(withDefaults([{ origin: 'https://scarab.one', repo: 'https://github.com/attacker/scarab', manifest: null }])).toEqual([BUILT_IN])
+    expect(withDefaults([{ origin: 'https://scarab.one', repo: null, manifest: 'https://m.example/{tag}' }])).toEqual([BUILT_IN])
+  })
+  it('keeps well-formed stored origins that have a source, and drops the rest', () => {
+    expect(
+      withDefaults([
+        { origin: 'https://my.example', repo: 'https://github.com/me/scarab', manifest: null },
+        { origin: 'https://other.example', repo: null, manifest: 'https://other.example/releases/{tag}/build.json' },
+        { origin: 'https://both.example', repo: 'https://github.com/me/scarab', manifest: 'https://m.example/{tag}' },
+        { origin: 'https://none.example', repo: null, manifest: null }, // no source: nothing to check against
+        { origin: 'https://bad.example', repo: 'https://gitea.example/me/scarab', manifest: null }, // not a GitHub repository
+        { origin: 'nope', repo: 'https://github.com/me/scarab' },
+        7,
+        { origin: 'https://a.example/path', repo: 'https://github.com/me/scarab' },
+      ]),
+    ).toEqual([
+      BUILT_IN,
+      { origin: 'https://my.example', repo: 'https://github.com/me/scarab', manifest: null },
+      { origin: 'https://other.example', repo: null, manifest: 'https://other.example/releases/{tag}/build.json' },
+      { origin: 'https://both.example', repo: 'https://github.com/me/scarab', manifest: 'https://m.example/{tag}' },
     ])
-    // a stored entry for scarab.one may add a manifest address, not a second entry
-    expect(withDefaults([{ origin: 'https://scarab.one', manifest: 'https://m.example/{tag}' }])).toEqual([{ origin: 'https://scarab.one', manifest: 'https://m.example/{tag}' }])
   })
   it('finds the setting a page URL belongs to', () => {
-    const origins = withDefaults([{ origin: 'http://localhost:8787', manifest: null }])
-    expect(settingFor('https://scarab.one/#/invest', origins)?.origin).toBe('https://scarab.one')
+    const origins = withDefaults([{ origin: 'http://localhost:8787', repo: 'https://github.com/me/scarab', manifest: null }])
+    expect(settingFor('https://scarab.one/#/invest', origins)).toBe(BUILT_IN)
     expect(settingFor('http://localhost:8787/', origins)?.origin).toBe('http://localhost:8787')
     expect(settingFor('http://localhost:8788/', origins)).toBeNull()
     expect(settingFor('https://evil.example/', origins)).toBeNull()

@@ -14,23 +14,34 @@
 export type BuildInfo = { repo: string | null; commit: string | null; tag: string | null }
 export type Manifest = BuildInfo & { assets: Record<string, string> }
 
-/** Where a page's documents and files come from, with an optional address for the attested manifest. */
+/**
+ * An origin to check and where its attested manifests come from. The source
+ * is never read from the site: a server that could name its own trust anchor
+ * (a fork whose release lists the hashes of the bundle it serves) would make
+ * the check worthless. For scarab.one it is fixed in this file; for a
+ * self-hosted site the user types it when adding the origin.
+ */
 export type OriginSetting = {
   /** `https://host[:port]`, nothing after it. */
   origin: string
+  /** The GitHub repository whose releases carry build.json: `https://github.com/owner/name`. */
+  repo: string | null
   /**
-   * Where the attested manifest for a release is, with `{tag}` standing for the
-   * release tag; null means the GitHub release of the repository the site names
-   * (`<repo>/releases/download/<tag>/build.json`). For a self-hosted install
-   * whose releases live elsewhere.
+   * Instead of (or as well as) the repository: where the attested manifest
+   * is, with `{tag}` standing for the release tag — for releases that are
+   * not on GitHub. Takes precedence over `repo` for the address.
    */
   manifest: string | null
 }
 
 export const DEFAULT_ORIGIN = 'https://scarab.one'
+/** The trust anchor for scarab.one: this repository's releases. Not a setting. */
+export const PINNED_REPO = 'https://github.com/lincolnfrog/scarab'
+export const BUILT_IN: OriginSetting = Object.freeze({ origin: DEFAULT_ORIGIN, repo: PINNED_REPO, manifest: null })
 export const SHELL = 'index.html'
 
 const HEX64 = /^[0-9a-f]{64}$/
+const HEX40 = /^[0-9a-f]{40}$/
 const GITHUB_REPO = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/
 
 /* ---------- the two manifests ---------- */
@@ -79,22 +90,20 @@ function jsonObject(text: string): Record<string, unknown> | null {
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
 
 /**
- * Where the attested manifest for the release the site names should be: the
- * origin's configured address with `{tag}` filled in, or by default the
- * GitHub release asset of the repository the site names. A site that names no
- * release (a build from source: `tag: null`) cannot be checked against one.
+ * Where the attested manifest for the release the site names is: the origin's
+ * configured address with `{tag}` filled in, or the release asset of its
+ * configured repository. The only thing taken from the site is the tag —
+ * which release to compare with — and the popup shows it. A site that names
+ * no release (a build from source: `tag: null`) cannot be checked against one.
  */
-export function manifestUrl(served: BuildInfo, template: string | null | undefined): { url: string } | { reason: string } {
-  if (template) {
-    if (template.includes('{tag}') && !served.tag) return { reason: NO_TAG }
-    return { url: template.replaceAll('{tag}', encodeURIComponent(served.tag ?? '')) }
+export function manifestUrl(served: BuildInfo, setting: OriginSetting): { url: string } | { reason: string } {
+  if (setting.manifest) {
+    if (setting.manifest.includes('{tag}') && !served.tag) return { reason: NO_TAG }
+    return { url: setting.manifest.replaceAll('{tag}', encodeURIComponent(served.tag ?? '')) }
   }
-  if (!served.repo || !GITHUB_REPO.test(served.repo))
-    return {
-      reason: `the site names ${served.repo ? `a repository that is not on GitHub (${served.repo})` : 'no repository'} — set a manifest address for this origin in the extension's settings`,
-    }
+  if (!setting.repo) return { reason: `no manifest source for ${setting.origin}: set its repository or a manifest address in the extension's settings` }
   if (!served.tag) return { reason: NO_TAG }
-  return { url: `${served.repo}/releases/download/${encodeURIComponent(served.tag)}/build.json` }
+  return { url: `${setting.repo}/releases/download/${encodeURIComponent(served.tag)}/build.json` }
 }
 const NO_TAG = 'the site names no release (its build.json has no tag): a build from source, not a published release'
 
@@ -129,6 +138,15 @@ export function assetPath(url: string, origin: string): string | null {
 }
 
 /** An http(s) URL, or null: a blob: URL carries the page's origin but is not a file the server serves. */
+/**
+ * Is this document the app's shell? The app lives at `/` (hash routes); a
+ * top-level visit to `/api/health` or `/build.json` on the same origin is a
+ * page of the server, not of the app, and the manifest says nothing about it.
+ */
+export function isAppDocument(url: string, origin: string): boolean {
+  return assetPath(url, origin) === SHELL
+}
+
 function parseUrl(url: string): URL | null {
   try {
     const u = new URL(url)
@@ -147,10 +165,14 @@ export type Report = {
   origin: string
   document: { url: string; size: number }
   resources: { url: string; size: number }[]
+  /** The document's load event has fired: the shell's own references are all in. */
+  loaded: boolean
 }
 
 /** The release a document is checked against, resolved once per document. */
 export type Release = {
+  /** The configured repository (pinned for scarab.one): the trust anchor, and where the popup's links go. */
+  repo: string | null
   /** /build.json as the site serves it; null when it has none. */
   served: BuildInfo | null
   /** The attested manifest; null with `reason` when there is none to be had. */
@@ -168,9 +190,14 @@ export type TabState = {
   /** Each URL's re-fetch, once per document. */
   fetched: Record<string, Fetched>
   files: FileResult[]
+  /** A report made after the document's load event has been judged: before that, the verdict is "checking" however the files look. */
+  loaded: boolean
   verdict: Verdict
   reason: string | null
+  /** Provenance the site and the attestation disagree about: the files decide, the popup says. */
   notes: string[]
+  /** What should not happen on an honest server: the site naming another repository than the one it is checked against. */
+  warnings: string[]
   checkedAt: number | null
 }
 
@@ -246,11 +273,14 @@ export type Verdict =
 /**
  * The page's verdict from its files. Failure wins over everything (one wrong
  * file is a wrong page, whatever else could not be checked); without a
- * manifest, or with a file nobody could fetch, nothing is proven.
+ * manifest nothing is proven; and nothing is green before the document has
+ * loaded — the first reports carry the shell alone, and a check that said ✓
+ * on those would be vouching for chunks it had not seen.
  */
-export function verdict(files: FileResult[], hasManifest: boolean): Verdict {
+export function verdict(files: FileResult[], hasManifest: boolean, loaded: boolean): Verdict {
   if (files.some((f) => FAILING.has(f.status))) return 'fail'
   if (!hasManifest) return 'unverifiable'
+  if (!loaded) return 'checking'
   if (files.some((f) => f.status === 'unreachable')) return 'unverifiable'
   if (files.length === 0 || files.some((f) => f.status === 'unchecked')) return 'checking'
   return 'ok'
@@ -268,7 +298,20 @@ export function releaseNotes(served: BuildInfo, attested: Manifest): string[] {
   return notes
 }
 
+/**
+ * The site naming a repository other than the one it is checked against. The
+ * files still decide — they are compared with the configured repository's
+ * release, whatever the site says — but an honest server has no reason to
+ * say this, so it goes on the badge and in the popup.
+ */
+export function releaseWarnings(served: BuildInfo, setting: OriginSetting): string[] {
+  if (served.repo && setting.repo && served.repo !== setting.repo)
+    return [`the site says it was built from ${served.repo}; this extension checks it against ${setting.repo}, and will not follow the site's choice`]
+  return []
+}
+
 export const shortCommit = (commit: string): string => commit.slice(0, 7)
+export const isCommit = (s: string | null): s is string => s !== null && HEX40.test(s)
 
 /* ---------- settings ---------- */
 
@@ -279,15 +322,33 @@ export function normalizeOrigin(input: string): string | null {
   return u.origin
 }
 
-/** The configured origins, scarab.one always among them (its content script is in the manifest, not registered at run time). */
+/** `https://github.com/owner/name` from whatever was typed (a trailing slash or .git dropped), or null. */
+export function normalizeRepo(input: string): string | null {
+  const u = parseUrl(input.trim())
+  if (!u || u.protocol !== 'https:' || u.host !== 'github.com') return null
+  const repo = `https://github.com${u.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}`
+  return GITHUB_REPO.test(repo) ? repo : null
+}
+
+/**
+ * The configured origins: scarab.one first, as BUILT_IN and nothing else —
+ * a stored entry for it is ignored, so no setting can move its trust anchor —
+ * then every well-formed stored origin that has a source (a repository, a
+ * manifest address, or both).
+ */
 export function withDefaults(stored: unknown): OriginSetting[] {
-  const out: OriginSetting[] = [{ origin: DEFAULT_ORIGIN, manifest: null }]
+  const out: OriginSetting[] = [BUILT_IN]
   if (!Array.isArray(stored)) return out
   for (const item of stored) {
     if (!item || typeof item !== 'object') continue
-    const { origin, manifest } = item as Record<string, unknown>
-    if (typeof origin !== 'string' || normalizeOrigin(origin) !== origin) continue
-    const setting: OriginSetting = { origin, manifest: typeof manifest === 'string' && manifest !== '' ? manifest : null }
+    const { origin, repo, manifest } = item as Record<string, unknown>
+    if (typeof origin !== 'string' || normalizeOrigin(origin) !== origin || origin === DEFAULT_ORIGIN) continue
+    const setting: OriginSetting = {
+      origin,
+      repo: typeof repo === 'string' && normalizeRepo(repo) === repo ? repo : null,
+      manifest: typeof manifest === 'string' && manifest !== '' ? manifest : null,
+    }
+    if (!setting.repo && !setting.manifest) continue
     const i = out.findIndex((o) => o.origin === origin)
     if (i >= 0) out[i] = setting
     else out.push(setting)

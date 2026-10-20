@@ -6,7 +6,7 @@
  * it shows that tab, which is how the end-to-end test reads it.
  */
 import { loadOrigins } from './origins.js'
-import { settingFor, shortCommit, type FileResult, type FileStatus, type TabState, type Verdict } from './verify.js'
+import { isCommit, settingFor, shortCommit, type FileResult, type FileStatus, type TabState, type Verdict } from './verify.js'
 
 const root = document.getElementById('root')!
 
@@ -54,13 +54,15 @@ function render(tabId: number, state: TabState | undefined, configured: boolean)
 
   const release = state.release
   const m = release?.manifest
+  // Links go to the configured repository only — pinned for scarab.one — never to an address the site named.
+  const repo = release?.repo ?? null
   const facts = el('dl', { class: 'facts' })
   const fact = (k: string, ...v: (string | Node)[]) => facts.append(el('dt', {}, k), el('dd', {}, ...v))
   fact('Site', state.origin)
+  if (repo) fact('Checked against', link(repo, repo.replace('https://github.com/', '')), el('span', { class: 'muted' }, ' on GitHub'))
   if (m) {
-    const repo = m.repo
     fact('Release', m.tag ? (repo ? link(`${repo}/releases/tag/${encodeURIComponent(m.tag)}`, m.tag) : m.tag) : 'untagged')
-    if (m.commit) fact('Commit', repo ? link(`${repo}/commit/${m.commit}`, shortCommit(m.commit)) : shortCommit(m.commit), el('span', { class: 'muted mono' }, ` ${m.commit}`))
+    if (isCommit(m.commit)) fact('Commit', repo ? link(`${repo}/commit/${m.commit}`, shortCommit(m.commit)) : shortCommit(m.commit), el('span', { class: 'muted mono' }, ` ${m.commit}`))
     if (release?.manifestUrl) fact('Manifest', link(release.manifestUrl, 'attested build.json'))
   } else if (release?.served) {
     fact('Site says', `${release.served.tag ?? 'no release'}${release.served.commit ? ` · ${shortCommit(release.served.commit)}` : ''}`)
@@ -68,6 +70,7 @@ function render(tabId: number, state: TabState | undefined, configured: boolean)
   if (state.checkedAt) fact('Checked', time(state.checkedAt))
   root.append(facts)
 
+  for (const w of state.warnings) root.append(el('p', { class: 'warning' }, w))
   if (state.reason) root.append(el('p', { class: 'reason' }, state.reason))
   for (const n of state.notes) root.append(el('p', { class: 'note' }, n))
 

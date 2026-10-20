@@ -7,7 +7,7 @@
   "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://scarab.one/*",
-    "https://github.com/*",
+    "https://github.com/*/*/releases/download/*",
     "https://objects.githubusercontent.com/*",
     "https://release-assets.githubusercontent.com/*"
   ],

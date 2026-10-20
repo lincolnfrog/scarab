@@ -4,10 +4,16 @@
  * For each report from a tab's content script (content.ts) it fetches the
  * site's /build.json (as the page: credentials included, no cache) to learn
  * which release the site claims to serve, fetches that release's attested
- * manifest from GitHub — another origin, one the site cannot answer for —
- * then re-fetches every URL the page loaded, hashes the bytes with SubtleCrypto
+ * manifest from the origin's configured source — the pinned repository's
+ * GitHub release for scarab.one; never an address the site names — then
+ * re-fetches every URL the page loaded, hashes the bytes with SubtleCrypto
  * and compares (verify.ts). The result goes on the toolbar badge and into
  * chrome.storage.session for the popup.
+ *
+ * Everything about one tab runs on that tab's queue, clears included, so a
+ * check still in flight when the tab leaves the origin cannot write its
+ * result back over the cleared badge; and before it saves, a check confirms
+ * the tab still shows the document it was checking.
  *
  * Requests are kept to what the check needs: each URL is fetched once per
  * document (a screen opened later adds only its own chunks), and "Check
@@ -18,11 +24,13 @@ import { loadOrigins, syncContentScripts } from './origins.js'
 import {
   assetPath,
   describeFetchFailure,
+  isAppDocument,
   judgeFile,
   manifestUrl,
   parseBuildInfo,
   parseManifest,
   releaseNotes,
+  releaseWarnings,
   settingFor,
   shortCommit,
   unchecked,
@@ -30,6 +38,7 @@ import {
   type BuildInfo,
   type Fetched,
   type FileResult,
+  type OriginSetting,
   type Release,
   type Report,
   type TabState,
@@ -38,16 +47,22 @@ import {
 
 const key = (tabId: number) => `tab:${tabId}`
 
-/* ---------- messages ---------- */
+/* ---------- one queue per tab ---------- */
 
 const queues = new Map<number, Promise<void>>()
+/** The document each tab last reported, or null once it left the origin: a check for any other document is stale. */
+const latest = new Map<number, string | null>()
 
-/** One check at a time per tab: reports arrive in bursts, and each must see the previous one's fetches. */
 function enqueue(tabId: number, job: () => Promise<void>): Promise<void> {
   const next = (queues.get(tabId) ?? Promise.resolve()).then(job).catch((e: unknown) => console.error('scarab-verify:', e))
   queues.set(tabId, next)
   return next
 }
+
+/** Is this check about a document the tab no longer shows? Cheap, from memory; `commit` asks the tab itself as well. */
+const stale = (tabId: number, docId: string): boolean => latest.has(tabId) && latest.get(tabId) !== docId
+
+/* ---------- messages and tab events ---------- */
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const m = message as { type?: unknown; tabId?: unknown }
@@ -55,6 +70,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const tabId = sender.tab.id
     const report = message as Report
     if (sender.url && !sender.url.startsWith(`${report.origin}/`)) return // a report can only be about the page that sent it
+    latest.set(tabId, report.docId)
     void enqueue(tabId, () => onReport(tabId, report))
     return
   }
@@ -65,17 +81,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
 })
 
-// Leaving a configured origin clears the badge; a configured origin's new document replaces its own state (docId).
+// A tab that navigates to anything but a page of a configured app is cleared — on its queue, after any check in
+// flight — or, for a page of the server on a configured origin (/api/health, /build.json), marked as nothing to check.
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
-  if (change.status !== 'loading') return
-  void loadOrigins().then(async (origins) => {
-    if (tab.url && settingFor(tab.url, origins)) return
-    await chrome.storage.session.remove(key(tabId))
-    await chrome.action.setBadgeText({ tabId, text: '' })
-    await chrome.action.setTitle({ tabId, title: 'Scarab Verify' })
-  })
+  if (change.status !== 'loading' && change.url === undefined) return
+  void (async () => {
+    const url = tab.url
+    const setting = url ? settingFor(url, await loadOrigins()) : null
+    if (url && setting && isAppDocument(url, setting.origin)) return
+    latest.set(tabId, null)
+    await enqueue(tabId, () => (url && setting ? commit(tabId, notAPage(setting.origin, url)).then(() => undefined) : clear(tabId)))
+  })()
 })
 chrome.tabs.onRemoved.addListener((tabId) => {
+  latest.delete(tabId)
   queues.delete(tabId)
   void chrome.storage.session.remove(key(tabId))
 })
@@ -86,20 +105,52 @@ chrome.runtime.onStartup.addListener(() => void syncContentScripts())
 
 /* ---------- the check ---------- */
 
+function fresh(report: Report): TabState {
+  return {
+    docId: report.docId,
+    origin: report.origin,
+    url: report.document.url,
+    release: null,
+    fetched: {},
+    files: [],
+    loaded: false,
+    verdict: 'checking',
+    reason: null,
+    notes: [],
+    warnings: [],
+    checkedAt: null,
+  }
+}
+
+/** /api/health, /build.json: the server's, not the app's — nothing the manifest could vouch for, and nothing to accuse. */
+function notAPage(origin: string, url: string): TabState {
+  return {
+    ...fresh({ type: 'observed', docId: 'not-a-page', origin, document: { url, size: 0 }, resources: [], loaded: true }),
+    loaded: true,
+    verdict: 'unverifiable',
+    reason: `not a page of the app (${new URL(url).pathname}): nothing to check`,
+    checkedAt: Date.now(),
+  }
+}
+
 async function onReport(tabId: number, report: Report): Promise<void> {
-  const origins = await loadOrigins()
-  const setting = settingFor(report.origin + '/', origins)
-  if (!setting || setting.origin !== report.origin) return // not an origin the user asked to check
+  const setting = settingFor(`${report.origin}/`, await loadOrigins())
+  if (!setting) return // not an origin the user asked to check
+  if (stale(tabId, report.docId)) return
   let state = (await load(tabId)) ?? null
   if (!state || state.docId !== report.docId) {
-    state = { docId: report.docId, origin: report.origin, url: report.document.url, release: null, fetched: {}, files: [], verdict: 'checking', reason: null, notes: [], checkedAt: null }
-    await save(tabId, state)
-    await showBadge(tabId, state)
+    if (!isAppDocument(report.document.url, report.origin)) {
+      await commit(tabId, notAPage(report.origin, report.document.url))
+      return
+    }
+    state = fresh(report)
+    if (!(await commit(tabId, state))) return
   }
   state.url = report.document.url
   if (!state.release) {
-    state.release = await resolveRelease(report.origin, setting.manifest)
-    await save(tabId, state)
+    state.release = await resolveRelease(report.origin, setting)
+    state.warnings = state.release.served ? releaseWarnings(state.release.served, setting) : []
+    if (!(await commit(tabId, state))) return
   }
   await judge(tabId, state, report)
 }
@@ -113,13 +164,14 @@ async function recheck(tabId: number): Promise<void> {
     return // no content script in that tab: not a configured origin, or not loaded yet
   }
   if (!report || report.type !== 'observed') return
-  const origins = await loadOrigins()
-  const setting = settingFor(report.origin + '/', origins)
+  if (!isAppDocument(report.document.url, report.origin)) return
+  const setting = settingFor(`${report.origin}/`, await loadOrigins())
   if (!setting) return
-  const state: TabState = { docId: report.docId, origin: report.origin, url: report.document.url, release: null, fetched: {}, files: [], verdict: 'checking', reason: null, notes: [], checkedAt: null }
-  await save(tabId, state)
-  await showBadge(tabId, state)
-  state.release = await resolveRelease(report.origin, setting.manifest)
+  latest.set(tabId, report.docId)
+  const state = fresh(report)
+  if (!(await commit(tabId, state))) return
+  state.release = await resolveRelease(report.origin, setting)
+  state.warnings = state.release.served ? releaseWarnings(state.release.served, setting) : []
   await judge(tabId, state, report)
 }
 
@@ -136,36 +188,38 @@ async function judge(tabId: number, state: TabState, report: Report): Promise<vo
     }
     let fetched = state.fetched[r.url]
     if (!fetched) {
+      if (stale(tabId, state.docId)) return // the tab moved on: no more requests on its behalf
       fetched = await fetchAndHash(r.url)
       state.fetched[r.url] = fetched
     }
     files.push(judgeFile({ url: r.url, path, observedSize: r.size, fetched, manifest }))
   }
   state.files = files
-  state.verdict = verdict(files, manifest !== null)
+  state.loaded = state.loaded || report.loaded
+  state.verdict = verdict(files, manifest !== null, state.loaded)
   state.reason = manifest ? null : (state.release?.reason ?? 'no manifest')
   state.notes = state.release?.served && manifest ? releaseNotes(state.release.served, manifest) : []
   state.checkedAt = Date.now()
-  await save(tabId, state)
-  await showBadge(tabId, state)
+  await commit(tabId, state)
 }
 
-/** The site's claim and the release's attested manifest. */
-async function resolveRelease(origin: string, template: string | null): Promise<Release> {
-  const none = (reason: string, served: BuildInfo | null = null): Release => ({ served, manifest: null, manifestUrl: null, reason })
+/** The site's claim and the release's attested manifest, from the configured source. */
+async function resolveRelease(origin: string, setting: OriginSetting): Promise<Release> {
+  const none = (reason: string, served: BuildInfo | null = null): Release => ({ repo: setting.repo, served, manifest: null, manifestUrl: null, reason })
   // The site's own file: as the page, and a redirect is the proxy's sign-in bounce, not a manifest to read.
   const claim = await fetchText(`${origin}/build.json`, 'include', 'manual')
   if ('error' in claim) return none(`no /build.json (${claim.error}): this server was built before the trust chain, or from source`)
   const served = parseBuildInfo(claim.text)
   if (!served) return none('no /build.json: the server answered with something that is not a manifest (a build from before the trust chain, or from source)')
-  const where = manifestUrl(served, template)
+  const where = manifestUrl(served, setting)
   if ('reason' in where) return none(where.reason, served)
-  // The attested copy: no cookies to GitHub; a self-hosted address on the site's own origin needs the page's session.
+  // The attested copy: no cookies to GitHub; a configured address on the site's own origin needs the page's session.
   const attested = await fetchText(where.url, new URL(where.url).origin === origin ? 'include' : 'omit', 'follow')
-  if ('error' in attested) return { served, manifest: null, manifestUrl: where.url, reason: `no attested manifest at ${where.url} (${attested.error}): the release has none attached, or the address is wrong` }
+  if ('error' in attested)
+    return { ...none(`no attested manifest at ${where.url} (${attested.error}): the release has none attached, or the address is wrong`, served), manifestUrl: where.url }
   const manifest = parseManifest(attested.text)
-  if (!manifest) return { served, manifest: null, manifestUrl: where.url, reason: `${where.url} is not a build manifest` }
-  return { served, manifest, manifestUrl: where.url, reason: null }
+  if (!manifest) return { ...none(`${where.url} is not a build manifest`, served), manifestUrl: where.url }
+  return { repo: setting.repo, served, manifest, manifestUrl: where.url, reason: null }
 }
 
 /** As the page would: with its cookies, never from a cache, and a redirect (a sign-in bounce) is a failure, not a page to hash. */
@@ -201,8 +255,34 @@ function hex(buf: ArrayBuffer): string {
 async function load(tabId: number): Promise<TabState | undefined> {
   return (await chrome.storage.session.get(key(tabId)))[key(tabId)] as TabState | undefined
 }
-async function save(tabId: number, state: TabState): Promise<void> {
+
+/**
+ * Store and show, unless the tab has moved on: a later document reported, the
+ * tab left the origin or the app, or the tab is gone. Then nothing is written
+ * — the clear that the navigation queued stands — and false comes back.
+ */
+async function commit(tabId: number, state: TabState): Promise<boolean> {
+  if (state.docId !== 'not-a-page' && stale(tabId, state.docId)) return false
+  let tab: chrome.tabs.Tab
+  try {
+    tab = await chrome.tabs.get(tabId)
+  } catch {
+    return false // closed
+  }
+  if (!tab.url || new URL(tab.url).origin !== state.origin || !isAppDocument(tab.url, state.origin) !== !isAppDocument(state.url, state.origin)) return false
   await chrome.storage.session.set({ [key(tabId)]: state })
+  await showBadge(tabId, state)
+  return true
+}
+
+async function clear(tabId: number): Promise<void> {
+  await chrome.storage.session.remove(key(tabId))
+  try {
+    await chrome.action.setBadgeText({ tabId, text: '' })
+    await chrome.action.setTitle({ tabId, title: 'Scarab Verify' })
+  } catch {
+    // the tab closed
+  }
 }
 
 /** Badge colours are the app's status tokens (CLAUDE.md): up for verified, down for not, ink-3 for unknown. */
@@ -215,8 +295,9 @@ const BADGE: Record<Verdict, { text: string; color: string; ink: string }> = {
 
 async function showBadge(tabId: number, state: TabState): Promise<void> {
   const b = BADGE[state.verdict]
-  const release = state.release?.manifest ? `${state.release.manifest.tag ?? 'untagged'}${state.release.manifest.commit ? ` (${shortCommit(state.release.manifest.commit)})` : ''}` : null
-  const title =
+  const m = state.release?.manifest
+  const release = m ? `${m.tag ?? 'untagged'}${m.commit ? ` (${shortCommit(m.commit)})` : ''}` : null
+  let title =
     state.verdict === 'ok'
       ? `Scarab Verify: ${release} — ${state.files.length} files verified`
       : state.verdict === 'fail'
@@ -224,6 +305,7 @@ async function showBadge(tabId: number, state: TabState): Promise<void> {
         : state.verdict === 'unverifiable'
           ? `Scarab Verify: cannot verify — ${state.reason ?? 'no manifest'}`
           : 'Scarab Verify: checking…'
+  for (const w of state.warnings) title += `\nWARNING: ${w}`
   try {
     await chrome.action.setBadgeText({ tabId, text: b.text })
     await chrome.action.setBadgeBackgroundColor({ tabId, color: b.color })

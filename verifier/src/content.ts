@@ -87,13 +87,16 @@
       origin,
       document: { url: `${origin}${location.pathname}${location.search}`, size: documentSize() },
       resources: [...seen].map(([url, size]) => ({ url, size })),
+      // Before the load event the shell's own references are still arriving; the worker shows nothing green until this is true.
+      loaded: document.readyState === 'complete',
     }
   }
 
-  function send(): void {
+  /** One retry, a second later, for a worker that was asleep or being updated; after that the next report or "Check again" carries the list. */
+  function send(retry = true): void {
     timer = undefined
     chrome.runtime.sendMessage(snapshot()).catch(() => {
-      // the worker is being installed or updated: the next report, or a "Check again", will reach it
+      if (retry) setTimeout(() => send(false), 1000)
     })
   }
 
