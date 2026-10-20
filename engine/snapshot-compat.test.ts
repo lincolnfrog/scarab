@@ -1,14 +1,17 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
+import { listAccountFlows } from './account-flows'
 import { getAllocation } from './allocation'
 import { getCheckupSettings } from './checkup-settings'
 import type { DbLike } from './db'
 import { migrate } from './migrations'
+import { getHarvestProfile } from './harvest'
 import { getUnvested } from './invest'
 import { listPaySources } from './paychecks'
 import { listReportedRealized } from './realized-reported'
 import { listPeople } from './people'
+import { listPlannedSales } from './planned-sales'
 import { listInvestAccounts } from './services'
 import { computeTaxYear } from './tax'
 import { type Dump, dumpDb, loadDump } from './snapshot'
@@ -252,10 +255,10 @@ describe('the shipped contract stays honest', () => {
     expect(upgradesFor(CURRENT_VERSION)).toEqual([])
   })
 
-  it('v27, the floor since 2026-10-11: a credit card, a broker-reported loss, grants, the paycheck’s Roth line and match, classes and settings all load', async () => {
-    const dump = JSON.parse(readFileSync(new URL('snapshot-v27.json', fixtureDir), 'utf8')) as Dump
+  it('v28, the floor since 2026-10-19: the managed strategy’s plan, a credit card, a broker-reported loss, grants, the paycheck’s Roth line and match, classes and settings all load', async () => {
+    const dump = JSON.parse(readFileSync(new URL('snapshot-v28.json', fixtureDir), 'utf8')) as Dump
     for (const [engine, db] of await both()) {
-      expect(loadDump(db, dump).from, engine).toBe(27)
+      expect(loadDump(db, dump).from, engine).toBe(28)
       // A credit card is its own kind of bank account (migration 27), its ledger imported like any other.
       expect(db.prepare("SELECT kind, count(*) AS n FROM accounts a JOIN transactions t ON t.account_id = a.id WHERE a.name = 'Visa'").get(), engine).toEqual({ kind: 'credit', n: 2 })
       // A managed account's realized loss as its broker reported it (migration 26), still on the tax bill.
@@ -279,8 +282,26 @@ describe('the shipped contract stays honest', () => {
         ['Nicole', 1977],
       ])
       expect(getCheckupSettings(db), engine).toMatchObject({ concentrationMicro: 150_000, charityCategoryId: 0 })
-      // Migration 28's tables are additive: the older snapshot loads with them empty.
-      expect(db.prepare('SELECT count(*) AS n FROM account_flows').get(), engine).toEqual({ n: 0 })
+      // The plan around the managed strategy (migration 28): deposits (one planned ahead), the manager's forecast, a planned sale.
+      expect(listAccountFlows(db, '2026-09-25').map((f) => [f.account, f.flowed_on, f.amount_cents, f.planned]), engine).toEqual([
+        ['Flex 250', '2026-12-01', 25_000_000, true],
+        ['Flex 250', '2026-01-15', 200_000_000, false],
+      ])
+      const flex = (db.prepare("SELECT id FROM invest_accounts WHERE name = 'Flex 250'").get() as { id: number }).id
+      expect(getHarvestProfile(db, flex), engine).toMatchObject({
+        as_of: '2026-08-31',
+        year1_micro: 700_000,
+        year2_micro: 390_000,
+        later_micro: 100_000,
+        source: 'Manager estimate',
+        years: [
+          { tax_year: 2026, loss_cents: 60_000_000 },
+          { tax_year: 2027, loss_cents: 35_000_000 },
+        ],
+      })
+      expect(listPlannedSales(db).map((p) => [p.account, p.symbol, p.planned_on, p.qty_micro, p.price_cents, p.note]), engine).toEqual([
+        ['Vanguard', 'VTI', '2027-01-15', 5_000_000, 30_000, 'Down payment'],
+      ])
     }
   })
 

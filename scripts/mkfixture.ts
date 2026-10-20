@@ -8,7 +8,10 @@
  * Every date is fixed, so the same engine always writes the same household.
  */
 import type { DbLike } from '../engine/db'
+import { createAccountFlow } from '../engine/account-flows'
 import { createOpeningPositions, createTrade, putBalanceSnapshot, putUnvested, vestUnvested } from '../engine/invest'
+import { putHarvestProfile } from '../engine/harvest'
+import { createPlannedSale } from '../engine/planned-sales'
 import { putAccountClass, putAssetClass, putTarget } from '../engine/allocation'
 import { putCheckupSettings } from '../engine/checkup-settings'
 import { createPaySource } from '../engine/paychecks'
@@ -77,6 +80,28 @@ putTarget(db, { targets: { us_stock: 600_000, intl_stock: 200_000, bonds: 150_00
 // The settings blobs the copilot reads: people (birth year, HSA) and the Checkup's threshold and roles.
 putPeople(db, { people: [{ name: 'Max', birthYear: 1975, hsaCoverage: 'family', hsaCents: 300_000 }, { name: 'Nicole', birthYear: 1977 }] }, TODAY)
 putCheckupSettings(db, { concentrationMicro: 150_000, charityCategoryId: 0 })
+
+// The plan around the managed strategy (migration 28): money in (a deposit made, another planned ahead),
+// the manager's harvest forecast, and a sale planned off the brokerage's lots.
+createAccountFlow(db, { investAccountId: managed, flowedOn: '2026-01-15', amountCents: 200_000_000, note: 'Initial funding' }, TODAY)
+createAccountFlow(db, { investAccountId: managed, flowedOn: '2026-12-01', amountCents: 25_000_000 }, TODAY)
+putHarvestProfile(
+  db,
+  managed,
+  {
+    asOf: '2026-08-31', year1Micro: 700_000, year2Micro: 390_000, laterMicro: 100_000, source: 'Manager estimate',
+    years: [{ taxYear: 2026, lossCents: 60_000_000 }, { taxYear: 2027, lossCents: 35_000_000 }],
+  },
+  TODAY,
+)
+createPlannedSale(
+  db,
+  {
+    investAccountId: vanguard, assetId: (db.prepare("SELECT id FROM assets WHERE symbol = 'VTI'").get() as { id: number }).id,
+    plannedOn: '2027-01-15', qtyMicro: 5_000_000, priceCents: 30_000, note: 'Down payment',
+  },
+  TODAY,
+)
 
 // A home with a valuation and its mortgage.
 const home = createProperty(db, { name: 'Home', purchasedOn: '2015-05-01', purchaseCents: 90_000_000 }) as { id: number }

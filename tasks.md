@@ -505,11 +505,13 @@ Follow-ups (not blocking):
       today `POST /api/prices/refresh` still fetches held symbols per-symbol.
 - [x] Passkey-only vault v2 (WebAuthn PRF; no passphrase; typed recovery
       code) and the household member flow — DESIGN.md roadmap #2 and #3,
-      2026-09-15. Still not exercised on a real authenticator (the 2026-09-23
-      pass used CDP virtual authenticators): verify create → unlock → add
-      member on a Mac + iPhone before the vault-only deploy.
-- [ ] Live basket build couldn't run from the build sandbox (egress 403s to
-      nasdaqtrader.com / coingecko); verify a real build on the deployment.
+      2026-09-15. Exercised on real authenticators in 2026-10: the vault was
+      created and unlocked with platform passkeys on scarab.one, and the
+      second member enrolled through the QR (hybrid) prompt (until then only
+      CDP virtual authenticators had run the ceremonies).
+- [x] Live basket build couldn't run from the build sandbox (egress 403s to
+      nasdaqtrader.com / coingecko); verified on the deployment — the basket
+      serves the live vault's prices (the vault-only milestone below).
 
 ## Milestone: re-import from scratch through the vault (2026-09-09) — done
 

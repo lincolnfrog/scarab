@@ -86,8 +86,8 @@ export type Compat = { minReadable: number; upgrades: Record<number, Upgrade> }
 /** The engine's own version — what `dumpDb` stamps on everything it writes. */
 export const CURRENT_VERSION = migrations.length
 
-/** The shipped contract: v27 onward (see the note above; raised from 25 once the vault was resealed at v27, 2026-10-11). */
-export const SNAPSHOT_COMPAT: Compat = { minReadable: 27, upgrades: {} }
+/** The shipped contract: v28 onward (see the note above; raised from 27 once the vault was resealed at v28, 2026-10-19). */
+export const SNAPSHOT_COMPAT: Compat = { minReadable: 28, upgrades: {} }
 
 export const MIN_READABLE_VERSION = SNAPSHOT_COMPAT.minReadable
 

@@ -751,21 +751,25 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
 
 **Remaining, in order:**
 
-1. **Production origin, before the real vault.** Passkeys bind to the RP ID
-   for life, and `run.app` is on the Public Suffix List: map scarab.one first,
-   or accept re-registering every passkey later.
-2. **A real-authenticator pass**: create → unlock → add member on a Mac and an
-   iPhone (QR hybrid). This pass exercised ceremonies with CDP virtual
-   authenticators (PRF), recovery codes and unit tests only.
+1. ~~Production origin, before the real vault~~ **— done 2026-09-23**:
+   passkeys are pinned to the RP ID `scarab.one` (`src/passkey.ts` rpIdFor),
+   and the real vault was created there.
+2. ~~A real-authenticator pass~~ **— done 2026-10**: the vault was created
+   and unlocked with platform passkeys on scarab.one, and the second member
+   enrolled from their phone through the QR (hybrid) prompt. (Until then only
+   CDP virtual authenticators, recovery codes and unit tests had exercised
+   the ceremonies.)
 3. **scarab.one deploy** — ~~vault-only storage~~ (done 2026-09-09:
    `SCARAB_ZK_ONLY=1`, one-time purge), ~~size caps~~ (done 2026-09-23: a
-   body cap on every route, on top of the 10MB blob cap); still to do: the
-   vault-only cut-over itself (see tasks.md), verifying the basket and history
-   builds from Cloud Run's IP, the CPU-throttling decision (§6), IAP
+   body cap on every route, on top of the 10MB blob cap), ~~the vault-only
+   cut-over~~ (done 2026-10-01: the household re-entered through the front
+   door; tasks.md), ~~the daily basket build from Cloud Run~~ (it serves the
+   live vault's prices); still to do: the market history's monthly rebuild
+   under request-based CPU (the CPU-throttling decision, §6), IAP
    `allAuthenticatedUsers`, ToS/privacy pages.
-4. **Declare production**: freeze the first snapshot fixture and lower
-   `SNAPSHOT_COMPAT.minReadable` to it (`engine/fixtures/README.md`); from
-   then on every tier-C migration ships an upgrade.
+4. **Declare production**: the floor is rolling — v28 since 2026-10-19
+   (`engine/fixtures/README.md`). It stops rising once a second household
+   keeps a vault; from then on every tier-C migration ships an upgrade.
 5. **Trust chain** — open-source the repo, reproducible builds, sigstore/
    GitHub attestations binding served bundle hashes to public commits,
    published asset manifest (and, with it, a proper ZK-only build target).
