@@ -55,7 +55,9 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /**
  * Static paths the built client references (index.html, public/, the build manifest): the shell, its assets, the
- * web manifest and icons, and /build.json — what the server serves, read by Data & Vault's Advanced card.
+ * web manifest and icons, /build.json — what the server serves, read by Data & Vault's Advanced card — and the terms
+ * and privacy pages the front door and Advanced link to (plain HTML, their stylesheet and its font; opened in a new
+ * tab, so a session never fetches them on its own).
  */
 const STATIC_OK = (path: string): boolean =>
   path === '/' ||
@@ -63,7 +65,11 @@ const STATIC_OK = (path: string): boolean =>
   path.startsWith('/assets/') ||
   path === '/manifest.webmanifest' ||
   path.startsWith('/icons/') ||
-  path === '/build.json'
+  path === '/build.json' ||
+  path === '/terms.html' ||
+  path === '/privacy.html' ||
+  path === '/legal.css' ||
+  path.startsWith('/fonts/')
 
 /** Schemes that never reach a network: the favicon is a data: URI, downloads are blob: URLs. */
 const LOCAL_SCHEMES = new Set(['data:', 'blob:', 'about:'])

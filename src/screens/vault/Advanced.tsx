@@ -143,7 +143,7 @@ export function AdvancedCard(p: {
     <details className="card zk-card zk-adv" open={p.open} onToggle={(e) => p.onToggle((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className="zk-adv-sum">
         <h2>Advanced</h2>
-        <span className="muted">this device’s memory of the vault · key rotation · price basket · engine check · served code{!local ? ' · start a session' : ''}</span>
+        <span className="muted">this device’s memory of the vault · key rotation · price basket · engine check · served code · terms{!local ? ' · start a session' : ''}</span>
       </summary>
 
       <div className="zk-adv-grid">
@@ -214,6 +214,7 @@ export function AdvancedCard(p: {
         </div>
 
         <ServedCode build={p.build} />
+        <TermsAndPrivacy />
 
         {!local && (
           <div className="zk-adv-sec">
@@ -234,6 +235,32 @@ export function AdvancedCard(p: {
         )}
       </div>
     </details>
+  )
+}
+
+/**
+ * The terms and the privacy statement this origin runs under: two static files
+ * (public/terms.html, public/privacy.html — the front door's create step links
+ * them too), opened in a new tab so the session stays where it is. The same
+ * text is PRIVACY.md and LICENSE in the repository, readable without signing in.
+ */
+function TermsAndPrivacy() {
+  const ext = { target: '_blank', rel: 'noreferrer', className: 'zk-link zk-link-inline' } as const
+  return (
+    <div className="zk-adv-sec">
+      <h3 className="zk-h3">Terms and privacy</h3>
+      <p className="sub2">
+        What this server stores and what it still sees, and the terms it runs under:{' '}
+        <a {...ext} href="/terms.html">
+          terms
+        </a>{' '}
+        ·{' '}
+        <a {...ext} href="/privacy.html">
+          privacy
+        </a>
+        . The same text is in the repository (<span className="num">PRIVACY.md</span>, <span className="num">LICENSE</span>).
+      </p>
+    </div>
   )
 }
 
