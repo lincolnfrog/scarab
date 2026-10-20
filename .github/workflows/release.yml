@@ -150,6 +150,26 @@ jobs:
           fi
           echo "The image's dist/ is the attested manifest."
 
+      - name: The four repository variables are set (Settings → Secrets and variables → Actions → Variables)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+          WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          IS_TAG: ${{ github.ref_type == 'tag' }}
+        run: |
+          missing=""
+          for v in GCP_PROJECT_ID GCP_REGION WIF_PROVIDER WIF_SERVICE_ACCOUNT; do
+            [[ -n "${!v}" ]] || missing="$missing $v"
+          done
+          if [[ -z "$missing" ]]; then
+            echo "Release configuration: $GCP_PROJECT_ID / $GCP_REGION, $WIF_SERVICE_ACCOUNT through $WIF_PROVIDER"
+            exit 0
+          fi
+          msg="repository variable(s) not set:$missing. They are Variables, not Secrets — Settings → Secrets and variables → Actions → Variables → Repository variables (scripts/bootstrap-gcp.sh trust-chain prints the values)."
+          if [[ "$IS_TAG" == "true" ]]; then echo "::error::$msg"; exit 1; fi
+          echo "::warning::$msg A tag build would stop here."
+
       # ---- tags only from here: push, attest, verify, release ----
 
       - name: Sign in to Google Cloud (Workload Identity Federation)
