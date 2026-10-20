@@ -704,3 +704,20 @@
 .inv-yearrows { display: grid; gap: 8px; }
 .inv-yearrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .inv-yearrow .ui-input { width: auto; }
+
+/* ---------- #/invest/cover: ask the basket to cover a fund ---------- */
+.inv-cover {
+  max-width: 640px;
+}
+.inv-cover-lead {
+  margin: 8px 0 10px;
+  line-height: 1.5;
+}
+.inv-cover-actions {
+  margin-top: 14px;
+  align-items: center;
+  gap: 12px;
+}
+.inv-cover-state {
+  margin-top: 14px;
+}

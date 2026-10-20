@@ -655,6 +655,7 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
 | Yahoo v8 spark (batched) | basket quotes | ~200 symbols per call; v7 quote (crumb+cookie) is the fallback when spark returns nothing. Batches fail piecemeal: a symbol a build misses keeps its last (dated) quote for 14 days before it drops out. |
 | Yahoo v8 spark, `range=10y&interval=1mo` | monthly market history (`server/history-pack.ts`, GET /api/basket/history): month-end closes for the whole basket universe, one file for every caller | **20 symbols per call at most** (more is a 400), so a full build is ~600 calls: one call per 1.5s, ≤160 per run, runs ≥20 min apart, ≤640 a day, resumable (progress saved every 10 batches), and the first 429/403/5xx/unreadable reply pauses it until the next UTC day. Runs start only when someone asks for the file (or a household's series catalog), never on a timer. v8 replies carry no exchange zone, but US listings' monthly bars open at New York midnight (04:00/05:00Z) and crypto's at 00:00Z, so the UTC month is right; the live bar for the month in progress is last and wins. An unknown symbol is simply absent from the reply. Stored delta-encoded in app_meta `basket:history:v1` (~4 MB JSON, ~1.5 MB gzipped); rebuilt once a month has closed, and each daily basket build merges its quotes into the month in progress. A fresh server doesn't crawl for its first file: `npm run seed:history` builds it locally (same builder, budgets lifted) into `seed/history-pack.json.gz` — gitignored, since it is Yahoo-derived, but uploaded by `.gcloudignore` and copied into the image — and boot stores it via `seedHistoryPack` whenever it is newer than the server's. A tab keeps the file in memory for `bench:*` and copies only its traded assets' month ends into `prices` (engine/prices.ts `applyMonthlyHistory`). |
 | Yahoo v8 spark, `range=2y&interval=1d` | daily history in hashed symbol buckets (`server/daily-buckets.ts`, GET /api/basket/daily/:bucket; `shared/buckets.ts` deals the universe into 64 by SHA-1) | Same 20-symbol calls and the same gentle crawl as the monthly file, on **one shared budget** (`server/crawl-budget.ts`: 640 calls a day for both files together, runs 20 minutes apart, a refusal pauses both). One crawl of the universe ≈ 600 calls ≈ a day; crawled again once a month has closed; each daily basket build folds its quotes into every bucket (`appendDailyQuotes`). Daily bars are stamped at the session open (New York morning for US listings, midnight UTC for crypto), so the UTC day is the trading day. Stored one file per bucket in app_meta `basket:daily:file:<b>` (~550 KB JSON, ~180 KB gzipped each; ~35 MB in all — the database grows by that, inside the 512 MiB instance, and Litestream ships the rewritten files daily), delta-encoded on a calendar-day axis (engine/prices.ts `encodeDaily`). A tab fetches the bucket a held symbol falls in when its chart opens, keeps it in memory 30 minutes, and writes nothing from it (PRIVACY.md "Daily history"). |
+| SEC EDGAR `company_tickers_mf.json` | the chaff population for "Ask the basket to cover this fund" (`src/invest/fund-tickers.txt`, bundled; `scripts/fetch-fund-tickers.mjs`) | Every registered fund share class's ticker (28,586 on 2026-10-20), a US government work: public domain. The SEC rate-limits and wants a User-Agent naming the caller (`SEC_USER_AGENT`), else 403. ETF tickers are in it too (they are 1940-Act funds), which is why the chaff draw excludes whatever the basket already quotes. Names aren't in this file; a fund's name comes from Yahoo's quote meta once it is quoted. |
 | CoinGecko /coins/markets | basket crypto quotes and names | top ~500 by market cap, keyless, browser-CORS-friendly. A failed crypto source leaves yesterday's crypto rows alone (the basket is replaced per kind). |
 | SimpleFIN | (planned, household mode) | $1.50/mo, read-only tokens via MX. Fundamentally in tension with ZK mode — see PRIVACY.md. |
 
@@ -799,12 +800,16 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
    Still open: a proper ZK-only build target, and a browser-side check (an
    extension in the style of Code Verify) for a response tailored to one
    person, which the script's service-account vantage point can't see.
-6. **ZK market data**: ~~daily history through hashed symbol buckets~~ (done
-   2026-10-20: `shared/buckets.ts`, `server/daily-buckets.ts`,
-   `GET /api/basket/daily/:bucket`, the holding drawer's chart reads the
-   bucket its symbol falls in — PRIVACY.md "Daily history" has the numbers);
-   an anonymous-add path for off-universe symbols (today: a hand-entered
-   price).
+6. ~~**ZK market data**~~ — done 2026-10-20: daily history through hashed
+   symbol buckets (`shared/buckets.ts`, `server/daily-buckets.ts`,
+   `GET /api/basket/daily/:bucket`; the holding drawer's chart reads the
+   bucket its symbol falls in — PRIVACY.md "Daily history" has the numbers),
+   and the anonymous add for mutual funds (`POST /api/basket/suggest`: the
+   wanted fund among 31 others from the SEC's list, chaff drawn from the
+   vault's key; `#/invest/cover` off the holding drawer — PRIVACY.md
+   "Anonymous add" states the residual: one of 32, and when). CITs and
+   private stock keep a hand-entered price; the stronger alternative, the
+   whole SEC list in the basket, is written up there with its cost.
 7. Household-mode conveniences that never made ZK controversial: SimpleFIN
    sync, nightly price refresh (Cloud Scheduler + OIDC through IAP), one price
    path (household refresh on the basket too). (The tax-rate settings page

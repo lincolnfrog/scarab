@@ -14,6 +14,7 @@ import AddAccountFlow, { type AddAccountNext } from '../invest/AddAccountFlow'
 import { shortDay } from '../invest/balanceMath'
 import { portfolioCash } from '../invest/cashMath'
 import CheckinDrawer from '../invest/CheckinDrawer'
+import CoverFundView from '../invest/CoverFundView'
 import HoldingDrawer from '../invest/HoldingDrawer'
 import HoldingsCard from '../invest/HoldingsCard'
 import InvestSummary from '../invest/InvestSummary'
@@ -44,7 +45,7 @@ const NO_POSITIONS: PortfolioPosition[] = []
 const NO_OWNERS: string[] = []
 const plural = (n: number, noun: string) => (n === 0 ? '' : `${n} ${noun}${n === 1 ? '' : 's'}`)
 /** The detail views under the overview: '#/invest/holdings', '#/invest/allocation' (the Checkup's and the digest's link), … */
-const DETAILS = ['holdings', 'accounts', 'allocation', 'activity'] as const
+const DETAILS = ['holdings', 'accounts', 'allocation', 'activity', 'cover'] as const
 /** How many holdings the overview lists before "All N holdings". */
 const TOP_HOLDINGS = 6
 /** The overview's summary cards share one row: 4 → quarters, 3 → thirds, … */
@@ -462,6 +463,8 @@ export default function Invest() {
       </DetailView>
     )
   else if (detail === 'accounts') body = <DetailView title="Accounts">{strip}</DetailView>
+  // '#/invest/cover': ask the shared basket to cover a fund it doesn't quote (from a holding's drawer; the symbol rides in route state).
+  else if (detail === 'cover') body = <CoverFundView />
   else if (detail === 'allocation')
     body = (
       <DetailView title="Allocation">

@@ -489,11 +489,23 @@ reload → unlock → data restored, with the server's user tables never touched
 
 Follow-ups (not blocking):
 
-- [ ] **Anonymous add** for off-universe symbols: an identity-opaque, delayed,
-      chaffed request that widens the basket without linking a symbol to a
-      person. (Deferred by decision — the whole-universe basket already covers
-      ordinary US holdings, and since 2026-09-23 a fund or private stock can
-      take a hand-entered price.)
+- [x] **Anonymous add** for mutual funds (2026-10-20): `POST /api/basket/suggest`
+      names the wanted fund among 31 others drawn from the SEC's public-domain
+      list of fund share-class tickers (`src/invest/fund-tickers.txt`,
+      `scripts/fetch-fund-tickers.mjs`), seeded from the vault's key so a
+      repeat names the same 32 and the server can't precompute the draw; sent
+      after a random 30 s–10 min delay; the server adds all 32 to
+      `basket:extra:symbols` with no identity or time, quotes them from the
+      next build, drops one unquotable in three builds. UI: "Ask the basket to
+      cover this fund" in the holding drawer → `#/invest/cover`. Residual,
+      stated in PRIVACY.md: the server learns one-of-32 and when; popularity
+      ranking and later bucket fetches can narrow it. CITs and private stock
+      stay hand-priced (no public feed). Stronger alternative on the table:
+      the whole SEC list in the basket (≈3× the files and crawls).
+- [ ] Decoy daily buckets from a per-vault secret (blunts both the bucket
+      and the suggest residuals; PRIVACY.md "Daily history").
+- [ ] The whole SEC fund list in the basket, if the file sizes stop
+      mattering — then `basket/suggest` goes.
 - [x] ZK *monthly* history (2026-09-23): the shared market history file,
       ten years of month-ends for the whole basket, identical for every caller
       (`server/history-pack.ts`, `GET /api/basket/history`).

@@ -115,7 +115,17 @@ export async function fetchUniverse(f: typeof fetch = fetch): Promise<{ listings
 const day = (t: unknown) => (typeof t === 'number' ? new Date(t * 1000) : new Date()).toISOString().slice(0, 10)
 const cents = (px: unknown) => (typeof px === 'number' && Number.isFinite(px) && px > 0 ? Math.round(px * 100) : null)
 
-/** Yahoo v8 spark: { spark: { result: [{ symbol, response: [{ meta: { regularMarketPrice, regularMarketTime } }] }] } } */
+/** A security's name as a quote source gives it (spark's meta, v7's row), or none. */
+const sourceName = (m: Record<string, unknown> | undefined): string | null => {
+  const n = [m?.longName, m?.shortName].find((v) => typeof v === 'string' && v.trim())
+  return typeof n === 'string' ? n.trim() : null
+}
+
+/**
+ * Yahoo v8 spark: { spark: { result: [{ symbol, response: [{ meta: { regularMarketPrice, regularMarketTime, … } }] }] } }.
+ * A name in the meta (longName/shortName) is kept for symbols the directory doesn't list — the funds the basket was asked
+ * to cover (basketExtras); a listed symbol's name comes from the directory.
+ */
 export function parseSpark(body: unknown): BasketQuote[] {
   const results = (body as { spark?: { result?: { symbol?: string; response?: { meta?: Record<string, unknown> }[] }[] } })
     ?.spark?.result
@@ -125,7 +135,8 @@ export function parseSpark(body: unknown): BasketQuote[] {
     const meta = r.response?.[0]?.meta
     const c = cents(meta?.regularMarketPrice)
     if (!r.symbol || c === null) continue
-    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(meta?.regularMarketTime), prevCents: cents(meta?.chartPreviousClose) })
+    const name = sourceName(meta)
+    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(meta?.regularMarketTime), prevCents: cents(meta?.chartPreviousClose), ...(name ? { name } : {}) })
   }
   return out
 }
@@ -138,7 +149,8 @@ export function parseV7Quotes(body: unknown): BasketQuote[] {
   for (const r of results) {
     const c = cents(r.regularMarketPrice)
     if (typeof r.symbol !== 'string' || c === null) continue
-    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(r.regularMarketTime), prevCents: cents(r.regularMarketPreviousClose) })
+    const name = sourceName(r)
+    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(r.regularMarketTime), prevCents: cents(r.regularMarketPreviousClose), ...(name ? { name } : {}) })
   }
   return out
 }
@@ -265,6 +277,71 @@ const meta = (db: DbLike, key: string) => (db.prepare('SELECT value FROM app_met
 const setMeta = (db: DbLike, key: string, value: string) =>
   db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
 
+/* ---------------- extras: symbols the basket was asked to cover ---------------- */
+
+/**
+ * The universe is the exchange directory; a mutual fund isn't in it. A tab
+ * may ask the basket to cover one — POST /api/basket/suggest (api8.ts),
+ * naming the wanted fund among chaff drawn from the same population
+ * (PRIVACY.md "Anonymous add") — and every symbol named is added here, to
+ * `basket:extra:symbols`: a plain list of symbols with a miss count, no
+ * identity and no time. The next build quotes them along with the universe;
+ * one that Yahoo can't quote in EXTRA_MISSES consecutive builds (a retired
+ * share class, a typo) drops out. A `basket:*` key: never in a snapshot,
+ * kept by the zero-knowledge purge.
+ */
+const EXTRAS_KEY = 'basket:extra:symbols'
+/** Builds in a row an extra may go unquoted before it is dropped. */
+export const EXTRA_MISSES = 3
+/** How many extras the list holds at most (≈ 125 asks of 32); past it a request is refused. */
+export const MAX_BASKET_EXTRAS = 4_000
+/** A symbol the list can carry: a US ticker — letters, then letters or digits, a dot or dash for a class (BRK.B); never a prototype name. */
+export const EXTRA_SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/
+
+export type BasketExtra = { symbol: string; misses: number }
+
+export function basketExtras(db: DbLike): BasketExtra[] {
+  const raw = meta(db, EXTRAS_KEY)
+  if (!raw) return []
+  try {
+    const x: unknown = JSON.parse(raw)
+    if (!Array.isArray(x)) return []
+    return x.filter(
+      (e): e is BasketExtra =>
+        !!e && typeof e === 'object' && typeof (e as BasketExtra).symbol === 'string' && EXTRA_SYMBOL.test((e as BasketExtra).symbol) && Number.isSafeInteger((e as BasketExtra).misses),
+    )
+  } catch {
+    return []
+  }
+}
+
+const writeExtras = (db: DbLike, extras: readonly BasketExtra[]) => setMeta(db, EXTRAS_KEY, JSON.stringify(extras))
+
+/**
+ * Add symbols to the list (each in Yahoo spelling; a symbol already there, or
+ * in the basket, is left as it is). Returns how many are new, or null when
+ * the list can't take them (MAX_BASKET_EXTRAS). Records nothing else — not who
+ * asked, not when.
+ */
+export function addBasketExtras(db: DbLike, symbols: readonly string[]): { added: number; total: number } | null {
+  const extras = basketExtras(db)
+  const have = new Set(extras.map((e) => e.symbol))
+  const inBasket = new Set((db.prepare("SELECT symbol FROM basket_quotes WHERE kind = 'stock'").all() as { symbol: string }[]).map((r) => r.symbol))
+  const fresh = [...new Set(symbols.map(toYahooSymbol))].filter((s) => EXTRA_SYMBOL.test(s) && !have.has(s) && !inBasket.has(s))
+  if (extras.length + fresh.length > MAX_BASKET_EXTRAS) return null
+  if (fresh.length > 0) writeExtras(db, [...extras, ...fresh.map((symbol) => ({ symbol, misses: 0 }))])
+  return { added: fresh.length, total: extras.length + fresh.length }
+}
+
+/** After a build that fetched stock quotes: an extra that was quoted stays (misses reset); one that wasn't is a miss closer to dropping out. */
+function settleExtras(db: DbLike, extras: readonly BasketExtra[], quoted: ReadonlySet<string>): void {
+  if (extras.length === 0) return
+  const next = extras
+    .map((e) => (quoted.has(e.symbol) ? { symbol: e.symbol, misses: 0 } : { symbol: e.symbol, misses: e.misses + 1 }))
+    .filter((e) => e.misses < EXTRA_MISSES)
+  writeExtras(db, next)
+}
+
 export function basketStatus(db: DbLike): BasketStatus {
   const errs = meta(db, 'basket:errors')
   return {
@@ -324,16 +401,21 @@ export type BuildResult = { stocks: number; crypto: number; universe: number; er
 export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<BuildResult> {
   const t0 = Date.now()
   const { listings, errors } = await fetchUniverse(f)
+  // The universe, plus the symbols the basket was asked to cover (funds the directory doesn't list).
+  const extras = basketExtras(db)
+  const listed = new Set(listings.map((l) => l.symbol))
+  const symbols = [...listings.map((l) => l.symbol), ...extras.map((e) => e.symbol).filter((s) => !listed.has(s))]
   const [stocks, crypto] = await Promise.all([
-    listings.length > 0 ? fetchStockBasket(listings.map((l) => l.symbol), f) : { quotes: [], errors: ['quotes: no universe, skipped'] },
+    symbols.length > 0 ? fetchStockBasket(symbols, f) : { quotes: [], errors: ['quotes: no universe, skipped'] },
     fetchCryptoBasket(f),
   ])
-  // Names and the ETF flag come from the directory, keyed by Yahoo spelling.
+  // Names and the ETF flag come from the directory, keyed by Yahoo spelling; an extra keeps the name the quote source gave.
   const listing = new Map(listings.map((l) => [l.symbol, l]))
   const named = stocks.quotes.map((q) => {
     const l = listing.get(q.symbol)
     return l ? { ...q, name: l.name || null, etf: l.etf } : q
   })
+  if (stocks.quotes.length > 0) settleExtras(db, extras, new Set(stocks.quotes.map((q) => q.symbol)))
   const all = [...named, ...crypto.quotes]
   const allErrors = [...errors, ...stocks.errors, ...crypto.errors]
   const builtAt = new Date().toISOString()

@@ -24,6 +24,7 @@ const PATTERNS = [
   'basket/history', // the monthly market history: one file, identical for every caller (PRIVACY.md)
   'basket/crawl', // POST: run the market-history builds inside the request — a trigger, called on a schedule as scarab-history (PRIVACY.md)
   'basket/daily/[0-9]+', // two years of daily closes for one hashed bucket of the universe: the same file for every caller (PRIVACY.md "Daily history")
+  'basket/suggest', // POST: ask the basket to cover a fund, named among chaff — the server learns one-of-k, and when (PRIVACY.md "Anonymous add")
 ]
 
 export const ZK_ROUTES = new RegExp(`^/api/(${PATTERNS.join('|')})$`)

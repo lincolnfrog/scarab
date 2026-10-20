@@ -259,8 +259,8 @@ Consequences, stated plainly:
   mode probe, the encrypted-blob courier (with the versions it keeps), its
   membership list and invitations (emails it already knows from IAP), the
   price basket with its market history (the monthly file and the daily
-  buckets, each identical for every caller, and the scheduled trigger that
-  builds them), and health. Every other route returns 403 before any handler runs,
+  buckets, each identical for every caller, the scheduled trigger that
+  builds them, and the one-of-k ask that widens the basket), and health. Every other route returns 403 before any handler runs,
   and the server refuses to boot at all if its database holds plaintext (a
   one-time `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data,
   keeping the ciphertext, its membership routing and the shared price data). The
@@ -425,10 +425,12 @@ the operator can observe:
   at most every 30 minutes). Monthly history comes from the shared market
   history file (below), and a holding's daily price chart from the hashed
   symbol bucket its symbol falls in ("Daily history", below): the tab asks
-  for one of 64 shared files, never for the symbol. Not yet covered:
-  holdings outside the basket (mutual funds, CITs, private stock) get no
-  quote — they take a hand-entered price, kept with the rest of the
-  household's encrypted data. The planned fix is an anonymous-add path.
+  for one of 64 shared files, never for the symbol. A mutual fund the basket
+  doesn't quote can be asked for — "Anonymous add", below: the request names
+  it among 31 other funds, so the server learns one of 32, and when. Not
+  covered, and not coverable this way: a collective investment trust, private
+  stock or a plan-specific unit has no public price feed — they take a
+  hand-entered price, kept with the rest of the household's encrypted data.
 - **Bank sync (future)**: automatic SimpleFIN-style sync is fundamentally in
   tension with zero-knowledge — a server-side job would see plaintext
   transactions. ZK mode therefore ships with manual imports (client-side
@@ -674,3 +676,75 @@ falls in, never for the symbol — **`GET /api/basket/daily/:bucket`**
   buckets it has no holding in, chosen from a secret so the server can't
   tell them apart — would blur the *k* above; they need a per-vault secret
   the tab has only once a vault exists, and are left for later.
+
+### Anonymous add
+
+The basket's universe is the exchange directory, so a mutual fund — the
+retirement-plan holding par excellence — has no quote and took a hand-entered
+price. Widening the basket on request runs into the one fact this document
+keeps returning to: **every request carries the IAP identity**, so a request
+naming one fund ties that fund to the household. Nothing on the server's side
+can undo that; the only tool is k-anonymity on the client's side, and it is
+honest only if the k are drawn from the same population as the real one —
+otherwise the real one stands out. That population exists, and is clean: the
+SEC publishes every registered fund share class's ticker
+(`company_tickers_mf.json`, EDGAR's mapping of series and classes to
+symbols — a US government work, public domain). It is bundled as
+`src/invest/fund-tickers.txt` (28,586 tickers, 166 KB, fetched 2026-10-20;
+`scripts/fetch-fund-tickers.mjs` refreshes it, and its header says so), in a
+chunk that loads only when the view opens.
+
+- **The ask.** A holding's drawer offers *Ask the basket to cover this fund*
+  only when the symbol is a registered fund's ticker that the basket doesn't
+  quote (`src/invest/suggest.ts` `canSuggest`). The view
+  (`#/invest/cover`; the symbol rides in route state, never the address)
+  says in one line what the request does, and on a click schedules
+  **`POST /api/basket/suggest`** naming the wanted fund among **31 others
+  drawn from the same list** (`k = 32`; `src/invest/chaff.ts`), sent after a
+  random wait of 30 seconds to ten minutes while the tab stays open — so
+  the request doesn't trail the vault save that recorded the fund.
+- **Which 31.** A draw seeded from the vault's data key and the symbol
+  (SHA-256 over both, with a counter; `pickChaff`), with the basket's own
+  symbols excluded (they would be no chaff — the server has them). Secret-
+  seeded, so the server cannot run the draw for every fund and match the set
+  it received — a draw seeded from the symbol alone would be exactly that
+  lookup table. Deterministic, so asking again — tomorrow, from the other
+  member's phone — names the same 32 and gives an observer nothing to
+  intersect. Before a vault exists there is no secret: the draw is random,
+  and the view says to ask once. (A new build of the app with a refreshed
+  list changes the draw; a second ask after that is a second set.)
+- **What the server does.** It adds every symbol it was given to a plain
+  list, `basket:extra:symbols` (`server/basket.ts`), alike — no identity, no
+  time, nothing to tell the wanted one by. The next daily build quotes the
+  extras with the universe (the fund's name comes from the quote source,
+  since no directory lists it), the monthly file and the daily buckets pick
+  them up at their next crawls, and a symbol Yahoo can't quote in three
+  builds running drops out. The route refuses a request naming fewer than
+  two or more than 64 symbols, takes one request a minute from everyone
+  together (a brake that records the time of the last request and nothing
+  else), and caps the list at 4,000. Its answer says how many of the symbols
+  were new to the list, not which. `basket/suggest` is the pattern this adds
+  to the vault-only allowlist.
+- **What the server learns — the residual, exactly.** That this identity
+  named one of these 32 registered funds, and when. Not which: the request
+  gives it no way to tell, and nothing it stores helps later. Two honest
+  limits on the "one of 32". First, the 32 are not equally likely to an
+  operator who knows which funds are popular: a famous fund among obscure
+  share classes stands out, so the anonymity set is strongest for exactly the
+  institutional and retirement classes that need this path most (the basket
+  already quotes everything exchange-traded), and weakest for a household
+  name. Second, once the fund is quoted it is in the basket for everyone,
+  and a household's later requests — the basket, a bucket — are the same as
+  anyone's; but the operator who saw the ask can watch for *that* fund's
+  bucket being fetched by *that* identity later, which narrows 32 toward
+  one over time. (Decoy buckets, above, would blunt this too.) Every
+  household that holds a fund someone already asked for pays nothing: it is
+  simply in the basket.
+- **The alternative, and why not now.** Putting the whole SEC list in the
+  basket would make the ask unnecessary and leak nothing — the strongest
+  answer. It is also about three times the basket (28,586 more symbols,
+  most of them dead or institutional classes Yahoo may not quote), three
+  times the monthly file a tab downloads for benchmarks (~4.5 MB gzipped),
+  three times the crawls (two more days of budget a month), and 150 more
+  quote calls a day. If the file sizes stop mattering, that is the path to
+  take, and the suggest route goes with it.

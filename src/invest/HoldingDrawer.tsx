@@ -3,6 +3,8 @@ import type { InvestAccountRow, PortfolioLot, PortfolioPosition } from '../../sh
 import { formatCents, formatPercentMicro, formatQtyMicro } from '../../shared/money'
 import type { ScopedReturn } from '../cards/cardModel'
 import PriceChart from '../cards/PriceChart'
+import { localMode } from '../local'
+import { Link } from '../router'
 import { Button } from '../ui/Button'
 import { Drawer } from '../ui/Dialog'
 import ActivityTable from './ActivityTable'
@@ -11,6 +13,7 @@ import { dayAmount, dayChange, dayPercent, priceDay, toneOf } from './dayMath'
 import { rateWords } from './HoldingsCard'
 import HoldingsTable from './HoldingsTable'
 import { perShareCents } from './lotMath'
+import { inMarketList, useMarketSymbols } from './marketSymbols'
 import { PriceControl } from './SetPrice'
 import './invest.css'
 
@@ -47,12 +50,16 @@ const KIND = { stock: 'Stock or fund', crypto: 'Crypto' } as const
 export default function HoldingDrawer(p: HoldingDrawerProps) {
   // Through the exit animation the drawer keeps showing the holding it had.
   const [kept, setKept] = useState<PortfolioPosition | null>(p.position)
+  // The market list, for the ask below. A hook, so it runs before the early return whatever the drawer shows.
+  const market = useMarketSymbols()
   if (p.position && p.position !== kept) setKept(p.position)
   const h = p.position ?? kept
   if (!h) return null
 
   const perShare = priceDay(h)
   const day = dayChange(h.day_change_cents, h.value_cents)
+  // In a session, a stock the shared basket doesn't quote (a hand-priced fund) can ask the basket to cover it (#/invest/cover).
+  const canAskBasket = localMode.active && h.kind === 'stock' && (h.price_cents === null || h.price_manual === true) && market !== null && !inMarketList(market, h.symbol)
   const words = p.ret ? rateWords(p.ret) : null
   const subtitle = [KIND[h.kind], `${formatQtyMicro(h.qty_micro)} held`, h.accounts.length > 1 ? `${h.accounts.length} accounts` : h.accounts[0]?.name, p.scopeLabel]
     .filter(Boolean)
@@ -80,6 +87,11 @@ export default function HoldingDrawer(p: HoldingDrawerProps) {
               </span>
             ) : (
               <span>valued at cost until it has a price</span>
+            )}
+            {canAskBasket && (
+              <Link to={{ screen: 'invest', rest: ['cover'] }} state={{ coverSymbol: h.symbol }} className="inv-cover-link">
+                Ask the basket to cover this fund
+              </Link>
             )}
           </span>
         </div>
