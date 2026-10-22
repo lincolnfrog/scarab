@@ -312,6 +312,126 @@ export function payDatesThrough(anchor: string, cadence: PayCadence, from: strin
   return out
 }
 
+/* =========================== deferral limit =========================== */
+
+/**
+ * A run of checks like the stub's, after `start` is already deferred, each
+ * taking what is left under the earner's limit — pre-tax and Roth together,
+ * the way payroll stops a plan at §402(g). A check the limit cuts short
+ * splits what it takes the way the stub splits a whole one. `reachedAt` is
+ * the check that reaches the limit; `skipped` the checks after it.
+ */
+export function deferChecks(
+  s: Pick<PaySource, 'retirementCents' | 'rothCents'>,
+  checks: number,
+  limitCents: number,
+  start: { cents: number; pretaxCents: number } = { cents: 0, pretaxCents: 0 },
+) {
+  const perCheck = s.retirementCents + s.rothCents
+  let cents = start.cents
+  let pretaxCents = start.pretaxCents
+  let reachedAt: number | null = null
+  let skipped = 0
+  const takes: number[] = []
+  for (let i = 0; i < checks; i++) {
+    const take = Math.max(0, Math.min(perCheck, limitCents - cents))
+    if (reachedAt === null && perCheck > 0 && cents < limitCents && cents + take >= limitCents) reachedAt = i
+    if (perCheck > 0 && take === 0) skipped++
+    cents += take
+    pretaxCents += take === perCheck ? s.retirementCents : Math.round((take * s.retirementCents) / perCheck)
+    takes.push(take)
+  }
+  return { cents, pretaxCents, takes, reachedAt, skipped }
+}
+
+/** One plan's elective deferrals this year against the earner's limit. */
+export type DeferralPace = {
+  limitCents: number
+  /** Pre-tax + Roth per check, from the stub. */
+  perCheckCents: number
+  /** Through the stub: the YTD column as printed, else every pay date so far repeating the stub (stopped at the limit too). */
+  ytdCents: number
+  ytdPretaxCents: number
+  /** By Dec 31: the year so far and the checks ahead, stopping at the limit. */
+  projectedCents: number
+  projectedPretaxCents: number
+  projectedRothCents: number
+  /** Pay dates still ahead this year. */
+  remainingChecks: number
+  /** The pay date on which this plan's deferrals reach the limit, if they do this year. */
+  reachedOn: string | null
+  /** Checks after `reachedOn` that defer nothing. */
+  checksAfterLimit: number
+}
+
+/** A pay date walked, and what it deferred: the estimated checks so far (`past`), then the ones ahead. */
+export type DeferralCheck = { on: string; cents: number; past: boolean }
+
+/**
+ * The walk: this year's checks, oldest first, each deferring what's left
+ * under `limitCents`. Within a plan payroll enforces the limit; across two
+ * employers nothing does (computePayroll counts that excess as wages).
+ */
+export function walkDeferrals(s: PaySource, year: number, limitCents: number): DeferralPace & { checks: DeferralCheck[] } {
+  const jan1 = `${year}-01-01`
+  const stale = s.paidOn < jan1
+  // With a YTD column the year so far is one known lump; without one, every pay date so far repeats the stub — and the
+  // plan would have stopped at the limit on those too.
+  const estimated = !stale && s.ytdGrossCents === null
+  const pastDates = estimated ? payDatesThrough(s.paidOn, s.cadence, jan1).reverse() : []
+  const aheadDates = remainingPayDates(s, year)
+  const known = stale || estimated ? { cents: 0, pretaxCents: 0 } : { cents: (s.ytdRetirementCents ?? 0) + (s.ytdRothCents ?? 0), pretaxCents: s.ytdRetirementCents ?? 0 }
+  const past = deferChecks(s, pastDates.length, limitCents, known)
+  const ahead = deferChecks(s, aheadDates.length, limitCents, past)
+  const perCheck = s.retirementCents + s.rothCents
+  // Already at the limit by the stub: the plan reached it then.
+  const reachedOn =
+    perCheck > 0 && known.cents >= limitCents && !stale && !estimated
+      ? s.paidOn
+      : past.reachedAt !== null
+        ? pastDates[past.reachedAt]!
+        : ahead.reachedAt !== null
+          ? aheadDates[ahead.reachedAt]!
+          : null
+  return {
+    limitCents,
+    perCheckCents: perCheck,
+    ytdCents: past.cents,
+    ytdPretaxCents: past.pretaxCents,
+    projectedCents: ahead.cents,
+    projectedPretaxCents: ahead.pretaxCents,
+    projectedRothCents: ahead.cents - ahead.pretaxCents,
+    remainingChecks: aheadDates.length,
+    reachedOn,
+    checksAfterLimit: past.skipped + ahead.skipped,
+    checks: [
+      ...pastDates.map((on, i) => ({ on, cents: past.takes[i]!, past: true })),
+      ...aheadDates.map((on, i) => ({ on, cents: ahead.takes[i]!, past: false })),
+    ],
+  }
+}
+
+/**
+ * Pre-tax deferrals over an earner's limit across their plans, by earner
+ * (named as people are, case aside). Each plan stops at the limit, so only
+ * two jobs together get here — and an excess deferral is income in the year
+ * deferred, returned by April 15 or not (§402(g)(1)). Counted against the
+ * pre-tax deferrals first: the Roth ones are income already.
+ */
+export function excessPretax(plans: readonly { earner: string; limitCents: number; cents: number; pretaxCents: number }[]): Map<string, number> {
+  const by = new Map<string, { limit: number; cents: number; pretax: number }>()
+  for (const p of plans) {
+    const k = p.earner.trim().toLowerCase()
+    const e = by.get(k) ?? { limit: p.limitCents, cents: 0, pretax: 0 }
+    e.cents += p.cents
+    e.pretax += p.pretaxCents
+    by.set(k, e)
+  }
+  const out = new Map<string, number>()
+  for (const [k, e] of by) out.set(k, Math.min(e.pretax, Math.max(0, e.cents - e.limit)))
+  return out
+}
+
 /* ============================= projection ============================= */
 
 export type PayAmounts = {
@@ -328,11 +448,13 @@ export type PayProjection = PaySource & {
   ytdEstimated: boolean
   periodsElapsed: number
   periodsRemaining: number
+  /** `retirementCents` here and in `projected` is the pre-tax part of `deferral`: it stops at the limit. */
   ytd: PayAmounts
   projected: PayAmounts & {
     taxableWagesCents: number // Box 1 shape: gross − retirement − benefits
     ficaWagesCents: number // Social Security / Medicare wages: gross − benefits
   }
+  deferral: DeferralPace
 }
 
 const times = (a: PayAmounts, n: number): PayAmounts => ({
@@ -351,7 +473,8 @@ const plus = (a: PayAmounts, b: PayAmounts): PayAmounts => ({
 })
 const ZERO: PayAmounts = { grossCents: 0, retirementCents: 0, benefitsCents: 0, fedWithheldCents: 0, stateWithheldCents: 0 }
 
-export function projectPaySource(s: PaySource, year: number): PayProjection {
+/** One stub walked to Dec 31, its pre-tax deferrals stopping at the earner's `limitCents` (with their catch-up). */
+export function projectPaySource(s: PaySource, year: number, limitCents: number): PayProjection {
   const jan1 = `${year}-01-01`
   const dec31 = `${year}-12-31`
   const perPeriod: PayAmounts = {
@@ -365,7 +488,8 @@ export function projectPaySource(s: PaySource, year: number): PayProjection {
   const elapsed = stale ? 0 : payDatesThrough(s.paidOn, s.cadence, jan1).length
   const remaining = payDatesAfter(stale ? lastBefore(s, jan1) : s.paidOn, s.cadence, dec31).length
   const ytdEstimated = stale || s.ytdGrossCents === null
-  const ytd: PayAmounts = stale
+  const { checks: _, ...deferral } = walkDeferrals(s, year, limitCents)
+  const asStub: PayAmounts = stale
     ? ZERO
     : s.ytdGrossCents === null
       ? times(perPeriod, elapsed)
@@ -376,7 +500,8 @@ export function projectPaySource(s: PaySource, year: number): PayProjection {
           fedWithheldCents: s.ytdFedWithheldCents ?? 0,
           stateWithheldCents: s.ytdStateWithheldCents ?? 0,
         }
-  const projected = plus(ytd, times(perPeriod, remaining))
+  const ytd: PayAmounts = { ...asStub, retirementCents: deferral.ytdPretaxCents }
+  const projected: PayAmounts = { ...plus(ytd, times(perPeriod, remaining)), retirementCents: deferral.projectedPretaxCents }
   return {
     ...s,
     stale,
@@ -389,6 +514,7 @@ export function projectPaySource(s: PaySource, year: number): PayProjection {
       taxableWagesCents: projected.grossCents - projected.retirementCents - projected.benefitsCents,
       ficaWagesCents: projected.grossCents - projected.benefitsCents,
     },
+    deferral,
   }
 }
 
@@ -415,7 +541,12 @@ function lastBefore(s: PaySource, jan1: string): string {
 
 export type EarnerPayroll = {
   earner: string
-  wagesCents: number // income-tax wages (Box 1 shape), paychecks only
+  wagesCents: number // income-tax wages (Box 1 shape), paychecks only; includes `excessPretaxCents`
+  /** Their elective-deferral limit, and what their plans defer by Dec 31 (pre-tax + Roth, each plan stopping at it). */
+  deferralLimitCents: number
+  deferredCents: number
+  /** Pre-tax deferred over the limit across two jobs: wages anyway (§402(g)(1)). */
+  excessPretaxCents: number
   rsuCents: number // stock comp vesting through this earner's linked accounts (YTD + projected)
   ficaWagesCents: number // paycheck FICA wages + linked stock comp
   fedWithheldCents: number
@@ -447,14 +578,18 @@ const pct = (cents: number, micro: number) => Math.round((cents * micro) / 1_000
  * Household payroll picture. `rsuByAccount` is this year's stock-comp income
  * (YTD + projected) keyed by invest account; income in accounts no pay source
  * links to still counts toward the household Additional Medicare base.
+ * `deferralLimitOf` is each earner's limit this year (§402(g) plus their
+ * catch-up): every plan's pre-tax deferrals stop at it, and what two plans
+ * together put over it is wages.
  */
 export function computePayroll(
   sources: PaySource[],
   year: number,
   rsuByAccount: Map<number, number>,
   addlMedicareThresholdCents: number,
+  deferralLimitOf: (earner: string) => number,
 ): Payroll {
-  const projections = sources.map((s) => projectPaySource(s, year))
+  const projections = sources.map((s) => projectPaySource(s, year, deferralLimitOf(s.earner)))
   const byEarner = new Map<string, EarnerPayroll>()
   const linkedAccounts = new Set<number>()
   for (const p of projections) {
@@ -462,10 +597,12 @@ export function computePayroll(
     if (p.investAccountId !== null) linkedAccounts.add(p.investAccountId)
     const employerFica = p.projected.ficaWagesCents + rsu
     const e = byEarner.get(p.earner) ?? {
-      earner: p.earner, wagesCents: 0, rsuCents: 0, ficaWagesCents: 0, fedWithheldCents: 0, stateWithheldCents: 0,
+      earner: p.earner, wagesCents: 0, deferralLimitCents: p.deferral.limitCents, deferredCents: 0, excessPretaxCents: 0,
+      rsuCents: 0, ficaWagesCents: 0, fedWithheldCents: 0, stateWithheldCents: 0,
       socialSecurityCents: 0, socialSecurityWithheldCents: 0, medicareCents: 0, addlMedicareWithheldCents: 0,
     }
     e.wagesCents += p.projected.taxableWagesCents
+    e.deferredCents += p.deferral.projectedCents
     e.rsuCents += rsu
     e.ficaWagesCents += employerFica
     e.fedWithheldCents += p.projected.fedWithheldCents
@@ -474,11 +611,22 @@ export function computePayroll(
     e.addlMedicareWithheldCents += pct(Math.max(0, employerFica - ADDL_MEDICARE_WITHHOLD_THRESHOLD), ADDL_MEDICARE_RATE_MICRO)
     byEarner.set(p.earner, e)
   }
-  const earners = [...byEarner.values()].map((e) => ({
-    ...e,
-    socialSecurityCents: pct(Math.min(e.ficaWagesCents, SS_WAGE_BASE_2026), SS_RATE_MICRO),
-    medicareCents: pct(e.ficaWagesCents, MEDICARE_RATE_MICRO),
-  }))
+  const excess = excessPretax(
+    projections.map((p) => ({ earner: p.earner, limitCents: p.deferral.limitCents, cents: p.deferral.projectedCents, pretaxCents: p.deferral.projectedPretaxCents })),
+  )
+  const counted = new Set<string>()
+  const earners = [...byEarner.values()].map((e) => {
+    const k = e.earner.trim().toLowerCase()
+    const over = counted.has(k) ? 0 : (excess.get(k) ?? 0)
+    counted.add(k)
+    return {
+      ...e,
+      wagesCents: e.wagesCents + over,
+      excessPretaxCents: over,
+      socialSecurityCents: pct(Math.min(e.ficaWagesCents, SS_WAGE_BASE_2026), SS_RATE_MICRO),
+      medicareCents: pct(e.ficaWagesCents, MEDICARE_RATE_MICRO),
+    }
+  })
   let unlinkedRsu = 0
   for (const [acct, c] of rsuByAccount) if (!linkedAccounts.has(acct)) unlinkedRsu += c
   const sum = (f: (e: EarnerPayroll) => number) => earners.reduce((s, e) => s + f(e), 0)

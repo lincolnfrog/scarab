@@ -9,6 +9,7 @@ import { firstVestAfter, sharesText, validateTrade, vestOn } from './invest'
 import { deriveItemized } from './itemize'
 import { computePosition, isLongTerm, longTermOn, positionValueCents, saleRealized } from './lots'
 import { ADDL_MEDICARE_RATE_MICRO, computePayroll, listPaySources, PAYROLL_VINTAGE, type Payroll } from './paychecks'
+import { ageInYear, listPeople, personNamed } from './people'
 import { reportedTotals } from './realized-reported'
 
 /**
@@ -98,6 +99,12 @@ export const LIMITS_2026 = {
   hsaFamilyCents: 8_750_00,
   hsaCatchUp55Cents: 1_000_00,
 } as const
+/** The deferral limit for a person's age this year: the base, plus the catch-up tier they're in. */
+export function deferralLimit(age: number | null) {
+  const tier: '50+' | '60–63' | null = age === null ? null : age >= 60 && age <= 63 ? '60–63' : age >= 50 ? '50+' : null
+  const catchUp = tier === '60–63' ? LIMITS_2026.catchUp60to63Cents : tier === '50+' ? LIMITS_2026.catchUp50Cents : 0
+  return { baseCents: LIMITS_2026.deferralCents, catchUpCents: catchUp, catchUpTier: tier, limitCents: LIMITS_2026.deferralCents + catchUp }
+}
 /** §408A(c)(3) Roth IRA contribution phase-out by MAGI: [start, end] in cents. */
 export const ROTH_IRA_PHASEOUT_2026: Record<FilingStatus, [number, number]> = {
   single: [153_000_00, 168_000_00],
@@ -927,8 +934,11 @@ export function taxYear(db: DbLike, today: string) {
     rsuByAccount.set(e.account_id, (rsuByAccount.get(e.account_id) ?? 0) + (e.cents ?? 0))
     rsuProjectedByAccount.set(e.account_id, (rsuProjectedByAccount.get(e.account_id) ?? 0) + (e.cents ?? 0))
   }
+  // Each plan's pre-tax deferrals stop at the earner's limit for their age (engine/contributions.ts paces the same walk).
   const sources = listPaySources(db)
-  const payroll: Payroll = computePayroll(sources, Number(year), rsuByAccount, ADDL_MEDICARE_THRESHOLD[settings.filingStatus])
+  const people = sources.length ? listPeople(db) : []
+  const limitOf = (earner: string) => deferralLimit(ageInYear(personNamed(people, earner), Number(year))).limitCents
+  const payroll: Payroll = computePayroll(sources, Number(year), rsuByAccount, ADDL_MEDICARE_THRESHOLD[settings.filingStatus], limitOf)
   const fromPaychecks = sources.length > 0
 
   // Supplemental withholding on vests. A stub's YTD withholding already

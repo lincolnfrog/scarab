@@ -15,6 +15,9 @@ import {
 } from './paychecks'
 
 const $ = (dollars: number) => Math.round(dollars * 100)
+/** The 2026 deferral limit with no catch-up. */
+const LIMIT = $(24_500)
+const limitOf = () => LIMIT
 
 const source = (over: Partial<PaySource> = {}): PaySource => ({
   id: 1,
@@ -24,15 +27,20 @@ const source = (over: Partial<PaySource> = {}): PaySource => ({
   paidOn: '2026-08-21',
   grossCents: $(5_000),
   retirementCents: $(500),
+  rothCents: 0,
   benefitsCents: $(200),
   fedWithheldCents: $(900),
   stateWithheldCents: $(300),
   ytdGrossCents: null,
   ytdRetirementCents: null,
+  ytdRothCents: null,
   ytdBenefitsCents: null,
   ytdFedWithheldCents: null,
   ytdStateWithheldCents: null,
   investAccountId: null,
+  matchRateMicro: null,
+  matchCapMicro: null,
+  matchTrueUp: false,
   sort: 1,
   ...over,
 })
@@ -67,7 +75,7 @@ describe('pay calendar', () => {
 
 describe('projecting one stub to Dec 31', () => {
   it('assumes every paycheck matched when the YTD column is blank', () => {
-    const p = projectPaySource(source(), 2026)
+    const p = projectPaySource(source(), 2026, LIMIT)
     expect(p.stale).toBe(false)
     expect(p.ytdEstimated).toBe(true)
     expect(p.periodsElapsed).toBe(17)
@@ -83,6 +91,7 @@ describe('projecting one stub to Dec 31', () => {
     const p = projectPaySource(
       source({ ytdGrossCents: $(90_000), ytdRetirementCents: $(9_000), ytdBenefitsCents: $(3_400), ytdFedWithheldCents: $(17_000), ytdStateWithheldCents: $(5_000) }),
       2026,
+      LIMIT,
     )
     expect(p.ytdEstimated).toBe(false)
     expect(p.projected.grossCents).toBe($(135_000))
@@ -90,13 +99,21 @@ describe('projecting one stub to Dec 31', () => {
     expect(p.projected.taxableWagesCents).toBe($(135_000) - $(13_500) - $(5_200))
   })
   it('ignores a stub from last year and projects the whole year on its cadence', () => {
-    const p = projectPaySource(source({ paidOn: '2025-12-26', ytdGrossCents: $(120_000) }), 2026)
+    const p = projectPaySource(source({ paidOn: '2025-12-26', ytdGrossCents: $(120_000) }), 2026, LIMIT)
     expect(p.stale).toBe(true)
     expect(p.ytdEstimated).toBe(true)
     expect(p.periodsElapsed).toBe(0)
     expect(p.periodsRemaining).toBe(26)
     expect(p.ytd.grossCents).toBe(0)
     expect(p.projected.grossCents).toBe($(130_000))
+  })
+  it('stops the pre-tax deferral at the earner’s limit, a stale stub’s whole year too', () => {
+    // 26 checks Jan 9 … Dec 25 at $1,000: $24,000 by Nov 27, the last $500 on Dec 11, nothing on Dec 25.
+    const p = projectPaySource(source({ paidOn: '2025-12-26', retirementCents: $(1_000) }), 2026, LIMIT)
+    expect(p.deferral).toMatchObject({ projectedCents: LIMIT, projectedPretaxCents: LIMIT, reachedOn: '2026-12-11', checksAfterLimit: 1, remainingChecks: 26 })
+    expect(p.projected.retirementCents).toBe(LIMIT)
+    expect(p.projected.taxableWagesCents).toBe($(130_000) - LIMIT - $(5_200))
+    expect(p.projected.ficaWagesCents).toBe($(130_000) - $(5_200)) // deferrals never leave FICA wages
   })
 })
 
@@ -119,6 +136,7 @@ describe('household payroll taxes', () => {
       2026,
       rsu,
       $(250_000),
+      limitOf,
     )
     expect(p.wagesCents).toBe($(340_000))
     expect(p.fedWithheldCents).toBe($(70_000))
@@ -140,14 +158,14 @@ describe('household payroll taxes', () => {
     expect(p.excessSocialSecurityCents).toBe(0)
   })
   it('credits Social Security withheld past the wage base across two employers', () => {
-    const p = computePayroll([fullYear(1, 'C', 120_000), fullYear(2, 'C', 120_000)], 2026, new Map(), $(250_000))
+    const p = computePayroll([fullYear(1, 'C', 120_000), fullYear(2, 'C', 120_000)], 2026, new Map(), $(250_000), limitOf)
     expect(p.earners).toHaveLength(1)
     expect(p.earners[0]!.socialSecurityWithheldCents).toBe($(14_880))
     expect(p.socialSecurityCents).toBe($(11_439))
     expect(p.excessSocialSecurityCents).toBe($(3_441))
   })
   it('is empty without stubs', () => {
-    const p = computePayroll([], 2026, new Map([[1, $(50_000)]]), $(250_000))
+    const p = computePayroll([], 2026, new Map([[1, $(50_000)]]), $(250_000), limitOf)
     expect(p.addlMedicareCents).toBe(0)
     expect(p.wagesCents).toBe(0)
   })

@@ -1,14 +1,13 @@
 import { CAP_LOSS_LIMIT_CENTS } from '../shared/capgains'
 import { addDaysIso } from '../shared/dates'
 import { formatDollars } from '../shared/money'
-import { deferralLimit } from './contributions'
 import type { DbLike } from './db'
 import { bad } from './errors'
 import { accountForecasts, forecastLossIn } from './harvest'
-import { listPaySources, PERIODS_PER_YEAR } from './paychecks'
+import { deferChecks, excessPretax, listPaySources, PERIODS_PER_YEAR } from './paychecks'
 import { ageInYear, listPeople, personNamed } from './people'
 import { plannedSaleGains } from './planned-sales'
-import { computeTax, marginalRates, projectVests, taxYear, TAX_DATA_VINTAGE, type TaxComputed, type TaxInputs } from './tax'
+import { computeTax, deferralLimit, marginalRates, projectVests, taxYear, TAX_DATA_VINTAGE, type TaxComputed, type TaxInputs } from './tax'
 
 /**
  * The two-year tax view (copilot §4e): next year projected on the same
@@ -145,27 +144,30 @@ function context(db: DbLike, today: string): Context {
     ltGainCents: inputs.ltGainCents + planThis.plannedLtCents,
   }
 
-  // Wages: each paycheck for a full year, pre-tax deferrals capped at next year's limit for the earner's age.
+  // Wages: each paycheck for a full year, its deferrals stopping at the earner's limit for their age next year — the
+  // walk this year's projection takes (engine/paychecks.ts), so two years alike come out alike.
   const sources = listPaySources(db)
   let wages = settings.wagesAnnualCents
   let ficaWages: number | undefined
   if (sources.length) {
     const people = listPeople(db)
-    const pretaxBy = new Map<string, number>()
     let gross = 0
     let benefits = 0
-    for (const s of sources) {
+    const plans = sources.map((s) => {
       const n = PERIODS_PER_YEAR[s.cadence]
       gross += s.grossCents * n
       benefits += s.benefitsCents * n
-      const k = s.earner.trim().toLowerCase()
-      pretaxBy.set(k, (pretaxBy.get(k) ?? 0) + s.retirementCents * n)
-    }
-    let pretax = 0
-    for (const [k, cents] of pretaxBy) pretax += Math.min(cents, deferralLimit(ageInYear(personNamed(people, k), next)).limitCents)
-    wages = gross - benefits - pretax
+      const limitCents = deferralLimit(ageInYear(personNamed(people, s.earner), next)).limitCents
+      const d = deferChecks(s, n, limitCents)
+      return { earner: s.earner, limitCents, cents: d.cents, pretaxCents: d.pretaxCents }
+    })
+    let excess = 0
+    for (const cents of excessPretax(plans).values()) excess += cents
+    wages = gross - benefits - plans.reduce((sum, p) => sum + p.pretaxCents, 0) + excess
     ficaWages = gross - benefits
-    basis.push(`Wages: each paycheck × its pay dates in a year (${sources.length} paycheck${sources.length > 1 ? 's' : ''}), pre-tax deferrals capped at the limit`)
+    basis.push(
+      `Wages: each paycheck × its pay dates in a year (${sources.length} paycheck${sources.length > 1 ? 's' : ''}), deferrals stopping at ${year}'s limit for each earner's age in ${next}`,
+    )
   } else basis.push('Wages: the salary setting')
 
   // Stock comp: the grants' schedules walked through next Dec 31, after this year's vests have taken their shares.

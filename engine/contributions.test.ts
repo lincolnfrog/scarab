@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
 import { getCheckup } from './checkup'
-import { deferralLimit, getContributions, rothAllowed } from './contributions'
+import { getContributions, rothAllowed } from './contributions'
 import type { DbLike } from './db'
 import { createPaySource, type PaySourceInput } from './paychecks'
 import { listPeople, putPeople } from './people'
 import { dumpDb, loadDump } from './snapshot'
-import { putTaxSettings } from './tax'
+import { deferralLimit, putTaxSettings } from './tax'
 
 const mem = () => openDb(':memory:') as unknown as DbLike
 const $ = (dollars: number) => Math.round(dollars * 100)

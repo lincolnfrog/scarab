@@ -328,9 +328,19 @@ Proc. 2025-19.
 
 Follow-ups:
 
-- [ ] Taxes still projects pre-tax deferrals per check without the limit, so a
-      stub-based year that would pass $24,500 understates taxable wages; feed
-      the pace's capped figure into `computePayroll`.
+- [x] Taxes still projected pre-tax deferrals per check without the limit, so a
+      stub-based year that would pass $24,500 understated taxable wages; feed
+      the pace's capped figure into `computePayroll`. (2026-10-22: one walk,
+      `walkDeferrals` in `engine/paychecks.ts`, stops each plan at the
+      earner's limit — Roth sharing it, a check cut short split like the
+      stub — for the pace card, this year's wages and next year's alike; what
+      two jobs together defer over the limit is wages again, pre-tax first
+      (§402(g)(1)). The paycheck row says when its plan reaches the limit.)
+- [ ] Withholding on the checks after the limit is still the stub's; with no
+      deferral those checks withhold more, so the gap reads a little high.
+- [ ] The Roth catch-up rule (§414(v)(7): prior-year FICA wages from that
+      employer over $150,000) isn't applied to wages — a 50+ high earner's
+      catch-up on a pre-tax stub line is still taken as pre-tax.
 - [ ] IRA contributions aren't read from the ledger (they're transfers or
       trades), so there's no IRA "room" finding — only the limit and Roth
       eligibility.
@@ -441,9 +451,11 @@ Follow-ups:
 
 Follow-ups:
 
-- [ ] This year's projection doesn't cap pre-tax deferrals at the limit (see
-      4b); next year's does, so two otherwise identical years can differ by
-      the tax on the excess.
+- [x] This year's projection didn't cap pre-tax deferrals at the limit (see
+      4b); next year's did, so two otherwise identical years could differ by
+      the tax on the excess. (2026-10-22: both years take the same walk now,
+      and next year's stops Roth and pre-tax together too — it used to cap
+      pre-tax alone.)
 - [ ] Next year's indexed tables when the IRS publishes them (bundle 2027 and
       let each year use its own).
 - [ ] A Checkup finding when a timing choice is worth more than a threshold

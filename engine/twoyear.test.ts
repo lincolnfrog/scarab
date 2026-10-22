@@ -92,9 +92,29 @@ describe('now or in January', () => {
 
   it('is the same either way when the years look alike', () => {
     const db = mem()
-    household(db, 500) // under the deferral limit, so both years' wages match
-    const t = priceTiming(db, today, { kind: 'conversion', amountCents: $(20_000) })
-    expect(t.nowSavesCents).toBe(0)
+    household(db, 500) // under the deferral limit
+    expect(priceTiming(db, today, { kind: 'conversion', amountCents: $(20_000) }).nowSavesCents).toBe(0)
+    // Over it too: this year's projection stops the plan at $24,500 the way next year's does, so the years agree.
+    const db2 = mem()
+    household(db2)
+    const v = getTwoYear(db2, today)
+    expect(v.thisYear.wagesCents).toBe($(235_500))
+    expect(v.nextYear.wagesCents).toBe(v.thisYear.wagesCents)
+    expect(v.nextYear.tax.totalCents).toBe(v.thisYear.tax.totalCents)
+    expect(priceTiming(db2, today, { kind: 'conversion', amountCents: $(20_000) }).nowSavesCents).toBe(0)
+  })
+
+  it('stops next year’s plans the way this year’s stop: Roth shares the limit, two jobs over it count as wages', () => {
+    const db = mem()
+    putTaxSettings(db, { filingStatus: 'mfj', state: 'TX' })
+    // 26 checks of $600 pre-tax + $600 Roth would be $31,200: the plan stops at $24,500, half of it pre-tax.
+    createPaySource(db, { earner: 'Max', cadence: 'biweekly', paidOn: '2026-09-25', grossCents: $(10_000), retirementCents: $(600), rothCents: $(600) })
+    expect(getTwoYear(db, today).nextYear.wagesCents).toBe($(260_000) - $(12_250))
+    // A second job deferring $500 a month: $6,000 more, all of it over the limit together — wages after all.
+    createPaySource(db, { earner: 'Max', employer: 'Side gig', cadence: 'monthly', paidOn: '2026-09-30', grossCents: $(5_000), retirementCents: $(500) })
+    const v = getTwoYear(db, today)
+    expect(v.nextYear.wagesCents).toBe($(320_000) - $(12_250) - $(6_000) + $(6_000))
+    expect(v.thisYear.wagesCents).toBe(v.nextYear.wagesCents)
   })
 
   it('validates', () => {

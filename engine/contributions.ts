@@ -1,8 +1,8 @@
 import type { DbLike } from './db'
 import { listInvestAccounts, getPortfolio } from './invest'
-import { listPaySources, payDatesThrough, projectPaySource, remainingPayDates, type PayCadence, type PaySource } from './paychecks'
+import { listPaySources, projectPaySource, walkDeferrals, type PayCadence, type PaySource } from './paychecks'
 import { ageInYear, listPeople, personNamed, type HsaCoverage } from './people'
-import { LIMITS_2026, LIMITS_VINTAGE, ROTH_IRA_PHASEOUT_2026, taxYear, type FilingStatus } from './tax'
+import { deferralLimit, LIMITS_2026, LIMITS_VINTAGE, ROTH_IRA_PHASEOUT_2026, taxYear, type FilingStatus } from './tax'
 
 /**
  * Contribution pace (copilot §4b): what each person is on track to put into
@@ -17,6 +17,8 @@ import { LIMITS_2026, LIMITS_VINTAGE, ROTH_IRA_PHASEOUT_2026, taxYear, type Fili
  * stops deferring once its own total reaches the person's limit (that is how
  * payroll systems enforce §402(g) within a plan); across two employers
  * nothing stops it, so the person's total can run over — which is a finding.
+ * The walk is engine/paychecks.ts walkDeferrals, the one the Taxes
+ * projection's wages stop at too.
  */
 
 const r6 = (cents: number, micro: number) => Math.round((cents * micro) / 1_000_000)
@@ -53,7 +55,7 @@ export type SourcePace = {
   match: MatchPace | null
   /** Deferrals + match into this plan, against §415(c). */
   annualAdditionsCents: number
-  /** `projectedCents` split by the stub's pre-tax / Roth lines (Future's buckets read these). */
+  /** `projectedCents` split pre-tax / Roth: the YTD column's own lines, then the stub's (Future's buckets and Taxes' wages read these). */
   projectedPretaxCents: number
   projectedRothCents: number
 }
@@ -102,13 +104,6 @@ export type Contributions = {
   limits: typeof LIMITS_2026
 }
 
-/** The deferral limit for a person's age this year: the base, plus the catch-up tier they're in. */
-export function deferralLimit(age: number | null) {
-  const tier: '50+' | '60–63' | null = age === null ? null : age >= 60 && age <= 63 ? '60–63' : age >= 50 ? '50+' : null
-  const catchUp = tier === '60–63' ? LIMITS_2026.catchUp60to63Cents : tier === '50+' ? LIMITS_2026.catchUp50Cents : 0
-  return { baseCents: LIMITS_2026.deferralCents, catchUpCents: catchUp, catchUpTier: tier, limitCents: LIMITS_2026.deferralCents + catchUp }
-}
-
 /**
  * A direct Roth IRA contribution at `magi`: the full limit below the phase-out,
  * nothing above it, and in between the limit scaled down — rounded up to the
@@ -123,51 +118,28 @@ export function rothAllowed(limitCents: number, magiCents: number, [start, end]:
 }
 
 function sourcePace(s: PaySource, year: number, limit: number): SourcePace {
-  const p = projectPaySource(s, year)
-  const perCheck = s.retirementCents + s.rothCents
+  const p = projectPaySource(s, year, limit)
+  // The checks this plan withholds from, oldest first, each taking what's left under the limit (engine/paychecks.ts).
+  const w = walkDeferrals(s, year, limit)
+  const perCheck = w.perCheckCents
   const capPerCheck = s.matchCapMicro === null ? 0 : r6(s.grossCents, s.matchCapMicro)
   const matchOf = (deferral: number) => (s.matchRateMicro === null ? 0 : r6(Math.min(deferral, capPerCheck), s.matchRateMicro))
-
-  // The checks this plan withholds from, oldest first, each taking what's left under the limit. With a YTD
-  // column the year so far is one known lump; without one, every pay date so far repeats the stub — and the
-  // plan would have stopped at the limit on those too.
-  const estimated = !p.stale && s.ytdGrossCents === null
-  const past = estimated ? payDatesThrough(s.paidOn, s.cadence, `${year}-01-01`).reverse() : []
-  const ahead = remainingPayDates(s, year)
-  let cum = p.stale ? 0 : estimated ? 0 : (s.ytdRetirementCents ?? 0) + (s.ytdRothCents ?? 0)
-  // Already at the limit by the stub: the plan reached it then.
-  let reachedOn: string | null = !estimated && cum >= limit && perCheck > 0 ? s.paidOn : null
-  let after = 0
-  let matched = 0
-  let uncut = 0
-  let ytd = cum
-  const walk = (dates: string[], isPast: boolean) => {
-    for (const d of dates) {
-      const take = Math.max(0, Math.min(perCheck, limit - cum))
-      if (reachedOn === null && perCheck > 0 && cum < limit && cum + perCheck >= limit) reachedOn = d
-      if (perCheck > 0 && take === 0) after++
-      cum += take
-      matched += matchOf(take)
-      uncut += matchOf(perCheck)
-      if (isPast) ytd = cum
-    }
-  }
-  walk(past, true)
-  walk(ahead, false)
+  const matched = w.checks.reduce((sum, c) => sum + matchOf(c.cents), 0)
+  const uncut = w.checks.length * matchOf(perCheck)
 
   let match: MatchPace | null = null
   if (s.matchRateMicro !== null && s.matchCapMicro !== null) {
     // A known YTD lump is matched as the stub says: the rate on deferrals up to the cap share of YTD pay.
-    const lump = estimated || p.stale ? 0 : r6(Math.min(ytd, r6(p.ytd.grossCents, s.matchCapMicro)), s.matchRateMicro)
+    const lump = p.ytdEstimated ? 0 : r6(Math.min(w.ytdCents, r6(p.ytd.grossCents, s.matchCapMicro)), s.matchRateMicro)
     match = {
       rateMicro: s.matchRateMicro,
       capMicro: s.matchCapMicro,
       trueUp: s.matchTrueUp,
       projectedCents: s.matchTrueUp
-        ? r6(Math.min(cum, r6(p.projected.grossCents, s.matchCapMicro)), s.matchRateMicro)
+        ? r6(Math.min(w.projectedCents, r6(p.projected.grossCents, s.matchCapMicro)), s.matchRateMicro)
         : lump + matched,
       lostToLimitCents: s.matchTrueUp ? 0 : Math.max(0, uncut - matched),
-      unclaimedCents: ahead.length * r6(Math.max(0, capPerCheck - perCheck), s.matchRateMicro),
+      unclaimedCents: w.remainingChecks * r6(Math.max(0, capPerCheck - perCheck), s.matchRateMicro),
     }
   }
   return {
@@ -176,16 +148,16 @@ function sourcePace(s: PaySource, year: number, limit: number): SourcePace {
     cadence: s.cadence,
     perCheckCents: perCheck,
     grossCents: s.grossCents,
-    ytdCents: ytd,
+    ytdCents: w.ytdCents,
     ytdEstimated: p.ytdEstimated,
-    remainingChecks: ahead.length,
-    projectedCents: cum,
-    reachedOn,
-    checksAfterLimit: after,
+    remainingChecks: w.remainingChecks,
+    projectedCents: w.projectedCents,
+    reachedOn: w.reachedOn,
+    checksAfterLimit: w.checksAfterLimit,
     match,
-    annualAdditionsCents: cum + (match?.projectedCents ?? 0),
-    projectedPretaxCents: perCheck > 0 ? Math.round((cum * s.retirementCents) / perCheck) : cum,
-    projectedRothCents: perCheck > 0 ? cum - Math.round((cum * s.retirementCents) / perCheck) : 0,
+    annualAdditionsCents: w.projectedCents + (match?.projectedCents ?? 0),
+    projectedPretaxCents: w.projectedPretaxCents,
+    projectedRothCents: w.projectedRothCents,
   }
 }
 
