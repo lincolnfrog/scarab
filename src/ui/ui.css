@@ -30,9 +30,10 @@
   cursor: pointer;
   transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
+.ui-iconbtn { border-radius: 50%; }
 .ui-iconbtn:hover:not(:disabled),
 .ui-iconbtn[aria-expanded='true'] {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--hover);
   color: var(--ink);
 }
 .ui-iconbtn:disabled { opacity: 0.4; cursor: default; }
@@ -88,14 +89,15 @@
 .btn.mini .ui-spinner { width: 12px; height: 12px; }
 
 /* ---------- Dialog / Drawer (motion: styles.css "dialog") ---------- */
+/* A dialog sits one tone above the cards, with the large corner and no outline. */
 .ui-dialog {
   margin: auto; /* the global * { margin: 0 } reset would pin it top-left */
   padding: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: 14px;
-  background: var(--card);
+  border: 0;
+  border-radius: var(--r-xl);
+  background: var(--card-hi);
   color: var(--ink);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), var(--edge);
   width: min(var(--ui-dialog-w, 440px), calc(100vw - 32px));
   max-width: none;
   max-height: calc(100dvh - 48px);
@@ -143,9 +145,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.015);
+  padding: 12px 20px 16px;
 }
 .ui-dialog-foot .ui-foot-start { margin-right: auto; }
 
@@ -154,8 +154,7 @@
   width: min(var(--ui-dialog-w, 520px), 100vw);
   height: 100dvh;
   max-height: 100dvh;
-  border-radius: 14px 0 0 14px;
-  border-right: 0;
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
   transition-duration: var(--dur-3);
 }
 .ui-dialog--drawer:not([open]) { transform: translateX(32px); }
@@ -164,6 +163,7 @@
 }
 .ui-dialog--drawer .ui-dialog-head { padding-top: 20px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
 .ui-dialog--drawer .ui-dialog-body { padding-top: 16px; }
+.ui-dialog--drawer .ui-dialog-foot { border-top: 1px solid var(--line); }
 
 /* Phones: every dialog and drawer is a sheet from the bottom edge, full width, in thumb's reach. A
    sliver of the page stays showing above the tallest (a drawer) so it reads as a layer, not a new page,
@@ -175,8 +175,7 @@
     margin: auto 0 0;
     width: 100%;
     max-height: calc(100dvh - max(env(safe-area-inset-top, 0px), 12px) - 12px);
-    border-width: 1px 0 0;
-    border-radius: 16px 16px 0 0;
+    border-radius: 24px 24px 0 0;
     transition-duration: var(--dur-3);
   }
   .ui-dialog--drawer { height: calc(100dvh - max(env(safe-area-inset-top, 0px), 12px) - 12px); }
@@ -208,7 +207,7 @@
   color: var(--down);
   background: rgba(229, 96, 92, 0.08);
   border: 1px solid rgba(229, 96, 92, 0.35);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 7px 10px;
 }
 .ui-typeconfirm b { font-family: var(--mono); color: var(--ink); font-weight: 600; }
@@ -242,7 +241,7 @@
   gap: 3px;
   background: var(--plane);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 0 10px;
   font-size: 13px;
   transition: border-color var(--dur-1) var(--ease-out);
@@ -313,14 +312,13 @@
   .ui-pin1 > table .selrow > td:first-child { background: linear-gradient(var(--gold-dim), var(--gold-dim)), var(--card); }
 }
 
-/* ---------- Segmented (mockup .pills: card-hi active, never gold) ---------- */
+/* ---------- Segmented (a pill group: the chosen option on a lifted tone, never gold) ---------- */
 .ui-seg {
   display: inline-flex;
   gap: 2px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 2px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 999px;
+  padding: 3px;
 }
 .ui-seg button {
   background: none;
@@ -328,8 +326,9 @@
   color: var(--ink-3);
   font: inherit;
   font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  font-weight: 500;
+  padding: 4px 11px;
+  border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
   transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
@@ -338,10 +337,10 @@
    height, the options stretched to fill it. */
 .ui-seg--md,
 .ui-field > .ui-seg { height: var(--control-h); }
-.ui-seg--md button { font-size: 12.5px; padding: 0 12px; }
+.ui-seg--md button { font-size: 12.5px; padding: 0 14px; }
 .ui-field > .ui-seg button { padding-top: 0; padding-bottom: 0; }
-.ui-seg button:hover:not(:disabled, [aria-checked='true']) { color: var(--ink-2); }
-.ui-seg button[aria-checked='true'] { background: var(--card-hi); color: var(--ink); }
+.ui-seg button:hover:not(:disabled, [aria-checked='true']) { color: var(--ink-2); background: var(--hover); }
+.ui-seg button[aria-checked='true'] { background: var(--card-top); color: var(--ink); box-shadow: var(--edge); }
 .ui-seg button:disabled { opacity: 0.4; cursor: default; }
 .ui-seg button:focus-visible { outline-offset: 0; }
 
@@ -374,8 +373,8 @@
   left: 8px;
   right: 8px;
   bottom: 0;
-  height: 2px;
-  border-radius: 2px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
   background: var(--gold);
   transform: scaleX(0);
   transition: transform var(--dur-2) var(--ease-out);
@@ -390,8 +389,7 @@
   line-height: 16px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--card-hi);
-  border: 1px solid var(--line);
+  background: var(--card-top);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
@@ -405,9 +403,8 @@
   padding: 6px;
   background: var(--card-hi);
   color: var(--ink);
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55), var(--edge);
   font-size: 13px;
   animation: ui-drop-in var(--dur-2) var(--ease-out);
 }
@@ -427,12 +424,12 @@
   font: inherit;
   font-size: 13px;
   color: var(--ink);
-  padding: 7px 10px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
   cursor: pointer;
 }
-.ui-menu-item:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
-.ui-menu-item:focus-visible { outline-offset: -2px; background: rgba(255, 255, 255, 0.06); }
+.ui-menu-item:hover:not(:disabled) { background: var(--hover); }
+.ui-menu-item:focus-visible { outline-offset: -2px; background: var(--hover); }
 .ui-menu-item.danger { color: var(--down); }
 .ui-menu-item:disabled { color: var(--ink-3); cursor: default; }
 .ui-menu-hint { margin-left: auto; padding-left: 16px; font-size: 11.5px; color: var(--ink-3); }
@@ -468,11 +465,11 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 8px 10px 12px;
-  background: #0c1017;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 11px 8px 11px 14px;
+  background: var(--card-top);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), var(--edge);
   font-size: 13px;
   color: var(--ink);
   animation: ui-rise-in var(--dur-2) var(--ease-out);
@@ -544,7 +541,7 @@
   color: var(--ink-3);
   background: none;
   border: 1px dashed var(--line-strong);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   text-decoration: none;
   cursor: pointer;
   transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
@@ -556,14 +553,13 @@
 div.ui-empty--ghost { cursor: default; }
 
 /* ---------- ErrorBoundary ---------- */
-.card.ui-errcard { border-color: rgba(229, 96, 92, 0.4); }
+.card.ui-errcard { box-shadow: inset 0 0 0 1px rgba(229, 96, 92, 0.4); }
 .ui-errcard .ui-errmsg {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink-2);
   background: var(--plane);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 8px 10px;
   margin: 8px 0 12px;
   overflow-wrap: anywhere;
@@ -604,21 +600,21 @@ div.ui-empty--ghost { cursor: default; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 26px;
-  padding: 3px 11px 3px 9px;
+  min-height: 28px;
+  padding: 3px 12px 3px 10px;
   font: inherit;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--ink-2);
-  background: var(--plane);
-  border: 1px solid var(--line-strong);
+  background: var(--card);
+  border: 1px solid transparent;
   border-radius: 999px;
   cursor: pointer;
-  transition: border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+  transition: border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
 }
 .ui-sync:hover,
-.ui-sync[aria-expanded='true'] { border-color: rgba(255, 255, 255, 0.24); color: var(--ink); }
+.ui-sync[aria-expanded='true'] { background: var(--card-hi); color: var(--ink); }
 .ui-sync:is([data-state='novault'], [data-state='failed']) { border-color: rgba(229, 96, 92, 0.45); }
 
 .ui-sync-dot {
@@ -645,7 +641,7 @@ div.ui-empty--ghost { cursor: default; }
   color: var(--ink-2);
   background: rgba(229, 96, 92, 0.08);
   border: 1px solid rgba(229, 96, 92, 0.35);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 6px 9px;
   margin-bottom: 12px;
   overflow-wrap: anywhere;
@@ -660,22 +656,22 @@ div.ui-empty--ghost { cursor: default; }
 .ui-cmdk-hint {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 26px;
-  padding: 2px 4px 2px 9px;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 5px 2px 11px;
   font: inherit;
   font-size: 12px;
   color: var(--ink-3);
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid transparent;
+  border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
-.ui-cmdk-hint:hover { border-color: var(--line-strong); color: var(--ink-2); }
-.ui-cmdk-hint .ui-kbd { color: var(--ink-3); background: none; border-color: var(--line); }
-.ui-cmdk-hint:hover .ui-kbd { color: var(--ink-2); border-color: var(--line-strong); }
+.ui-cmdk-hint:hover { background: var(--card-hi); color: var(--ink-2); }
+.ui-cmdk-hint .ui-kbd { color: var(--ink-3); background: none; border-color: var(--line-strong); }
+.ui-cmdk-hint:hover .ui-kbd { color: var(--ink-2); }
 
 /* ---------- a phone's topbar: search and the session chip fold to icons ----------
    Their words stay in the accessibility tree (as .ui-sr does), so each keeps its name. */
@@ -748,7 +744,9 @@ div.ui-empty--ghost { cursor: default; }
   text-align: left;
   cursor: pointer;
 }
-.ui-finding-head:focus-visible { outline: var(--focus-ring); outline-offset: 2px; border-radius: 6px; }
+.ui-finding-head { border-radius: 10px; transition: background-color var(--dur-1) var(--ease-out); }
+.ui-finding-head:hover { background: rgba(255, 255, 255, 0.025); }
+.ui-finding-head:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 .ui-finding-eyebrow {
   display: flex;
   flex-direction: column;
@@ -774,8 +772,7 @@ div.ui-empty--ghost { cursor: default; }
   gap: 14px 22px;
   margin: 0 2px 14px 92px;
   padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--plane);
 }
 .ui-finding-body[hidden] { display: none; }
@@ -826,55 +823,72 @@ div.ui-empty--ghost { cursor: default; }
   .ui-finding-body { margin-left: 2px; padding: 12px; }
 }
 
-/* ---------- Drill: overview cards and detail views (Drill.tsx) ---------- */
+/* ---------- Drill: overview cards and detail views (Drill.tsx) ----------
+   The probe: an overview card that opens into its detail. Its round chevron
+   on the right is the one mark that says "there's more here" — tonal at
+   rest, gold as the pointer arrives; the card itself lifts a tone. */
 .ui-detail { animation: ui-detail-in var(--dur-2) var(--ease-out); }
 @keyframes ui-detail-in { from { opacity: 0; transform: translateY(4px); } }
-.ui-detail-lead { color: var(--ink-2); font-size: 13px; max-width: 72ch; margin: -6px 0 14px; }
+.ui-detail-lead { color: var(--ink-2); font-size: 13px; line-height: 1.55; max-width: 72ch; margin: -6px 0 16px; }
 
 .card.ui-drill {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
+  transition: background-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
 }
-.card.ui-drill:hover { border-color: var(--line-strong); background: var(--card-hi); }
-.card.ui-drill:has(.ui-drill-link:focus-visible) { border-color: var(--gold); }
-.card.ui-drill h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.ui-drill-link { color: inherit; text-decoration: none; }
+.card.ui-drill:hover { background: var(--card-hi); }
+.card.ui-drill:has(.ui-drill-link:focus-visible) { box-shadow: var(--edge), 0 0 0 2px var(--gold); }
+.card.ui-drill h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ui-drill-link { color: inherit; text-decoration: none; transition: color var(--dur-1) var(--ease-out); }
+.card.ui-drill:hover .ui-drill-link { color: var(--ink-2); }
 /* The title is the link; its hit area stretches over the whole card. */
 .ui-drill-link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
 .ui-drill-badge {
+  flex: none;
   font-size: 10.5px;
   letter-spacing: 0.06em;
-  padding: 1px 7px;
+  padding: 1px 8px;
   border-radius: 999px;
   background: var(--gold-dim);
   color: var(--gold);
+  white-space: nowrap; /* the title wraps its words; a badge never breaks */
 }
-.ui-drill-chev { flex: none; color: var(--ink-3); transition: transform var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
-.card.ui-drill h2 .ui-drill-chev { margin-left: auto; }
-.card.ui-drill:hover .ui-drill-chev { color: var(--gold); transform: translateX(2px); }
+.ui-drill-chev { flex: none; color: var(--ink-3); transition: transform var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out); }
+.card.ui-drill h2 .ui-drill-chev {
+  margin: -6px -6px -6px auto; /* the 26px disc hangs off the title line without adding to it */
+  width: 26px;
+  height: 26px;
+  padding: 6px;
+  border-radius: 50%;
+  background: var(--card-top);
+  color: var(--ink-2);
+}
+.card.ui-drill:hover h2 .ui-drill-chev { background: var(--gold-dim); color: var(--gold); transform: translateX(2px); }
 .ui-drill-v {
-  font-size: 21px;
-  font-weight: 650;
+  font-size: 22px;
+  font-weight: 600;
   letter-spacing: -0.01em;
+  line-height: 1.2;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 .ui-drill-v.pos { color: var(--up); }
 .ui-drill-v.neg { color: var(--down); }
-.ui-drill-note { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.ui-drill-note { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; margin-top: 2px; }
 .ui-drill-note b { color: var(--ink); font-weight: 600; }
-.ui-drill-body { margin-top: 10px; pointer-events: none; /* under the card link */ }
+.ui-drill-body { margin-top: 12px; pointer-events: none; /* under the card link */ }
 .ui-drill-body .ui-drill-live { position: relative; z-index: 1; pointer-events: auto; }
 
+/* "All 34 ›": a text link with the same chevron, small. */
 .ui-drill-more {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--ink-2);
   text-decoration: none;
   white-space: nowrap;
@@ -885,11 +899,11 @@ div.ui-empty--ghost { cursor: default; }
 
 .ui-stats { display: flex; flex-wrap: wrap; gap: 14px 32px; margin: 0; }
 .ui-stat { min-width: 0; }
-.ui-stat dt { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px; }
-.ui-stat dd { margin: 0; font-size: 17px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ui-stat dt { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
+.ui-stat dd { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .ui-stat dd.pos { color: var(--up); }
 .ui-stat dd.neg { color: var(--down); }
-.ui-stat dd.ui-stat-note { font-size: 12px; font-weight: 400; color: var(--ink-3); margin-top: 1px; }
+.ui-stat dd.ui-stat-note { font-size: 12px; font-weight: 400; letter-spacing: 0; color: var(--ink-3); margin-top: 2px; }
 
 .ui-minirows { list-style: none; margin: 0; padding: 0; }
 .ui-minirows li {
@@ -897,7 +911,7 @@ div.ui-empty--ghost { cursor: default; }
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 0;
+  padding: 7px 0;
   font-size: 13px;
   border-top: 1px solid var(--line);
 }

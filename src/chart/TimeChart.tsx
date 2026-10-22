@@ -128,6 +128,12 @@ export type TimeChartProps = {
   legend?: 'auto' | 'none'
   /** Where the legend sits: in the header row (default) or under the plot — for a long legend that would crowd the header. */
   legendAt?: 'head' | 'foot'
+  /**
+   * Where the controls sit — actions, the scale switch, the range presets. 'head' (default) puts them in
+   * the header row beside the title or lead; 'foot' lays them out under the plot as a quiet toolbar, so
+   * a hero figure stands alone over its chart and the knobs come after.
+   */
+  controlsAt?: 'head' | 'foot'
   onToggleSeries?: (id: string, hidden: boolean) => void
   /** Extra tooltip rows. `t` is the snapped point's own date string; `values` are every series' raw readings as of it, by id. */
   tooltipExtra?: (t: string, values: Record<string, number | null>) => ReactNode
@@ -739,7 +745,21 @@ export function TimeChart(p: TimeChartProps) {
     />
   ) : null
   const legendFoot = p.legendAt === 'foot'
-  const showHead = !!(p.title || p.lead || p.actions || presetsNode || scaleNode || m.zoomed || (!legendFoot && legendNode && legendItems.length >= 2))
+  const controlsFoot = p.controlsAt === 'foot'
+  const controls = (
+    <>
+      {p.actions}
+      {m.zoomed && (
+        <Button size="mini" variant="ghost" onClick={resetZoom} title="Or double-click the chart, or press Escape">
+          Reset zoom
+        </Button>
+      )}
+      {scaleNode}
+      {presetsNode}
+    </>
+  )
+  const anyControls = !!(p.actions || presetsNode || scaleNode || m.zoomed)
+  const showHead = !!(p.title || p.lead || (!controlsFoot && anyControls) || (!legendFoot && legendNode && legendItems.length >= 2))
 
   const r = c !== null ? readingsAt(c) : null
   const first = r?.rows.find((x) => x.y !== null)
@@ -774,17 +794,12 @@ export function TimeChart(p: TimeChartProps) {
         <div className="ch-head">
           {p.title && <h2>{p.title}</h2>}
           {p.lead && <div className="ch-head-lead">{p.lead}</div>}
-          <div className="ch-head-r">
-            {!legendFoot && legendNode}
-            {p.actions}
-            {m.zoomed && (
-              <Button size="mini" variant="ghost" onClick={resetZoom} title="Or double-click the chart, or press Escape">
-                Reset zoom
-              </Button>
-            )}
-            {scaleNode}
-            {presetsNode}
-          </div>
+          {(!controlsFoot || (!legendFoot && legendNode)) && (
+            <div className="ch-head-r">
+              {!legendFoot && legendNode}
+              {!controlsFoot && controls}
+            </div>
+          )}
         </div>
       )}
       <div
@@ -984,7 +999,12 @@ export function TimeChart(p: TimeChartProps) {
           {liveText}
         </div>
       </div>
-      {legendFoot && legendNode && <div className="ch-legend-below">{legendNode}</div>}
+      {(controlsFoot && anyControls) || (legendFoot && legendNode) ? (
+        <div className={controlsFoot ? 'ch-foot' : 'ch-legend-below'}>
+          {legendFoot && legendNode}
+          {controlsFoot && anyControls && <div className="ch-foot-r">{controls}</div>}
+        </div>
+      ) : null}
       {(m.refused.length > 0 || (tf !== 'value' && m.drawable)) && (
         <div className="ch-note">
           {tf === 'rebased' && m.drawable && (m.fixedAnchor ? `100 = each line's value on ${fmtDay(parseT(p.anchorT!, today))}. ` : "100 = each line's first value above zero in view. ")}

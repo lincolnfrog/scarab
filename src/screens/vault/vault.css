@@ -156,7 +156,7 @@
 .zk-side-prices { margin-top: 6px; padding-left: 14px; }
 
 /* Front door: why the last session ended on its own, or that another tab has one open. */
-.zk-door-lock { margin: 0 0 14px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--plane); line-height: 1.5; }
+.zk-door-lock { margin: 0 0 14px; padding: 8px 11px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--plane); line-height: 1.5; }
 
 /* Front door: the terms line under the create step — quiet (ink-3), its links one step up, never gold: it is not a call to action. */
 .zk-door-terms { margin: 14px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
@@ -201,8 +201,8 @@
   gap: 10px;
   margin: 0 0 12px;
   padding: 9px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
   background: var(--plane);
   font-size: 12.5px;
   line-height: 1.5;

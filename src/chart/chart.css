@@ -113,8 +113,8 @@
   place-items: center;
   color: var(--ink-3);
   font-size: 12.5px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
 }
 .ch-refused { color: var(--ink-3); }
 .tip .r .vl .ch-asof {
@@ -136,28 +136,36 @@
 .ch-a:hover { text-decoration-color: var(--ink-2); }
 
 /* ---------- dashboard: hero, change text, tiles ---------- */
-.ch-hero-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; }
-.ch-hero { font-size: 44px; line-height: 1.05; }
+.ch-hero-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 6px; }
+.ch-hero { font-size: 48px; line-height: 1.05; }
 .ch-delta { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ch-hero-delta { font-size: 13px; }
 .ch-compare { text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+
+/* The controls of a chart whose knobs sit under the plot (controlsAt="foot"): a quiet toolbar after the legend. */
+.ch-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 10px; }
+.ch-foot-r { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; }
+.ch-foot .ui-seg { background: none; padding: 0; }
+.ch-foot .ui-seg button { font-size: 11.5px; padding: 3px 9px; }
+.ch-foot .btn.mini { font-size: 11.5px; padding: 3px 10px; min-height: 0; background: none; border-color: var(--line-strong); }
+.ch-foot .btn.mini:hover:not(:disabled) { background: var(--hover); }
 
 .ch-stat {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  transition: border-color var(--dur-1) var(--ease-out);
+  transition: background-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
 }
-.ch-stat:hover { border-color: var(--line-strong); }
-/* The link's own ring hugs the small title; the card's border says which tile has focus. */
-.ch-stat:has(.ch-stat-link:focus-visible) { border-color: var(--gold); }
+.ch-stat:hover { background: var(--card-hi); }
+/* The link's own ring hugs the small title; a gold ring on the card says which tile has focus. */
+.ch-stat:has(.ch-stat-link:focus-visible) { box-shadow: var(--edge), 0 0 0 2px var(--gold); }
 .ch-stat h2 { margin-bottom: 8px; }
 .ch-stat-link { color: inherit; text-decoration: none; }
 /* The title is the link; its hit area stretches over the whole card. */
 .ch-stat-link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
 .ch-stat:hover .ch-stat-link { color: var(--ink-2); }
-.ch-stat-v { font-size: 21px; font-weight: 650; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ch-stat-v { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .ch-stat .ch-spark { margin-top: auto; padding-top: 8px; box-sizing: content-box; pointer-events: none; /* under the card link */ }
 
 /* ---------- dashboard: dream home tile ---------- */
@@ -185,9 +193,9 @@
   gap: 6px;
   font-size: 12px;
   color: var(--ink-2);
-  background: var(--card-hi);
-  border: 1px solid var(--line);
-  padding: 2px 9px;
+  background: var(--card-top);
+  border: 1px solid transparent;
+  padding: 2px 10px;
   border-radius: 999px;
   max-width: 180px;
   overflow: hidden;
@@ -205,7 +213,7 @@
   /* The ring keeps its legend beside it while the two fit, and centres over it once they don't. */
   .ch-donut { column-gap: 14px; justify-content: center; }
   .ch-donut-legend { flex-basis: 118px; }
-  .ch-hero { font-size: 40px; }
+  .ch-hero { font-size: 42px; }
 }
 
 /* Activity as a bank app lists it: what and how much on top, when and which account or category below.
@@ -319,13 +327,13 @@
   display: inline-flex;
   align-items: stretch;
   max-width: 100%;
-  background: var(--card-hi);
-  border: 1px solid var(--line);
+  background: var(--card-top);
+  border: 1px solid transparent;
   border-radius: 999px;
   font-size: 12.5px;
-  transition: border-color var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+  transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
 }
-.ch-chip:hover { border-color: var(--line-strong); }
+.ch-chip:hover { background: #2c3544; }
 .ch-chip.warn { border-style: dashed; }
 .ch-chip button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 .ch-chip-t {

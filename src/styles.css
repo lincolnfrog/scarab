@@ -9,17 +9,36 @@
 
 :root {
   color-scheme: dark;
+  /* Surfaces: a tonal ladder (Material 3's surface containers). Depth comes
+     from tone, not hairlines — the page is the lowest, each layer above it a
+     step lighter: page < plane (sidebar, inputs) < card < card-hi (hover,
+     dialogs, popovers) < card-top (active segments, buttons). --card stays
+     #161b24: the chart palette below is validated against it. */
   --page: #0a0d12;
   --plane: #0e1219;
   --card: #161b24;
   --card-hi: #1c2330;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.13);
+  --card-top: #242c3a;
+  --line: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  /* The light a card's top edge catches: cards carry no border, this says where one ends. */
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  /* State layers: what hover and press add on top of a surface. */
+  --hover: rgba(255, 255, 255, 0.05);
+  --press: rgba(255, 255, 255, 0.09);
   --ink: #f2efe6;
   --ink-2: #a8adb8;
   --ink-3: #828893; /* 4.84:1 on --card (was #6e7480, 3.68:1) */
   --gold: #e3b23c;
   --gold-dim: rgba(227, 178, 60, 0.14);
+  --gold-ink: #231a05; /* text on a gold fill */
+  /* The sun the scarab rolls: a warm wash in the corner of a hero card, and nowhere else. */
+  --sun: radial-gradient(90% 70% at 0% 0%, rgba(227, 178, 60, 0.1), transparent 70%);
+  /* Shape: pills for controls and nav, 16 for cards, 20 for a hero, 24 for a dialog. */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 20px;
+  --r-xl: 24px;
   --s1: #bd8a26; /* gold */
   --s2: #5b8def; /* lapis */
   --s3: #24a06e; /* malachite */
@@ -135,19 +154,20 @@ body {
 .app {
   display: flex;
   height: 100%;
-  background: var(--plane);
+  background: var(--page);
 }
 
-/* ---------- sidebar ---------- */
+/* ---------- sidebar ----------
+   A navigation drawer: one tone above the page, no rule between them, and a
+   gold pill behind the screen that's showing. */
 .side {
-  width: calc(208px + env(safe-area-inset-left, 0px));
+  width: calc(228px + env(safe-area-inset-left, 0px));
   flex: none;
-  background: #0c1017;
-  border-right: 1px solid var(--line);
+  background: var(--plane);
   display: flex;
   flex-direction: column;
-  padding: 18px 12px;
-  padding-left: calc(12px + env(safe-area-inset-left, 0px));
+  padding: 20px 14px;
+  padding-left: calc(14px + env(safe-area-inset-left, 0px));
   /* A short window (a phone on its side) scrolls the nav rather than clipping it. */
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -156,53 +176,53 @@ body {
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 8px 18px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 14px;
+  gap: 11px;
+  padding: 6px 10px 22px;
+  margin-bottom: 6px;
 }
 .logo span {
   font-family: var(--disp);
   font-size: 17px;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.24em;
   color: var(--ink);
 }
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .nav button {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
+  min-height: 42px;
   text-align: left;
   background: none;
   border: 0;
   color: var(--ink-2);
   font: inherit;
   font-size: 13.5px;
-  padding: 9px 10px;
-  border-radius: 8px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 999px;
   cursor: pointer;
-  border-left: 2px solid transparent;
   transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 .nav button:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover);
   color: var(--ink);
 }
+.nav button:active { background: var(--press); }
 .nav button:focus-visible {
   outline-offset: 1px;
 }
 .nav button.on {
   background: var(--gold-dim);
   color: var(--gold);
-  border-left-color: var(--gold);
 }
 /* Once App has measured the nav, one indicator slides behind the items and
-   takes over the active item's wash and bar (without it, .on draws them). */
+   takes over the active item's pill (without it, .on draws it). */
 .nav { position: relative; }
 .nav button { position: relative; } /* above the indicator */
 .nav-ind {
@@ -210,14 +230,14 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--gold-dim);
-  border-left: 2px solid var(--gold);
   pointer-events: none;
 }
 .nav-ind.ready { transition: transform var(--dur-3) var(--ease-out), height var(--dur-3) var(--ease-out); }
-.nav.has-ind button.on { background: none; border-left-color: transparent; }
-.nav button > svg { flex: none; }
+.nav.has-ind button.on { background: none; }
+.nav.has-ind button.on:hover { background: var(--hover); }
+.nav button > svg { flex: none; width: 19px; height: 19px; }
 .nav-short { display: none; }
 
 /* The rail: the same nav, folded to icons over their short labels (SCREENS' `short`). The status footer
@@ -228,19 +248,22 @@ body {
     padding: 14px 6px;
     padding-left: calc(6px + env(safe-area-inset-left, 0px));
   }
-  .side .logo { justify-content: center; padding: 4px 0 14px; margin-bottom: 10px; }
+  .side .logo { justify-content: center; padding: 6px 0 16px; margin-bottom: 6px; }
   .side .logo span { display: none; }
   .nav button {
     flex-direction: column;
     gap: 5px;
+    min-height: 0;
     padding: 9px 2px 8px;
+    border-radius: 14px;
     font-size: 10.5px;
     font-weight: 600;
     line-height: 1.2;
     letter-spacing: 0.01em;
     text-align: center;
   }
-  .nav button > svg { width: 19px; height: 19px; }
+  .nav-ind { border-radius: 14px; }
+  .nav button > svg { width: 20px; height: 20px; }
   .nav-label { display: none; }
   .nav-short { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .side .foot { display: none; }
@@ -256,9 +279,9 @@ body {
   left: 12px;
   z-index: 100;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--gold);
-  color: #231a05;
+  color: var(--gold-ink);
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
@@ -269,7 +292,7 @@ body {
 .skiplink:focus-visible { outline-color: var(--ink); }
 .side .foot {
   margin-top: auto;
-  padding: 14px 8px 4px;
+  padding: 14px 14px 4px;
   border-top: 1px solid var(--line);
   font-size: 11.5px;
   color: var(--ink-3);
@@ -282,14 +305,14 @@ body {
   display: flex;
   flex-direction: column;
 }
+/* The top app bar is the page itself: no rule, no tint — just the line that says where we are. */
 .topbar {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 13px 22px;
-  padding-right: calc(22px + env(safe-area-inset-right, 0px));
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.015);
+  min-height: 56px;
+  padding: 12px 28px;
+  padding-right: calc(28px + env(safe-area-inset-right, 0px));
 }
 .topbar-brand { display: none; }
 .topbar .where {
@@ -322,8 +345,8 @@ body {
 .screens {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 22px;
-  padding-right: calc(22px + env(safe-area-inset-right, 0px));
+  padding: 8px 28px 36px;
+  padding-right: calc(28px + env(safe-area-inset-right, 0px));
   overflow-y: auto;
   overscroll-behavior-y: contain;
   /* Screen changes crossfade as one unit (see "motion" at the end). */
@@ -339,7 +362,7 @@ body {
     gap: 4px;
     min-height: calc(54px + env(safe-area-inset-top, 0px));
     padding: calc(7px + env(safe-area-inset-top, 0px)) calc(8px + env(safe-area-inset-right, 0px)) 7px calc(16px + env(safe-area-inset-left, 0px));
-    background: #0c1017;
+    background: var(--plane);
   }
   .topbar .where,
   .topbar .who { display: none; }
@@ -364,14 +387,14 @@ body {
     padding: 16px calc(16px + env(safe-area-inset-right, 0px)) 28px calc(16px + env(safe-area-inset-left, 0px));
   }
 
+  /* A navigation bar: one tone above the page, the showing screen's icon in a gold pill. */
   .tabbar {
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
     flex: none;
-    padding: 5px calc(4px + env(safe-area-inset-right, 0px)) max(5px, env(safe-area-inset-bottom, 0px)) calc(4px + env(safe-area-inset-left, 0px));
-    background: #0c1017;
-    border-top: 1px solid var(--line);
+    padding: 8px calc(4px + env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) calc(4px + env(safe-area-inset-left, 0px));
+    background: var(--plane);
   }
   .tab {
     display: flex;
@@ -394,14 +417,14 @@ body {
   .tab-ico {
     display: grid;
     place-items: center;
-    width: 54px;
+    width: 56px;
     max-width: 100%;
-    height: 30px;
+    height: 32px;
     border-radius: 999px;
     transition: background-color var(--dur-2) var(--ease-out);
   }
   .tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tab:active .tab-ico { background: rgba(255, 255, 255, 0.07); }
+  .tab:active .tab-ico { background: var(--press); }
   .tab:is([aria-current='page'], .on) { color: var(--gold); }
   .tab:is([aria-current='page'], .on) .tab-ico { background: var(--gold-dim); }
   .tab:focus-visible { outline-offset: -2px; }
@@ -426,8 +449,9 @@ body {
   transition: background-color var(--dur-1) var(--ease-out);
 }
 .more-item > svg:first-child { color: var(--ink-2); flex: none; }
+.more-item { border-radius: 999px; }
 .more-item:hover,
-.more-item:active { background: rgba(255, 255, 255, 0.05); }
+.more-item:active { background: var(--hover); }
 .more-item[aria-current='page'] { background: var(--gold-dim); color: var(--gold); }
 .more-item[aria-current='page'] > svg:first-child { color: var(--gold); }
 .more-label { flex: 1; min-width: 0; }
@@ -447,32 +471,56 @@ body {
   display: flex;
   align-items: baseline;
   gap: 14px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  min-height: 40px;
 }
 .shead h1 {
   flex: none; /* the description beside it gives way first; the title never breaks */
   font-family: var(--disp);
   font-weight: 400;
-  font-size: 24px;
-  letter-spacing: 0.04em;
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
 }
-/* In a detail view: "Taxes › Realized gains" — the screen's name is the link back up. */
-.shead h1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.shead-up { color: var(--ink-3); text-decoration: none; transition: color var(--dur-1) var(--ease-out); }
-.shead-up:hover { color: var(--gold); }
+/* In a detail view: "← Taxes › Realized gains" — the screen's name, with a round back button
+   before it, is the link one level up. */
+.shead h1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.shead-up {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  text-decoration: none;
+  border-radius: 999px;
+  transition: color var(--dur-1) var(--ease-out);
+}
+.shead-up:hover { color: var(--ink); }
+.shead-back {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: var(--edge);
+  color: var(--ink-2);
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.shead-up:hover .shead-back { background: var(--gold-dim); color: var(--gold); transform: translateX(-2px); }
 .shead-sep { color: var(--ink-3); font-family: var(--sans); font-size: 18px; }
 .shead:has(.shead-up) .sub { display: none; } /* the crumb says where we are; the overview's tagline steps aside */
 .shead-here { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shead h1:has(.shead-up) { flex: 0 1 auto; }
 @media (width < 720px) {
   /* A phone stacks the crumb: the way back as a small line over the view's own name. */
-  .shead h1:has(.shead-up) { flex-wrap: wrap; gap: 0; flex-basis: 100%; }
-  .shead-up { flex-basis: 100%; font-family: var(--sans); font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 0; }
-  .shead-up::before { content: '‹ '; }
+  .shead h1:has(.shead-up) { flex-wrap: wrap; gap: 2px 0; flex-basis: 100%; align-items: baseline; }
+  .shead-up { flex-basis: 100%; font-family: var(--sans); font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 0 6px; }
+  .shead-back { width: 26px; height: 26px; }
   .shead-sep { display: none; }
 }
 .shead .sub {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-3);
 }
 .shead .right {
@@ -487,7 +535,7 @@ body {
 /* A phone stacks the header: the title, a two-line description, then the actions on a row of their own. */
 @media (width < 720px) {
   .shead { flex-wrap: wrap; gap: 4px 12px; margin-bottom: 14px; }
-  .shead h1 { font-size: 26px; line-height: 1.2; }
+  .shead h1 { font-size: 28px; line-height: 1.2; }
   .shead .sub {
     flex-basis: 100%;
     display: -webkit-box;
@@ -499,28 +547,37 @@ body {
   .shead .right { flex-basis: 100%; margin: 8px 0 0; flex-wrap: wrap; justify-content: flex-start; }
 }
 
+/* A filled card: a surface one tone above the page, no outline — its top edge catches the light. */
 .card {
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px 18px;
+  box-shadow: var(--edge);
+  border-radius: var(--r-md);
+  padding: 18px 20px;
   max-width: 720px;
 }
 .card + .card {
-  margin-top: 14px;
+  margin-top: 16px;
 }
+/* A card's title is an inscription: small capitals, tracked, quiet. */
 .card h2 {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 .card p {
   color: var(--ink-2);
   font-size: 13.5px;
+  line-height: 1.55;
   max-width: 60ch;
+}
+/* A hero card — the figure a screen opens on — is the one surface with the sun's warmth in its corner.
+   Screens mark theirs; the wash sits on --card, so a chart inside still reads on the validated surface. */
+.card:is(.hero, .tx-hero, .co-hero, .goal-hero, .inv-sum, .fo-answer) {
+  background: var(--sun), var(--card);
+  border-radius: var(--r-lg);
 }
 
 .kv {
@@ -547,13 +604,13 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 2px 8px;
-  border-radius: 5px;
+  border-radius: 999px;
   background: var(--gold-dim);
   color: var(--gold);
 }
 
 @media (width < 720px) {
-  .card { padding: 14px; }
+  .card { padding: 16px; }
 }
 
 /* ---------- Phase I: cash & budget ---------- */
@@ -563,7 +620,7 @@ body {
   container: grid / inline-size;
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
   max-width: 1240px;
 }
 .grid12 .card {
@@ -573,7 +630,7 @@ body {
 }
 .card.wide {
   max-width: 1240px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 .c3 { grid-column: span 3; }
 .c6 { grid-column: span 6; }
@@ -591,6 +648,7 @@ body {
 }
 @media (width < 720px) {
   .grid12 { gap: 12px; }
+  .card.wide { margin-bottom: 12px; }
 }
 /* Each card on the grid is a size container too, so its insides can answer a phone's width
    (a dialog's body is another — ui.css). */
@@ -641,21 +699,24 @@ body {
 .topline { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 12px; }
 .heronum {
   font-family: var(--disp);
-  font-size: 38px;
+  font-size: 42px;
   line-height: 1.1;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 /* buttons & inputs */
+/* Buttons are pills. The default is a filled tonal button (a surface two tones up, no outline); gold is
+   the one filled call to action; ghost is text-only with a hairline; danger stays outlined in --down. */
 .btn {
   font: inherit;
   font-size: 12.5px;
   font-weight: 600;
   line-height: 18px; /* 34px tall (--control-h), level with the inputs beside it; mini: 28px */
-  padding: 7px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--line-strong);
-  background: var(--card-hi);
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--card-top);
   color: var(--ink);
   cursor: pointer;
   white-space: nowrap; /* a squeezed row wraps around a button, never through its label */
@@ -665,32 +726,34 @@ body {
     color var(--dur-1) var(--ease-out),
     transform var(--dur-1) var(--ease-out);
 }
-.btn:hover:not(:disabled, [aria-disabled='true']) { border-color: var(--gold); background: #222a38; }
+.btn:hover:not(:disabled, [aria-disabled='true']) { background: #2c3544; }
 .btn:active:not(:disabled, [aria-disabled='true']) { transform: translateY(1px); }
-.btn.gold { background: var(--gold); border-color: var(--gold); color: #231a05; }
+.btn.gold { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }
 .btn.gold:hover:not(:disabled, [aria-disabled='true']) {
-  background: color-mix(in srgb, var(--gold) 84%, #fff);
-  border-color: color-mix(in srgb, var(--gold) 84%, #fff);
+  background: color-mix(in srgb, var(--gold) 86%, #fff);
+  border-color: color-mix(in srgb, var(--gold) 86%, #fff);
 }
-.btn.mini { padding: 4px 10px; font-size: 12px; min-height: var(--control-h-mini); }
-.btn.ghosty { background: none; }
-.btn.danger { border-color: rgba(229, 96, 92, 0.55); color: var(--down); }
+.btn.mini { padding: 4px 12px; font-size: 12px; min-height: var(--control-h-mini); }
+.btn.ghosty { background: none; border-color: var(--line-strong); }
+.btn.ghosty:hover:not(:disabled, [aria-disabled='true']) { background: var(--hover); border-color: var(--line-strong); }
+.btn.danger { background: none; border-color: rgba(229, 96, 92, 0.55); color: var(--down); }
 .btn.danger:hover:not(:disabled, [aria-disabled='true']) { border-color: var(--down); background: rgba(229, 96, 92, 0.1); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 
+/* A filter chip: outlined until chosen, then a gold tint. */
 .chipbtn {
   font: inherit;
   font-size: 12.5px;
-  padding: 5px 12px;
+  padding: 5px 13px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
-  background: var(--plane);
+  background: none;
   color: var(--ink-2);
   cursor: pointer;
   transition: border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
 }
-.chipbtn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.24); color: var(--ink); }
-.chipbtn.on { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
+.chipbtn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.chipbtn.on { border-color: transparent; color: var(--gold); background: var(--gold-dim); }
 
 .importbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .importmsg { margin-top: 10px; }
@@ -709,13 +772,12 @@ body {
   font-size: 12px;
   color: var(--ink-2);
   background: var(--plane);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 8px 10px;
   margin-bottom: 14px;
   overflow-wrap: anywhere;
 }
-.recovery { border: 1px solid rgba(227, 178, 60, 0.45); background: var(--gold-dim); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.recovery { border: 1px solid rgba(227, 178, 60, 0.45); background: var(--gold-dim); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
 .recoverycode {
   font-family: var(--mono);
   font-size: 15px;
@@ -734,19 +796,20 @@ body {
 .dangerbox {
   border: 1px solid rgba(229, 96, 92, 0.45);
   background: rgba(229, 96, 92, 0.08);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 14px;
   margin-top: 12px;
 }
 .dangerbox p { margin: 6px 0 10px; }
 
+/* Text fields: filled, one tone below the card they sit on, with a hairline that brightens on hover. */
 input, select {
   font: inherit;
   font-size: 13px;
   color: var(--ink);
   background: var(--plane);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 6px 10px;
   transition: border-color var(--dur-1) var(--ease-out);
 }
@@ -767,14 +830,14 @@ th {
   color: var(--ink-3);
   font-weight: 600;
   text-align: left;
-  padding: 6px 10px;
+  padding: 6px 10px 8px;
   border-bottom: 1px solid var(--line-strong);
 }
 th.r, td.r { text-align: right; }
-td { padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+td { padding: 8px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 td.num { font-family: var(--mono); font-size: 12.5px; }
 td.desc { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
+tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
 tbody tr:last-child td { border-bottom: 0; }
 
 /* charts */
@@ -789,13 +852,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .tip {
   position: absolute;
   pointer-events: none;
-  background: #0c1017;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  padding: 8px 10px;
+  background: var(--card-top);
+  border-radius: var(--r-sm);
+  padding: 8px 11px;
   font-size: 12px;
   min-width: 150px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), var(--edge);
   z-index: 5;
 }
 .tip .t { color: var(--ink-3); font-size: 11px; margin-bottom: 4px; }
@@ -815,15 +877,15 @@ tbody tr:last-child td { border-bottom: 0; }
 .formrow input.date { width: 130px; }
 .formrow input.sym { width: 80px; text-transform: uppercase; }
 .tk { display: inline-flex; align-items: center; gap: 7px; font-weight: 650; }
-.tk .lg { min-width: 30px; height: 22px; padding: 0 5px; border-radius: 6px; display: inline-grid; place-items: center; font-size: 9.5px; font-weight: 700; background: var(--card-hi); color: var(--ink-2); border: 1px solid var(--line); }
-.warncard { border-color: rgba(229, 96, 92, 0.4); }
+.tk .lg { min-width: 30px; height: 22px; padding: 0 6px; border-radius: 7px; display: inline-grid; place-items: center; font-size: 9.5px; font-weight: 700; background: var(--card-top); color: var(--ink-2); }
+.warncard { box-shadow: inset 0 0 0 1px rgba(229, 96, 92, 0.4); }
 .proprow { display: flex; gap: 20px; flex-wrap: wrap; }
 .propstat .muted { margin-bottom: 2px; }
 .propstat .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .lotrow td { background: rgba(255, 255, 255, 0.015); font-size: 12px; }
 
 /* ---------- Phase III: dream home ---------- */
-.pbar { height: 10px; border-radius: 999px; background: var(--card-hi); overflow: hidden; margin: 10px 0 12px; }
+.pbar { height: 10px; border-radius: 999px; background: var(--card-top); overflow: hidden; margin: 10px 0 12px; }
 .pbar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #8a6418, var(--gold)); }
 .selrow td { background: var(--gold-dim); }
 

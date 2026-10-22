@@ -47,9 +47,8 @@
 /* An inline editor inside a card (the paycheck editor): set off from the table above it. */
 .scr-editor {
   margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  padding: 16px 18px;
+  border-radius: 14px;
   background: var(--plane);
 }
 
@@ -197,9 +196,9 @@ td.scr-who { min-width: 156px; }
   gap: 6px;
   font-size: 12px;
   color: var(--ink-2);
-  background: var(--card-hi);
-  border: 1px solid var(--line);
-  padding: 2px 9px;
+  background: var(--card);
+  box-shadow: var(--edge);
+  padding: 3px 11px;
   border-radius: 999px;
   white-space: nowrap;
 }
@@ -351,13 +350,13 @@ td.scr-none { padding: 18px 10px; text-align: center; }
   align-items: center;
   gap: 12px;
   padding: 8px 10px 8px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 13.5px;
   color: var(--ink);
   cursor: pointer;
   transition: background-color var(--dur-1) var(--ease-out);
 }
-.scr-cmdk-opt[aria-selected='true'] { background: rgba(255, 255, 255, 0.06); }
+.scr-cmdk-opt[aria-selected='true'] { background: var(--hover); }
 /* The nav's gold marker, on the row Enter opens. */
 .scr-cmdk-opt[aria-selected='true']::before {
   content: '';
@@ -409,13 +408,13 @@ td.scr-none { padding: 18px 10px; text-align: center; }
   color: var(--ink);
   background: var(--plane);
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 8px 10px;
   transition: border-color var(--dur-1) var(--ease-out);
 }
 .scr-paste:hover:not(:focus) { border-color: rgba(255, 255, 255, 0.22); }
 .scr-paste::placeholder { color: var(--ink-3); }
-.scr-preview { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.scr-preview { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
 .scr-preview td.num { white-space: nowrap; }
 .scr-errlist { margin: 6px 0 0 18px; padding: 0; display: grid; gap: 2px; }
 .scr-newtag { margin-left: 8px; }
@@ -443,7 +442,7 @@ td.scr-none { padding: 18px 10px; text-align: center; }
 .scr-flowlist dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; color: var(--ink); }
 
 /* ---------- overview: a row of cards that share the width evenly, however many render ---------- */
-.scr-pair { grid-column: span 12; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 14px; }
+.scr-pair { grid-column: span 12; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; }
 .scr-pair:empty { display: none; }
 .scr-pair > .card { container: card / inline-size; }
 @container grid (width < 800px) {

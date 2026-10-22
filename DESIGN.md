@@ -846,8 +846,25 @@ mini 32px), text fields and selects set 16px (below that iOS zooms on focus),
 and a tapped chart mark keeps its tooltip until the next tap. Cascade note:
 `main.tsx` imports App before `styles.css`, so `ui.css`, `screens.css` and
 `vault.css` load *before* it — a rule there that must beat one in
-`styles.css` needs the higher specificity. Surfaces
-#0a0d12/#0e1219/#161b24; ink #f2efe6/#a8adb8/#828893; gold accent #e3b23c
+`styles.css` needs the higher specificity.
+
+**Surfaces and shape** (2026-10-22, the tonal pass). Depth is tone, not
+outline, as in Material 3's surface containers: page #0a0d12 < plane #0e1219
+(the sidebar, text fields) < card #161b24 < card-hi #1c2330 (a hovered probe,
+dialogs, popovers) < card-top #242c3a (buttons, chips, the chosen segment).
+Cards have no border — `--edge`, a one-pixel inset highlight on the top edge,
+says where one ends — and interaction adds a state layer (`--hover`,
+`--press`) rather than a brighter border. The sidebar is a navigation drawer
+with a gold pill behind the showing screen (the phone's tab bar and the
+tablet's rail do the same); the topbar is the page itself. Shape: pills for
+every button, chip, segment and nav item; 16px cards, 20px hero cards, 24px
+dialogs, 10px fields. The one flourish is `--sun`: a warm radial wash in the
+corner of each screen's hero card and nowhere else — the sun the scarab
+rolls. The Dashboard's hero puts its chart knobs under the plot
+(`TimeChart controlsAt="foot"`), so the figure stands alone over its chart.
+A `DrillCard`'s round chevron on the right is the mark that a card opens
+into more; a detail view's heading starts with a round back button. Ink
+#f2efe6/#a8adb8/#828893; gold accent #e3b23c
 reserved for nav/CTAs/goal (and the focus ring). Chart series fixed order
 (CVD-validated on #161b24): gold #bd8a26, lapis #5b8def, malachite #24a06e,
 amethyst #8f7fe8, carnelian #d95f42, faience #2b9cb8. Up/down #34c77b/#e5605c

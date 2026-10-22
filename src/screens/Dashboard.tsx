@@ -292,7 +292,7 @@ export default function Dashboard() {
     <>
       {header}
       <div className="grid12">
-        <div className="card c8">
+        <div className="card c8 hero">
           <h2>Household net worth</h2>
           {series.length >= 2 ? (
             <TimeChart
@@ -306,6 +306,7 @@ export default function Dashboard() {
               }
               series={parts ?? nwSeries?.total ?? []}
               legendAt="foot"
+              controlsAt="foot"
               height={230}
             />
           ) : (

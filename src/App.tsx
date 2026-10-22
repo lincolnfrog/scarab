@@ -447,8 +447,13 @@ function Shell({ me }: { me: Me | null }) {
             <h1 ref={h1} tabIndex={-1}>
               {crumb ? (
                 <>
-                  {/* In a detail view the screen's name is the way back to its overview. */}
+                  {/* In a detail view the screen's name — behind a round back button — is the way back to its overview. */}
                   <Link to={{ screen: active }} className="shead-up">
+                    <span className="shead-back" aria-hidden="true">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15 5l-7 7 7 7" />
+                      </svg>
+                    </span>
                     {label}
                   </Link>
                   <span className="shead-sep" aria-hidden="true">

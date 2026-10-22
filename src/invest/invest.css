@@ -6,8 +6,8 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  border-radius: 6px;
-  border: 1px solid var(--line);
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
   background: transparent;
   color: var(--ink-2);
   font-size: 11px;
@@ -78,10 +78,10 @@
   display: inline-flex;
   align-items: center;
   height: 18px;
-  padding: 0 6px;
-  border-radius: 5px;
-  border: 1px solid var(--line);
-  background: var(--card-hi);
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--card-top);
   color: var(--ink-2);
   font-size: 10.5px;
   font-weight: 600;
@@ -595,7 +595,7 @@
 /* ---------- the headline: worth, today, overall ---------- */
 .inv-sum-body { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 32px; }
 .inv-sum-main { display: grid; gap: 4px; min-width: 0; }
-.inv-sum-v { font-family: var(--disp); font-size: 38px; line-height: 1.1; letter-spacing: 0.005em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.inv-sum-v { font-family: var(--disp); font-size: 44px; line-height: 1.1; letter-spacing: 0.005em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .inv-sum-day { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; color: var(--ink-2); }
 .inv-sum-day b { font-family: var(--mono); font-weight: 650; font-variant-numeric: tabular-nums; }
 .inv-sum-day > span { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -611,7 +611,7 @@
 .inv-sum-stats dd { font-size: 16px; }
 .inv-dsum-stats .inv-subtone { color: inherit; opacity: 0.85; }
 @container card (width < 520px) {
-  .inv-sum-v { font-size: 30px; }
+  .inv-sum-v { font-size: 34px; }
   .inv-sum-stats { gap: 10px 24px; }
 }
 

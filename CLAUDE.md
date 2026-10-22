@@ -62,9 +62,18 @@ Match it when building screens (layout, copy tone, chart anatomy).
 - **Derived numbers come from the ledger.** Store facts (transactions, lots,
   valuations); compute charts/balances from them, never store both.
 
-## Design tokens (source: mockup, `src/styles.css`)
+## Design tokens (source: `src/styles.css`; the mockup's chrome was re-cut to match on 2026-10-22)
 
-- Surfaces: page #0a0d12 · plane #0e1219 · card #161b24. Ink #f2efe6/#a8adb8/#828893 (ink-3 ≥4.5:1 on card).
+- Surfaces are a tonal ladder (Material 3 containers): page #0a0d12 · plane
+  #0e1219 (sidebar, inputs) · card #161b24 · card-hi #1c2330 (hover, dialogs,
+  popovers) · card-top #242c3a (buttons, chips, chosen segments). Depth comes
+  from tone: cards carry no border (`--edge` is the one inset highlight),
+  hover and press are `--hover`/`--press` state layers. Ink
+  #f2efe6/#a8adb8/#828893 (ink-3 ≥4.5:1 on card).
+- Shape: pills for buttons, chips, segments and nav; `--r-md` 16px cards ·
+  `--r-lg` 20px hero cards · `--r-xl` 24px dialogs · `--r-sm` 10px fields.
+- Hero cards (`.card.hero`, the per-screen `*-hero` classes) are the one
+  surface with `--sun`, the warm wash in the corner. Nothing else is tinted.
 - Accent gold #e3b23c (nav/CTAs/goal only). Status: up #34c77b, down #e5605c —
   reserved for gains/losses, never series colors.
 - Chart series, fixed order (CVD-validated on #161b24 — don't restep):
