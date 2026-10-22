@@ -99,14 +99,29 @@ describe('state tax', () => {
   it('uses the custom rate for unbundled states', () => {
     expect(stateTaxCents($(100_000), { state: 'ME', filingStatus: 'mfj', customStateRateMicro: 65_000 }).taxCents).toBe($(6_500))
   })
-  it('runs California 2025 brackets and the MHST', () => {
-    // MFJ $100k: deduction 11,412 → taxable 88,588:
-    // 1%×22,158 + 2%×30,370 + 4%×30,376 + 6%×5,684 = 221.58+607.40+1215.04+341.04
+  it('runs California 2026 brackets and the MHST', () => {
+    // MFJ $100k: deduction 11,800 → taxable 88,200, Schedule Y's "$2,113.48 plus 6% over $85,722"
     const r = stateTaxCents($(100_000), { state: 'CA', filingStatus: 'mfj', customStateRateMicro: 0 })
-    expect(r.taxCents).toBe(238506)
+    expect(r.taxCents).toBe(211_348 + Math.round((88_200 - 85_722) * 6))
     expect(r.mhstCents).toBe(0)
     const rich = stateTaxCents($(1_600_000), { state: 'CA', filingStatus: 'mfj', customStateRateMicro: 0 })
     expect(rich.mhstCents).toBeGreaterThan(0)
+  })
+  it('California 2026: every edge of Schedules X, Y and Z lands on the FTB’s published amount', () => {
+    // [taxable income at the edge, "Enter on Form 540, line 31"] from FTB Tax News, October 2026 — 2026 Indexing.
+    const edges: Record<'single' | 'mfj' | 'hoh', [number, number][]> = {
+      single: [[11_456, 114.56], [27_157, 428.58], [42_861, 1_056.74], [59_498, 2_054.96], [75_197, 3_310.88], [384_109, 32_039.7], [460_927, 39_951.95], [768_213, 74_675.27]],
+      mfj: [[22_912, 229.12], [54_314, 857.16], [85_722, 2_113.48], [118_996, 4_109.92], [150_394, 6_621.76], [768_218, 64_079.39], [921_854, 79_903.9], [1_536_426, 149_350.54]],
+      hoh: [[22_927, 229.27], [54_316, 857.05], [70_018, 1_485.13], [86_654, 2_483.29], [102_356, 3_739.45], [522_385, 42_802.15], [626_864, 53_563.49], [1_044_771, 100_786.98]],
+    }
+    const deduction = { single: 5_900, mfj: 11_800, hoh: 11_800 }
+    for (const f of ['single', 'mfj', 'hoh'] as const)
+      for (const [taxable, owed] of edges[f]) {
+        const r = stateTaxCents($(taxable + deduction[f]), { state: 'CA', filingStatus: f, customStateRateMicro: 0 })
+        // The schedule rounds its running total at each edge, the walk once at the end: a cent apart at most.
+        expect(Math.abs(r.taxCents - r.mhstCents - $(owed)), `${f} at ${taxable}`).toBeLessThanOrEqual(1)
+      }
+    expect(stateTaxCents($(27_157 + 5_900), { state: 'CA', filingStatus: 'mfs', customStateRateMicro: 0 }).taxCents).toBe($(428.58))
   })
   const st = (state: string, filingStatus: 'single' | 'mfj' | 'mfs' | 'hoh', dollars: number) =>
     stateTaxCents($(dollars), { state, filingStatus, customStateRateMicro: 0 }).taxCents

@@ -106,11 +106,15 @@ Follow-ups — **shipped 2026-09-10** except the last:
       earner through an optional `invest_account_id`; vests a stub's YTD can't
       vouch for get supplemental withholding at 22% federal / the state's
       flat rate (CA 10.23%, NY 11.70%), overridable in settings.
-- [ ] 2026 CA brackets when the FTB publishes them. As of 2026-09-10 they are
-      not out (the EDD's 2026 withholding tables still use 2025 thresholds), so
-      `CA` in `engine/tax.ts` now carries the *official 2025* Schedules X/Y/Z and
+- [x] 2026 CA brackets when the FTB publishes them. As of 2026-09-10 they were
+      not out (the EDD's 2026 withholding tables still used 2025 thresholds), so
+      `CA` in `engine/tax.ts` carried the *official 2025* Schedules X/Y/Z and
       $5,706/$11,412 deduction (the previous table was actually 2024 data). The
       swap is one entry: four arrays, one deduction line, one vintage string.
+      (2026-10-22: swapped in — the FTB's indexing memorandum of 2026-09-03,
+      published in Tax News October 2026: 3.4% CCPI, $5,900/$11,800, every
+      edge of X/Y/Z cross-checked against its cumulative amounts in
+      `engine/tax.test.ts`.)
 
 ## 2 — Digest & proactivity
 
@@ -457,7 +461,13 @@ Follow-ups:
       and next year's stops Roth and pre-tax together too — it used to cap
       pre-tax alone.)
 - [ ] Next year's indexed tables when the IRS publishes them (bundle 2027 and
-      let each year use its own).
+      let each year use its own). Checked 2026-10-22: not out — no
+      inflation-adjustment release through IR-2026-127 (last year's,
+      Rev. Proc. 2025-32, came Oct 9), so 2026's stay held and the
+      Assumptions page says so. The 2027 HSA limits are out (Rev. Proc.
+      2026-24: $4,500 / $9,000, catch-up unchanged) but nothing reads next
+      year's HSA limit yet; the deferral and IRA limits wait on the November
+      notice — bundle all three as one `LIMITS_2027` then.
 - [ ] A Checkup finding when a timing choice is worth more than a threshold
       (e.g. a large loss lot whose harvest is worth far more this year).
 
