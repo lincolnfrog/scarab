@@ -349,6 +349,11 @@ Consequences, stated plainly:
   ever uploaded (`PUT /api/vault`). Besides the ciphertext, an upload says
   only which stored version it replaces (its number and hash) and, when it
   applies, a pin or a request to purge the history.
+- **The sample household sends nothing.** Before a vault exists, the front
+  door offers a made-up household to look around (`src/sample.ts`): built in
+  the tab, it is a session that never gets a vault, so nothing in it is ever
+  sealed or uploaded. It asks the server only what any session asks — the
+  price basket and the market history, the same files for everyone.
 - **Browser requirement.** Passkeys with the PRF extension: Chrome and Safari
   on current macOS, iOS, Android and Windows. A browser without it can open
   the vault only with the recovery code, and the front door says so.
@@ -368,6 +373,10 @@ clear in any request, in `localStorage` or in `sessionStorage`; (d) browsing
 alone uploaded nothing and left the stored version where it was; (e) the
 server's plaintext tables stayed empty. A screen that calls a plaintext route
 fails it, naming the request — even though the server would have refused it.
+The same command runs `e2e/sample.spec.ts`: the sample household, opened from
+the front door, browsed, edited and sent to the background, makes nothing but
+GETs to same-origin, allowlisted paths — no `PUT /api/vault`, no write of any
+kind — sends none of its made-up data, and leaves the server with no vault.
 
 ## What the server still learns (honesty section)
 

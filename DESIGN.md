@@ -12,7 +12,9 @@ privacy architecture and its honest limits), `README.md` (quickstart),
 Nine screens plus **Data & Vault**, in nav order (`src/router.ts` SCREENS):
 **Dashboard** (net-worth hero with a Total/Breakdown chart, grouped stat
 tiles with 12-month sparklines, allocation donut, dream-home tile, activity,
-the "since you were last here" digest, the Checkup's top three),
+the "since you were last here" digest, the Checkup's top three; a new
+household's setup checklist — in the hero's place while there is nothing to
+add up, then one card for what's left),
 **Checkup** (derived findings — concentration, cash runway, itemizing,
 appreciated-share gifts, gain and loss harvesting, safe harbor, the Medicare
 surtax, drift, price creep, the mortgage-rate trigger — sorted by dollar
@@ -37,6 +39,26 @@ year's capital-loss carryover by character),
 Vault** (export/import, and the encrypted vault's session, household,
 recovery, backups, history and advanced cards). ⌘K / Ctrl-K opens a command
 palette: every screen, and actions through deep links.
+
+**A stranger's way in** (2026-10-22, before open sign-up). The setup
+checklist (`engine/setup.ts`, `GET`/`PUT /api/setup`, `src/cards/Setup.tsx`)
+reads six steps from the ledger — a bank or card account with transactions,
+an investment account with holdings or a balance, a property, a paycheck,
+everyone's birth year, and filing status and state saved on Taxes — so
+nothing is ever marked done; each links into the flow that already does it
+(`?d=` actions, detail views), and the only thing stored is a per-person
+hide mark in app_meta. While the household is empty it is the Dashboard's
+hero; after that, a card ("2 of 6 · Next: …") over `#/dash/setup`; it goes
+away when every step is done or the person hides it. Before a vault exists,
+the front door offers **a sample household**: two made-up earners with
+paychecks and RSUs, a house and mortgage, a taxable brokerage, a 401(k) and
+a 403(b), a credit card and two years of categorized transactions, built in
+the tab by `engine/sample.ts` through the engine's own write paths (the
+index funds priced from the shared market history when the tab has it) and
+loaded only when asked for. It opens as a session that never gets a vault —
+no save queue, no autosave, no `PUT /api/vault` (`e2e/sample.spec.ts`) —
+badged as the sample in the topbar, the sidebar and a banner with "Leave the
+sample", which reloads to the front door.
 
 Two deployment modes, one codebase:
 
@@ -96,12 +118,14 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
             handler; the tab turns dirty only when an 'auto' route actually
             changed the database (totalChanges) — a failed or no-op write, a
             read-like POST or a quote refresh ('never') leaves it clean, so
-            browsing never creates a vault version.
+            browsing never creates a vault version. enterSampleMode boots the
+            sample household: a session setVault refuses, that never prompts
+            on leaving (leaveSample reloads to the front door).
   local/      table.ts (matching: method + exact segment count, first match
             wins; DirtyPolicy), routes.ts (NETWORK_ONLY; loads the lists lazily
             so the engine stays out of the household bundle), routes-core.ts
-            (cash, budget, property, goal, tax, digest, checkup, scenarios,
-            export/import, /me), routes-invest.ts (accounts, trades, portfolio,
+            (cash, budget, property, goal, tax, digest, setup checklist,
+            checkup, scenarios, export/import, /me), routes-invest.ts (accounts, trades, portfolio,
             grants, balances), routes-analytics.ts (price refresh from the
             basket, charts, series, returns; the tab's in-memory copy of the
             market history). Each handler calls the engine function its server
@@ -226,7 +250,8 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
   cards/      Cards built on it: StatTile, DreamHomeTile, ActivityCard,
             PortfolioValueCard, PriceChart (one symbol's daily history, in
             the holding drawer), RealEstateChart, GoalFundChart, FutureFan, CashFlowCard,
-            CategorySpendCard; cardModel.ts.
+            CategorySpendCard, Setup (the setup checklist: hero, card, detail
+            view); cardModel.ts.
   tax/        Taxes cards (HarvestCard, RealizedCard, ContributionsCard, TwoYearCard,
             CapacityCard: the loss-capacity view with its planned-sales editor), BracketBar, and their copy.
   viz.tsx BigChart.tsx  Donut, GroupedBars, HBars, Bullets; the daily price
@@ -234,6 +259,9 @@ src/        React 19 client (Vite). Screens call get/post('/api/…') and do not
   ui/Finding.tsx  One Checkup finding: the five parts every finding carries.
   FrontDoor.tsx ConflictSheet.tsx RecoveryCode.tsx DigestCard.tsx
   RecurringCard.tsx passkey.ts saveQueue.ts
+  sample.ts   The front door's sample household, loaded on demand: the
+            shared market history (if the tab can have it within 4s), then
+            engine/sample.ts into enterSampleMode.
 engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
   db.ts        DbLike — 4-method seam (prepare/exec/transaction/pragma).
   errors.ts    ApiError(status), bad/notFound, isoDay/isoMonth. The tab turns an
@@ -285,6 +313,12 @@ engine/     THE CORE. Isomorphic: runs byte-identical in Node and browsers.
                harvest list, trade preview, realized report; paychecks.ts
                projects per-person payroll.
   digest.ts recurring.ts  The digest and recurring-transaction detection.
+  setup.ts     The setup checklist: six steps read from the ledger, and a
+               per-person hide mark (GET/PUT /api/setup).
+  sample.ts    The sample household, built through the engine's own write
+               paths for a given day: deterministic (amounts hash the date),
+               dated back two years, integer cents; its funds take the market
+               history's real closes when given them, else a synthetic path.
   contributions.ts  Contribution pace: each person's 401(k)/403(b) deferrals
                walked to Dec 31 against the limit their age allows, the match
                and where it stops, HSA room, Roth IRA eligibility and pre-tax
@@ -412,6 +446,9 @@ components render to static markup. The structural ones:
   `PUT /api/vault`, every upload decrypted with the recovery code to a snapshot
   holding the canaries, no canary in clear anywhere, browsing uploads nothing,
   the server's tables stay empty. PRIVACY.md calls it the runnable proof.
+  `e2e/sample.spec.ts` runs beside it (same command, same server and
+  request log, `e2e/harness.ts`): the front door's sample household, browsed
+  and edited, sends nothing but GETs and leaves no vault behind.
 
 Everything else covers parsers, lots edge cases (the anniversary, oversells,
 specific lots, per-account pools), tax, money parsing, series and returns
@@ -707,7 +744,9 @@ daily price basket that keeps a ZK session's quotes fresh without naming
 holdings (2026-09-09), the passkey-only vault and a two-member household
 (2026-09-15), the improvement pass below (2026-09-23), and the plan around a
 managed strategy (2026-10-11: deposits, the harvest forecast, planned sales
-and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
+and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`), and a
+stranger's way in before open sign-up (2026-10-22: the Dashboard's setup
+checklist and the front door's sample household, §1).
 
 1. ~~Boot-into-local-from-vault~~ **— done 2026-09-09** (`src/FrontDoor.tsx`,
    `src/session.ts`). The front door shows only when the server holds no

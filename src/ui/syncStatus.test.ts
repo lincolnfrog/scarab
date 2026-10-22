@@ -18,6 +18,13 @@ describe('syncStateOf', () => {
     expect(syncStateOf({ ...base, hasVault: false, dirty: true })).toBe('novault')
   })
 
+  it('reads the sample household as itself, whatever has been done in it', () => {
+    expect(syncStateOf({ ...base, sample: true, hasVault: false })).toBe('sample')
+    expect(syncStateOf({ ...base, sample: true, hasVault: false, dirty: true })).toBe('sample')
+    expect(syncStateOf({ ...base, active: false, sample: true })).toBe('off')
+    expect(sidebarText({ state: 'sample', version: null, savedAt: null, attention: null }, 0)).toBe('Sample household · nothing is saved')
+  })
+
   it('lets a failure outrank everything, then an upload in flight', () => {
     expect(syncStateOf({ ...base, dirty: true, autosave: 'error' })).toBe('failed')
     expect(syncStateOf({ ...base, hasVault: false, autosave: 'error' })).toBe('failed')

@@ -276,8 +276,9 @@ export default function App() {
 
 /* ---------- the shell: sidebar, topbar, and every screen visited so far ---------- */
 
-// Which data universe the screens are reading: household or this tab's session, and which load of it.
-// Any change remounts every screen (a session started, a vault was unlocked or replaced in place).
+// Which data universe the screens are reading — the household's server, this tab's session, or the sample
+// household — and which load of it. Any change remounts every screen (a session started, a vault was unlocked
+// or replaced in place).
 const subscribeData = (l: () => void) => {
   window.addEventListener('scarab-mode', l)
   window.addEventListener('scarab-data', l)
@@ -286,7 +287,7 @@ const subscribeData = (l: () => void) => {
     window.removeEventListener('scarab-data', l)
   }
 }
-const dataKey = () => `${localMode.active ? 's' : 'h'}${localMode.dataEpoch}`
+const dataKey = () => `${localMode.sample ? 'sample' : localMode.active ? 'session' : 'household'}:${localMode.dataEpoch}`
 
 function Shell({ me }: { me: Me | null }) {
   const route = useRoute()
@@ -435,7 +436,7 @@ function Shell({ me }: { me: Me | null }) {
             </span>
           </span>
           <span className="where">
-            Scarab {data.startsWith('s') ? 'session' : 'household'} · <b>{label}</b>
+            Scarab {data.slice(0, data.indexOf(':'))} · <b>{label}</b>
           </span>
           <PaletteHint />
           <SyncChip />

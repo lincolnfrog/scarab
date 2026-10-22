@@ -6,6 +6,7 @@ import { ackDigest, getDigest, inheritDigestMark } from '../../engine/digest'
 import { createPaySource, deletePaySource, updatePaySource } from '../../engine/paychecks'
 import { listPeople, putPeople } from '../../engine/people'
 import { getRecurring } from '../../engine/recurring'
+import { getSetup, putSetup } from '../../engine/setup'
 import {
   compareScenarios,
   createScenario,
@@ -114,7 +115,7 @@ export const CORE: LocalRoute[] = [
   r('GET', '/people', (c) => listPeople(c.db)),
   r('PUT', '/people', (c) => putPeople(c.db, c.body, c.today)),
 
-  /* ---------- digest and recurring (api6.ts) ---------- */
+  /* ---------- digest, recurring and the setup checklist (api6.ts) ---------- */
   r('GET', '/digest', (c) => {
     // The inherited mark is derived state: GET never dirties, so it rides
     // along with the next real save (and is simply copied again until then).
@@ -124,6 +125,8 @@ export const CORE: LocalRoute[] = [
   }),
   r('POST', '/digest/ack', (c) => ackDigest(c.db, digestOwner(c))),
   r('GET', '/recurring', (c) => getRecurring(c.db, c.today)),
+  r('GET', '/setup', (c) => getSetup(c.db, digestOwner(c))),
+  r('PUT', '/setup', (c) => putSetup(c.db, digestOwner(c), c.body)),
 
   /* ---------- checkup and assumptions (api11.ts) ---------- */
   r('GET', '/checkup', (c) => getCheckup(c.db, c.today, digestOwner(c))),

@@ -689,6 +689,9 @@ export async function startEmpty(): Promise<void> {
  */
 let pendingPin: { vaultId: string; version: number; pin: HistoryPin } | null = null
 
+/** Why the sample household refuses a save, a vault or a key: it is made up, and never leaves the tab. */
+const SAMPLE_UNSAVED = 'The sample household is never saved — leave it to set up a vault of your own.'
+
 const queue = createSaveQueue(
   {
     session: () => localMode.vault,
@@ -697,7 +700,11 @@ const queue = createSaveQueue(
     dump: localDump,
     seal: (s, plaintext, seq) => sealVault(s.header, s.rawDataKey, plaintext, seq),
     // The server refuses a stale version (409), so a second device can't silently clobber this one.
-    put: (body) => net<{ ok: true; version: number; sha256: string }>('/api/vault', { method: 'PUT', body: JSON.stringify(body) }),
+    // The sample household never reaches the courier, whatever asked: this is the one upload path.
+    put: (body) =>
+      localMode.sample
+        ? Promise.reject(new Error(SAMPLE_UNSAVED))
+        : net<{ ok: true; version: number; sha256: string }>('/api/vault', { method: 'PUT', body: JSON.stringify(body) }),
     sha256: (data) => sha256Hex(typeof data === 'string' ? new TextEncoder().encode(data) : data),
     commit(s, writesAtDump, stored) {
       const before = localMode.vault
@@ -766,6 +773,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
 function requireSession(): VaultSession {
   if (!localMode.active) throw new Error('not in a zero-knowledge session')
+  if (localMode.sample) throw new Error(SAMPLE_UNSAVED)
   const s = localMode.vault
   if (!s) throw new Error('no vault yet — create one first')
   return s
@@ -830,6 +838,7 @@ const deleteVault = (version: number) =>
  * nothing unsaved (nothing was entered), so a reload doesn't ask to leave.
  */
 export async function createVault(label: string, o: { replace?: number; empty?: boolean } = {}): Promise<SaveResult & { recoveryCode: string }> {
+  if (localMode.sample) throw new Error(SAMPLE_UNSAVED)
   if (!o.empty && !localMode.active) throw new Error('not in a zero-knowledge session')
   if (localMode.vault) throw new Error('this session already has a vault')
   // Check before the passkey prompt: a passkey minted for a vault that can't be
@@ -2025,16 +2034,18 @@ function watchOtherTabs(): void {
   if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return
   const ch = new BroadcastChannel('scarab-session')
   const id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+  // The sample household isn't a session of anyone's vault: it neither counts as one nor hears about them.
+  const inSession = () => localMode.active && !localMode.sample
   const presence = createTabPresence(ch as unknown as PresenceChannel, {
     id,
-    active: () => localMode.active,
+    active: inSession,
     changed: () => setFollow({ otherTab: presence.ahead > 0 }),
   })
   presence.announce(false) // at load (the front door): is a session open elsewhere?
-  let wasActive = localMode.active
+  let wasActive = inSession()
   window.addEventListener('scarab-mode', () => {
-    if (localMode.active && !wasActive) presence.announce(true)
-    wasActive = localMode.active
+    if (inSession() && !wasActive) presence.announce(true)
+    wasActive = inSession()
   })
   window.addEventListener('pagehide', () => presence.leave())
 }

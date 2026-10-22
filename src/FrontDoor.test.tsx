@@ -42,6 +42,17 @@ describe('the front door’s create step', () => {
   })
 })
 
+describe('the sample household', () => {
+  it('is offered before a vault exists — a tonal button, never the gold one creating a vault is — and not at an unlock', async () => {
+    const setup = await door(base)
+    const look = buttons(setup).find((b) => b.label === 'Look around with a sample household')
+    expect(look?.attrs).toMatch(/class="btn"/)
+    expect(setup).toContain('nothing is saved or uploaded')
+    const unlock = await door({ ...base, vault: { version: 3, updated_at: '2026-09-22 09:00:00', updated_by: null } })
+    expect(unlock).not.toContain('sample household')
+  })
+})
+
 describe('the front door’s invitation step', () => {
   it('focuses nothing for you: Join is never the default, and Decline is a full button beside it', async () => {
     const html = await door({ ...base, invites: [inv('max@x.com', '2026-09-22 09:00:00')] })

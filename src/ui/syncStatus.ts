@@ -21,6 +21,7 @@ export type SyncState =
   | 'retrying' // offline or a server hiccup: autosave tries again on its own
   | 'unsaved'
   | 'novault' // a session with nowhere to save — even when nothing has been edited yet
+  | 'sample' // the sample household: made up, and never saved
   | 'newer' // the vault moved on and this tab hasn't loaded it (unsaved work here, or mid-edit): a call to action
   | 'conflict' // a save was refused because the vault moved on, or the stored vault changed under the tab
   | 'failed' // any other refusal (over the size cap, an error)
@@ -28,16 +29,19 @@ export type SyncState =
 /**
  * The one state to show. Something the person must decide outranks
  * everything; then a failure; then the other member's newer version; then an
- * upload in flight. A session without a vault reads as such even when clean.
+ * upload in flight. A session without a vault reads as such even when clean;
+ * the sample household reads as itself, whatever has been done in it.
  */
 export function syncStateOf(s: {
   active: boolean
+  sample?: boolean
   hasVault: boolean
   dirty: boolean
   autosave: string
   attention?: Attention['kind'] | null
 }): SyncState {
   if (!s.active) return 'off'
+  if (s.sample) return 'sample'
   if (s.autosave === 'conflict' || s.attention === 'gone') return 'conflict'
   if (s.autosave === 'error' || s.autosave === 'toolarge') return 'failed'
   if (s.attention === 'newer' || s.attention === 'older') return 'newer'
@@ -110,6 +114,7 @@ export function updatedText(r: { version: number; by: string | null }, identity:
 /** The sidebar's vault line: "Vault v43 · saved 2m ago", or what is holding it up. */
 export function sidebarText(s: Pick<SyncStatus, 'state' | 'version' | 'savedAt' | 'attention'>, now: number): string {
   if (s.state === 'off') return 'Household · server data'
+  if (s.state === 'sample') return 'Sample household · nothing is saved'
   if (s.version === null) return s.state === 'failed' ? 'Session · save failed' : 'Session · no vault yet'
   const v = `Vault v${s.version}`
   switch (s.state) {
@@ -207,6 +212,7 @@ function refresh() {
   const next: SyncStatus = {
     state: syncStateOf({
       active,
+      sample: localMode.sample,
       hasVault: version !== null,
       dirty: localMode.dirty,
       autosave: autosave.status,

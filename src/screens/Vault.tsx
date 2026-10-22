@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { localMode } from '../local'
+import { leaveSample, localMode } from '../local'
 import { fetchMembers, fetchMode, fetchVaultInfo, follow, type Members, type VaultInfo } from '../session'
+import { Button } from '../ui/Button'
 import { prefersReducedMotion } from '../ui/motion'
 import { AdvancedCard, type BasketStatus, type ServedBuild } from './vault/Advanced'
 import { BackupsCard } from './vault/Backups'
@@ -23,8 +24,53 @@ import './vault/vault.css'
  * What the server holds is fetched once per visit — one download of the blob
  * (its header lists the passkeys) — and again after this tab saves a new
  * version, so the stored-copy line describes the current copy.
+ *
+ * The sample household has no vault and never gets one, so it shows none of
+ * this: one card says what it is, and the way back to the front door.
  */
 export default function Vault() {
+  return localMode.sample ? <SampleVault /> : <VaultScreen />
+}
+
+/** What a zero-knowledge session is, in a paragraph. */
+function Intro() {
+  return (
+    <section className="card c12 zk-card zk-intro" aria-label="How this works">
+      <p>
+        A <b className="inkstrong">zero-knowledge session</b> runs Scarab entirely in this tab: the vault is decrypted here, every screen computes
+        here, and saving encrypts here before anything is uploaded. The server stores ciphertext it cannot read and couriers a daily price basket
+        that is the same for everyone. A passkey — fingerprint or face, synced by Apple or Google — decrypts; the printed recovery code is the only
+        other way in, and there is <b className="inkstrong">no reset</b>. Details and honest limits are in <span className="num">PRIVACY.md</span>.
+      </p>
+    </section>
+  )
+}
+
+function SampleVault() {
+  return (
+    <div className="grid12 zk-vault">
+      <section className="card c12 zk-card" aria-labelledby="zk-sample-h">
+        <h2 id="zk-sample-h">The sample household</h2>
+        <p className="zk-lead">
+          Everything here is made up — two earners, their paychecks and RSUs, a house, a brokerage, two years of spending — and was built in this
+          tab when you opened it.
+        </p>
+        <p className="sub2">
+          It has no vault and never gets one: nothing in it is encrypted, saved or uploaded, and it is gone when you leave. Leaving takes you
+          back to setting up a vault of your own.
+        </p>
+        <div className="formrow zk-actions">
+          <Button variant="gold" onClick={leaveSample}>
+            Leave the sample
+          </Button>
+        </div>
+      </section>
+      <Intro />
+    </div>
+  )
+}
+
+function VaultScreen() {
   /** undefined while loading; null when nothing is stored. */
   const [info, setInfo] = useState<VaultInfo | null | undefined>(undefined)
   const [members, setMembers] = useState<Members | null>(null)
@@ -101,14 +147,7 @@ export default function Vault() {
 
   return (
     <div className="grid12 zk-vault">
-      <section className="card c12 zk-card zk-intro" aria-label="How this works">
-        <p>
-          A <b className="inkstrong">zero-knowledge session</b> runs Scarab entirely in this tab: the vault is decrypted here, every screen computes
-          here, and saving encrypts here before anything is uploaded. The server stores ciphertext it cannot read and couriers a daily price basket
-          that is the same for everyone. A passkey — fingerprint or face, synced by Apple or Google — decrypts; the printed recovery code is the only
-          other way in, and there is <b className="inkstrong">no reset</b>. Details and honest limits are in <span className="num">PRIVACY.md</span>.
-        </p>
-      </section>
+      <Intro />
       <SessionCard
         info={info}
         household={household}
