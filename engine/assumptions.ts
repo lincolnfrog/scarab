@@ -219,10 +219,14 @@ export function getAssumptions(db: DbLike): AssumptionGroup[] {
   groups.push({
     id: 'checkup',
     title: 'Checkup rules',
-    vintage: 'Scarab defaults · the concentration threshold is yours',
+    vintage: 'Scarab defaults · the concentration and tax-timing thresholds are yours',
     source: 'Rules of thumb, stated as rules so they can be checked',
     rows: [
       { label: 'Employer stock flagged above', value: `${pct(checkup.concentrationMicro)} of liquid assets` },
+      {
+        label: 'Tax timing flagged at',
+        value: `${$(checkup.timingThresholdCents)} of tax — a planned sale the losses expected by its day don’t cover; a harvest worth more before Dec 31 than in January, or the reverse`,
+      },
       { label: 'Cash flagged below / above', value: `${RUNWAY_LOW_MONTHS} / ${RUNWAY_IDLE_MONTHS} months of average spending` },
       { label: 'Allocation drift flagged at', value: `${DRIFT_MICRO / 10_000} percentage points over 3 months` },
       { label: 'Recurring price rise flagged at', value: '10% over the typical charge' },

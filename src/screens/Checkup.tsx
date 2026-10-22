@@ -7,7 +7,7 @@ import { BracketBar } from '../tax/BracketBar'
 import { Button } from '../ui/Button'
 import { DetailView, DrillCard, useDetail } from '../ui/Drill'
 import { EmptyState } from '../ui/EmptyState'
-import { Field, PercentInput, Select } from '../ui/Field'
+import { Field, MoneyInput, PercentInput, Select } from '../ui/Field'
 import { Finding } from '../ui/Finding'
 import { HeaderSlot } from '../ui/HeaderSlot'
 import { useAnchor } from '../ui/screen'
@@ -228,6 +228,14 @@ export default function Checkup() {
                 <PercentInput
                   valueMicro={form.concentrationMicro}
                   onChange={(v) => setForm({ ...form, concentrationMicro: v ?? data.settings.concentrationMicro })}
+                />
+              </Field>
+            </div>
+            <div className="scr-f lg">
+              <Field label="Tax timing" hint="flag a planned sale or a harvest whose timing moves this much tax">
+                <MoneyInput
+                  value={form.timingThresholdCents}
+                  onChange={(v) => setForm({ ...form, timingThresholdCents: v ?? data.settings.timingThresholdCents })}
                 />
               </Field>
             </div>

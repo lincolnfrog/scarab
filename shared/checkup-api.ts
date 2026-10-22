@@ -34,6 +34,8 @@ export type FindingKind =
   | 'hsa-room'
   | 'backdoor-roth'
   | 'asset-location'
+  | 'sale-uncovered'
+  | 'timing'
 
 /**
  * One derived observation. Every finding carries the five parts the Finding
@@ -97,6 +99,8 @@ export type CalendarItem = {
 export type CheckupSettings = {
   /** Employer stock above this share of liquid assets is a finding (micro; default 10%). */
   concentrationMicro: number
+  /** The tax-timing findings — a planned sale the losses don't cover by its day, a harvest worth more in one year than the other — speak up at this much tax (cents; default $1,000). */
+  timingThresholdCents: number
   /** Category roles. null = guess from the category names; 0 = none; otherwise a category id. */
   charityCategoryId: number | null
   propertyTaxCategoryId: number | null

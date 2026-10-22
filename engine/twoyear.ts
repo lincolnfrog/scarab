@@ -126,8 +126,8 @@ export type Context = {
   view: TwoYear
 }
 
-function context(db: DbLike, today: string): Context {
-  const { out, inputs } = taxYear(db, today)
+function context(db: DbLike, today: string, picture: ReturnType<typeof taxYear> = taxYear(db, today)): Context {
+  const { out, inputs } = picture
   const year = out.year
   const next = year + 1
   const settings = out.settings
@@ -255,9 +255,9 @@ export function getTwoYear(db: DbLike, today: string): TwoYear {
   return context(db, today).view
 }
 
-/** The two-year context for other derivations (engine/capacity.ts): the inputs with and without the plan, and the year picture. */
-export function twoYearContext(db: DbLike, today: string): Context {
-  return context(db, today)
+/** The two-year context for other derivations (engine/capacity.ts, the Checkup): the inputs with and without the plan, and the year picture — built on `picture` when the caller already has it. */
+export function twoYearContext(db: DbLike, today: string, picture?: ReturnType<typeof taxYear>): Context {
+  return context(db, today, picture)
 }
 
 /* ============================== timing ============================== */
@@ -299,24 +299,36 @@ function nextWith(c: Context, thisYear: TaxInputs): TaxInputs {
   return { ...c.nextBase, stGainCents: c.nextBase.stGainCents + base.st - carry.st, ltGainCents: c.nextBase.ltGainCents + base.lt - carry.lt }
 }
 
+/** The same change made this year (`now`; next year feels it through the carryforward) or next year instead (`later`), over both years' tax. */
+function bothYears(c: Context, now: (i: TaxInputs) => TaxInputs, later: (i: TaxInputs) => TaxInputs = now): Omit<Timing, 'kind' | 'amountCents'> {
+  const tax = (i: TaxInputs) => computeTax(i).totalCents
+  const nowThis = now(c.thisInputs)
+  const n = { thisYear: tax(nowThis), nextYear: tax(nextWith(c, nowThis)) }
+  const l = { thisYear: tax(c.thisInputs), nextYear: tax(later(nextWith(c, c.thisInputs))) }
+  const nowTotal = n.thisYear + n.nextYear
+  const laterTotal = l.thisYear + l.nextYear
+  return { nowCents: { ...n, total: nowTotal }, laterCents: { ...l, total: laterTotal }, nowSavesCents: laterTotal - nowTotal }
+}
+
 /** POST /api/tax/timing (read-like): the same amount, this year or next, priced over both years. */
 export function priceTiming(db: DbLike, today: string, b: { kind?: unknown; amountCents?: unknown }): Timing {
   if (!KINDS.includes(b?.kind as TimingKind)) bad(`kind must be one of ${KINDS.join(', ')}`)
   if (!Number.isSafeInteger(b.amountCents) || (b.amountCents as number) <= 0) bad('amountCents must be a positive integer')
   const kind = b.kind as TimingKind
   const amount = b.amountCents as number
-  const c = context(db, today)
-  const tax = (i: TaxInputs) => computeTax(i).totalCents
-  const nowThis = withAmount(c.thisInputs, kind, amount)
-  const now = { thisYear: tax(nowThis), nextYear: tax(nextWith(c, nowThis)) }
-  const later = { thisYear: tax(c.thisInputs), nextYear: tax(withAmount(nextWith(c, c.thisInputs), kind, amount)) }
-  const nowTotal = now.thisYear + now.nextYear
-  const laterTotal = later.thisYear + later.nextYear
-  return {
-    kind,
-    amountCents: amount,
-    nowCents: { ...now, total: nowTotal },
-    laterCents: { ...later, total: laterTotal },
-    nowSavesCents: laterTotal - nowTotal,
-  }
+  return { kind, amountCents: amount, ...bothYears(context(db, today), (i) => withAmount(i, kind, amount)) }
+}
+
+/**
+ * Capital gains or losses (negative) realized before Dec 31 — `now`, by
+ * term — or in January instead, where a lot may count long-term by then
+ * (`later`): the timing question for lots, over both years.
+ */
+export function priceCapitalTiming(c: Context, now: { stCents: number; ltCents: number }, later: { stCents: number; ltCents: number } = now) {
+  const add = (x: { stCents: number; ltCents: number }) => (i: TaxInputs): TaxInputs => ({
+    ...i,
+    stGainCents: i.stGainCents + x.stCents,
+    ltGainCents: i.ltGainCents + x.ltCents,
+  })
+  return bothYears(c, add(now), add(later))
 }

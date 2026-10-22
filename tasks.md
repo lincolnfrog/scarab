@@ -468,8 +468,16 @@ Follow-ups:
       2026-24: $4,500 / $9,000, catch-up unchanged) but nothing reads next
       year's HSA limit yet; the deferral and IRA limits wait on the November
       notice — bundle all three as one `LIMITS_2027` then.
-- [ ] A Checkup finding when a timing choice is worth more than a threshold
+- [x] A Checkup finding when a timing choice is worth more than a threshold
       (e.g. a large loss lot whose harvest is worth far more this year).
+      (2026-10-22: `timing` — the lots the loss-harvest finding counts,
+      realized before Dec 31 or in January (a lot's term judged on Jan 1),
+      priced over both years with the carryforward by `priceCapitalTiming`
+      in `engine/twoyear.ts`; says which year wins, each holding's own
+      figure among the inputs; quiet without wages. The threshold is a
+      Checkup setting, `timingThresholdCents` (default $1,000), on the
+      Assumptions page. Planned sales, bonuses and conversions aren't
+      candidates yet — the "Now or in January?" card still prices those.)
 
 ### Gap list (after 4a–4e)
 
@@ -898,7 +906,14 @@ key, and can't be held to the engine's invariants).
 
 Follow-ups:
 
-- [ ] A Checkup finding for a planned sale the losses won't cover by then.
+- [x] A Checkup finding for a planned sale the losses won't cover by then.
+      (2026-10-22: `sale-uncovered`, from `saleCoverage` in
+      `engine/capacity.ts` — each planned sale against its year's carry-in,
+      realized gains and losses, the forecast through its day and the sales
+      before it; priced as the year's tax with it less without it if no
+      more losses came, with what Dec 31 looks like if the forecast holds;
+      a risk when even that falls short, a heads-up otherwise. Same
+      threshold as the timing finding.)
 - [ ] A money-weighted return for balance-tracked accounts now that their
       deposits are recorded (today only lots accounts have one).
 - [ ] "Plan a sale…" from the holding drawer, prefilled.

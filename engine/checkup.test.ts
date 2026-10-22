@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
+import { formatDollars } from '../shared/money'
 import { openDb } from '../server/migrations'
 import { getAssumptions } from './assumptions'
+import { saleCoverage } from './capacity'
 import { ackCheckup, getCheckup } from './checkup'
-import { putCheckupSettings, resolveRoles } from './checkup-settings'
+import { getCheckupSettings, putCheckupSettings, resolveRoles } from './checkup-settings'
 import type { DbLike } from './db'
 import { PMMS_KEY } from './digest'
+import { putHarvestProfile } from './harvest'
 import { deriveItemized, mortgageInterestYear, saltCapCents } from './itemize'
+import { createPlannedSale, updatePlannedSale } from './planned-sales'
 import { dumpDb, loadDump } from './snapshot'
 import { computeTaxYear, putTaxSettings } from './tax'
+import { priceCapitalTiming, twoYearContext } from './twoyear'
 
 const mem = () => openDb(':memory:') as unknown as DbLike
 const $ = (dollars: number) => Math.round(dollars * 100)
@@ -401,6 +406,173 @@ describe('the list', () => {
     const c = getCheckup(mem(), today, ME)
     expect(c.findings).toEqual([])
     expect(c.calendar.map((x) => x.on)).toEqual(['2026-12-31', '2027-04-15'])
+  })
+})
+
+describe('tax timing', () => {
+  function sell(db: DbLike, account: number, assetId: number, on: string, shares: number, totalCents: number) {
+    db.prepare("INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents) VALUES (?, ?, ?, 'sell', ?, ?)").run(
+      account,
+      assetId,
+      on,
+      shares * 1_000_000,
+      totalCents,
+    )
+  }
+  /**
+   * $300,000 of salary in Texas; Coinbase holds 10 BTC bought in 2017 for $3,500 each, quoted at $80,000; Flex 250
+   * is a managed account whose manager expects nothing more this year and $365,000 of losses in 2027 — $1,000 a day.
+   */
+  function managed(db: DbLike) {
+    taxes(db, 300_000)
+    const coinbase = investAccount(db, 'Coinbase', 'crypto')
+    const btc = asset(db, 'BTC', 'crypto')
+    buy(db, coinbase, btc, '2017-06-06', 10, $(35_000))
+    price(db, btc, '2026-09-30', $(80_000))
+    const flex = Number(db.prepare("INSERT INTO invest_accounts (name, kind, tracking) VALUES ('Flex 250', 'brokerage', 'balance')").run().lastInsertRowid)
+    db.prepare("INSERT INTO balance_snapshots (invest_account_id, balanced_on, balance_cents) VALUES (?, '2026-09-30', ?)").run(flex, $(1_000_000))
+    putHarvestProfile(
+      db,
+      flex,
+      { asOf: '2026-09-30', year1Micro: 0, year2Micro: 0, laterMicro: 0, years: [{ taxYear: 2026, lossCents: 0 }, { taxYear: 2027, lossCents: $(365_000) }] },
+      today,
+    )
+    return { coinbase, btc }
+  }
+
+  it('flags a planned sale the losses expected by its day don’t cover, priced as the tax if no more come', () => {
+    const db = mem()
+    const { coinbase, btc } = managed(db)
+    createPlannedSale(db, { investAccountId: coinbase, assetId: btc, plannedOn: '2027-03-01', qtyMicro: 2_000_000 }, today)
+    // 2 × ($80,000 − $3,500) = $153,000 long-term; by Mar 1 the forecast has brought 60 days × $1,000.
+    const v = saleCoverage(db, today)[0]!
+    expect(v).toMatchObject({ year: 2027, carryInCents: 0, forecastByCents: $(60_000), forecastAfterCents: $(305_000), netBeforeCents: -$(60_000) })
+    expect(v).toMatchObject({ uncoveredCents: $(93_000), uncoveredAtYearEndCents: 0 })
+    const f = finding(db, 'sale-uncovered')!
+    expect(f.id).toBe(`sale-uncovered:${v.sale.id}`)
+    expect(f.title).toBe('$93,000 of the gain on the BTC sale planned for Mar 1, 2027 isn’t covered by the losses expected by then')
+    expect(f.tone).toBe('heads-up') // the $305,000 expected after it covers it by Dec 31
+    // $93,000 long-term at 15% + 3.8% NIIT, and the $3,000 of pay the loss would otherwise have offset at 24%.
+    expect(f.impactCents).toBe(v.taxByThenCents)
+    expect(f.impactCents).toBe($(93_000 * 0.188) + $(720))
+    expect(f.math[0]).toBe('Room on 2027-03-01: $60,000 the forecast expects by 2027-03-01 = $60,000')
+    expect(f.math.at(-1)).toContain('2027 covers it by Dec 31')
+    expect(f.rule.vintage).toContain('held for 2027')
+    expect(f.rule.vintage).toContain('Flex 250 as of 2026-09-30')
+    expect(f.inputs).toContainEqual({ label: 'Losses the forecast expects after it, through Dec 31', value: '$305,000' })
+    expect(f.leavesOut.length).toBeGreaterThan(2)
+    expect(f.action).toEqual({ label: 'See loss capacity', to: { screen: 'tax', rest: ['capacity'] } })
+  })
+
+  it('is a risk when even the whole forecast falls short, and quiet once the losses cover it or under the threshold', () => {
+    const db = mem()
+    const { coinbase, btc } = managed(db)
+    const plan = createPlannedSale(db, { investAccountId: coinbase, assetId: btc, plannedOn: '2027-03-01', qtyMicro: 6_000_000 }, today)
+    // $459,000 of gain against $365,000 for the whole of 2027.
+    const f = finding(db, 'sale-uncovered')!
+    expect(f.tone).toBe('risk')
+    expect(f.title).toContain('$399,000 of the gain on the BTC sale')
+    expect(f.math.at(-1)).toContain('$94,000 stays uncovered by Dec 31')
+    const move = (plannedOn: string, qtyMicro: number) => updatePlannedSale(db, plan.row.id, { investAccountId: coinbase, assetId: btc, plannedOn, qtyMicro }, today)
+    move('2027-12-31', 2_000_000) // the year's whole forecast is in by then
+    expect(kinds(db)).not.toContain('sale-uncovered')
+    move('2027-03-01', 2_000_000)
+    expect(kinds(db)).toContain('sale-uncovered')
+    putCheckupSettings(db, { timingThresholdCents: $(50_000) })
+    expect(kinds(db)).not.toContain('sale-uncovered')
+    db.prepare('DELETE FROM planned_sales').run()
+    putCheckupSettings(db, { timingThresholdCents: 0 })
+    expect(kinds(db)).not.toContain('sale-uncovered')
+  })
+
+  it('reads this year’s realized gains and the sales before it, and says so when nothing more is expected', () => {
+    const db = mem()
+    const { coinbase, btc } = managed(db)
+    sell(db, coinbase, btc, '2026-08-17', 1, $(63_000)) // $59,500 long-term realized
+    createPlannedSale(db, { investAccountId: coinbase, assetId: btc, plannedOn: '2026-11-02', qtyMicro: 1_000_000 }, today)
+    createPlannedSale(db, { investAccountId: coinbase, assetId: btc, plannedOn: '2026-12-15', qtyMicro: 1_000_000 }, today)
+    const [first, second] = saleCoverage(db, today)
+    expect(first).toMatchObject({ year: 2026, realizedCents: $(59_500), netBeforeCents: $(59_500), uncoveredCents: $(76_500) })
+    expect(second).toMatchObject({ earlierCents: $(76_500), netBeforeCents: $(136_000), uncoveredCents: $(76_500), forecastAfterCents: 0 })
+    const f = getCheckup(db, today, ME).findings.filter((x) => x.kind === 'sale-uncovered')
+    expect(f.map((x) => x.id).sort()).toEqual([`sale-uncovered:${first!.sale.id}`, `sale-uncovered:${second!.sale.id}`].sort())
+    const last = f.find((x) => x.id === `sale-uncovered:${second!.sale.id}`)!
+    expect(last.math[0]).toBe('Room on 2026-12-15: −$59,500 of gains realized so far − $76,500 of planned gains before it = none — gains already $136,000 ahead')
+    expect(last.math.at(-1)).toBe(`No more losses are expected in 2026: the sale costs ${formatDollars(second!.taxByYearEndCents)} on the return`)
+    expect(last.tone).toBe('risk')
+  })
+
+  it('prices a large loss lot’s harvest before Dec 31 against January, over both years', () => {
+    const db = mem()
+    taxes(db, 300_000)
+    const acct = investAccount(db, 'Schwab')
+    const abc = asset(db, 'ABC')
+    const xyz = asset(db, 'XYZ')
+    buy(db, acct, abc, '2026-01-05', 10, $(10_000))
+    sell(db, acct, abc, '2026-06-01', 10, $(60_000)) // a $50,000 short-term gain this year
+    buy(db, acct, xyz, '2025-03-03', 100, $(60_000))
+    price(db, xyz, '2026-09-30', $(200)) // a $40,000 long-term loss lot
+    const f = finding(db, 'timing')!
+    // Now it offsets $40,000 of the short-term gain (24% + 3.8% NIIT = $11,120); in January it meets only $3,000 of pay
+    // ($720) and the rest carries past the two years.
+    expect(f.title).toBe('Harvesting the $40,000 loss in XYZ before Dec 31 is worth $10,400 more than in January')
+    expect(f).toMatchObject({ id: 'timing:harvest:now', tone: 'saving', impactCents: $(10_400), impactLabel: 'less tax over 2026 and 2027' })
+    expect(f.impactCents).toBe(priceCapitalTiming(twoYearContext(db, today), { stCents: 0, ltCents: -$(40_000) }).nowSavesCents)
+    expect(f.math.at(-1)).toContain('$10,400 less tax harvesting before Dec 31')
+    expect(f.inputs).toContainEqual({ label: 'XYZ in Schwab (1 lot, $40,000 loss), alone', value: '$10,400 more before Dec 31' })
+    expect(f.action).toEqual({ label: 'See next year’s tax', to: { screen: 'tax', rest: ['two-year'] } })
+    // Under the threshold, or with no wages entered, it says nothing.
+    putCheckupSettings(db, { timingThresholdCents: $(20_000) })
+    expect(kinds(db)).not.toContain('timing')
+    putCheckupSettings(db, { timingThresholdCents: $(1_000) })
+    putTaxSettings(db, { wagesAnnualCents: 0 })
+    expect(kinds(db)).not.toContain('timing')
+  })
+
+  it('says January when next year has the gains the loss would meet', () => {
+    const db = mem()
+    taxes(db, 40_000)
+    const acct = investAccount(db, 'Schwab')
+    const abc = asset(db, 'ABC')
+    const def = asset(db, 'DEF')
+    const xyz = asset(db, 'XYZ')
+    buy(db, acct, abc, '2024-01-05', 10, $(10_000))
+    sell(db, acct, abc, '2026-06-01', 10, $(30_000)) // $20,000 long-term, all of it in the 0% band
+    buy(db, acct, def, '2026-06-01', 100, $(10_000))
+    price(db, def, '2026-09-30', $(1_100))
+    createPlannedSale(db, { investAccountId: acct, assetId: def, plannedOn: '2027-03-01', qtyMicro: 100_000_000 }, today) // $100,000 short-term in 2027
+    buy(db, acct, xyz, '2025-03-03', 100, $(60_000))
+    price(db, xyz, '2026-09-30', $(300)) // a $30,000 long-term loss lot
+    const f = finding(db, 'timing')!
+    // Now it wastes $20,000 on 0%-taxed gains and carries $7,000; in January all $30,000 meets the 22% short-term gain.
+    expect(f.title).toBe('Harvesting the $30,000 loss in XYZ in January is worth $2,460 more than before Dec 31')
+    expect(f.id).toBe('timing:harvest:january')
+    expect(f.math.at(-1)).toContain('$2,460 less tax waiting for January')
+  })
+
+  it('leaves out lots with a wash-sale risk, like the harvest finding', () => {
+    const db = mem()
+    taxes(db, 300_000)
+    const acct = investAccount(db, 'Schwab')
+    const abc = asset(db, 'ABC')
+    const xyz = asset(db, 'XYZ')
+    buy(db, acct, abc, '2026-01-05', 10, $(10_000))
+    sell(db, acct, abc, '2026-06-01', 10, $(60_000))
+    buy(db, acct, xyz, '2025-03-03', 100, $(60_000))
+    buy(db, investAccount(db, 'Roth', 'retirement'), xyz, '2026-09-20', 1, $(200)) // a buy within 30 days
+    price(db, xyz, '2026-09-30', $(200))
+    expect(kinds(db)).not.toContain('timing')
+  })
+
+  it('keeps its threshold with the Checkup settings, and on the Assumptions page', () => {
+    const db = mem()
+    expect(getCheckupSettings(db).timingThresholdCents).toBe($(1_000))
+    putCheckupSettings(db, { timingThresholdCents: $(2_500) })
+    expect(getCheckupSettings(db).timingThresholdCents).toBe($(2_500))
+    expect(() => putCheckupSettings(db, { timingThresholdCents: -1 })).toThrow(/timingThresholdCents/)
+    expect(() => putCheckupSettings(db, { timingThresholdCents: 1.5 })).toThrow(/timingThresholdCents/)
+    const rows = getAssumptions(db).find((g) => g.id === 'checkup')!.rows
+    expect(rows.find((r) => r.label === 'Tax timing flagged at')!.value).toMatch(/^\$2,500 of tax/)
   })
 })
 

@@ -8,7 +8,7 @@ import { loadHoldings } from './holdings'
 import { saleRealized } from './lots'
 import { plannedSaleGains, type PlannedGain } from './planned-sales'
 import { computeTax, TAX_DATA_VINTAGE } from './tax'
-import { lossCarry, twoYearContext } from './twoyear'
+import { lossCarry, twoYearContext, type Context } from './twoyear'
 
 /**
  * Loss capacity (GET /api/tax/capacity): the plan around a managed tax-aware
@@ -104,8 +104,10 @@ function reportedThrough(rows: readonly { as_of: string }[]): string | null {
   return last
 }
 
-export function getCapacity(db: DbLike, today: string): Capacity {
-  const c = twoYearContext(db, today)
+/** The plan netted year by year — what getCapacity draws and saleCoverage reads. */
+type Netted = { c: Context; thisYear: number; sales: PlannedGain[]; forecasts: AccountForecast[]; years: CapacityYear[] }
+
+function netted(db: DbLike, today: string, c: Context): Netted {
   const { out } = c
   const thisYear = out.year
   const sales = plannedSaleGains(db, today)
@@ -113,19 +115,6 @@ export function getCapacity(db: DbLike, today: string): Capacity {
   const lastSaleYear = sales.reduce((m, s) => Math.max(m, yearOf(s.planned_on)), 0)
   const through = Math.min(thisYear + MAX_HORIZON_YEARS, Math.max(thisYear + 1, lastSaleYear, statedYears))
   const forecasts = accountForecasts(db, today, through)
-
-  // This year's recorded sales, dated, from taxable lots accounts — the gains line's solid part.
-  const dated = new Map<string, number>()
-  for (const h of loadHoldings(db, today)) {
-    if (h.sheltered) continue
-    for (const s of h.pos.sales) {
-      if (yearOf(s.traded_on) !== thisYear) continue
-      const r = saleRealized(s)
-      dated.set(s.traded_on, (dated.get(s.traded_on) ?? 0) + r.st_cents + r.lt_cents)
-    }
-  }
-
-  /* ---------- the years ---------- */
   const years: CapacityYear[] = []
   let carryIn = { st: out.incomes.carryInStCents, lt: out.incomes.carryInLtCents }
   for (let y = thisYear; y <= through; y++) {
@@ -166,6 +155,23 @@ export function getCapacity(db: DbLike, today: string): Capacity {
       est: !isThis || forecast !== 0 || mine.length > 0,
     })
     carryIn = carry
+  }
+  return { c, thisYear, sales, forecasts, years }
+}
+
+export function getCapacity(db: DbLike, today: string): Capacity {
+  const { c, thisYear, sales, forecasts, years } = netted(db, today, twoYearContext(db, today))
+  const { out } = c
+
+  // This year's recorded sales, dated, from taxable lots accounts — the gains line's solid part.
+  const dated = new Map<string, number>()
+  for (const h of loadHoldings(db, today)) {
+    if (h.sheltered) continue
+    for (const s of h.pos.sales) {
+      if (yearOf(s.traded_on) !== thisYear) continue
+      const r = saleRealized(s)
+      dated.set(s.traded_on, (dated.get(s.traded_on) ?? 0) + r.st_cents + r.lt_cents)
+    }
   }
 
   /* ---------- the series ---------- */
@@ -289,4 +295,90 @@ export function getCapacity(db: DbLike, today: string): Capacity {
     leavesOut,
     vintage: `${TAX_DATA_VINTAGE} — held for later years`,
   }
+}
+
+/* ======================= a planned sale on its day ======================= */
+
+/** One planned sale against the losses its year expects by the end of its day — and by Dec 31. */
+export type SaleCoverage = {
+  sale: PlannedGain
+  year: number
+  /** Loss carried into the sale's year (from the return, or the years before netted with the plan). */
+  carryInCents: number
+  /** This year only: realized so far — recorded sales and broker reports together (negative = a net loss). */
+  realizedCents: number
+  /** The forecast's expected losses from where it takes over through the sale's day, and after it through Dec 31 (positive). */
+  forecastByCents: number
+  forecastAfterCents: number
+  /** Planned sales before it in the year (negative = losses). */
+  earlierCents: number
+  /** The year's net capital position at the end of the sale's day without it: negative is room left. */
+  netBeforeCents: number
+  /** The sale's gain the year doesn't cover by then, and by Dec 31 with the whole forecast and the rest of the plan. */
+  uncoveredCents: number
+  uncoveredAtYearEndCents: number
+  /** The year's tax with the sale less without it: as its day stands (no losses after it), and at Dec 31. */
+  taxByThenCents: number
+  taxByYearEndCents: number
+  /** The forecasts it leans on: each managed account and the day its estimate was given. */
+  forecasts: { account: string; asOf: string }[]
+}
+
+/**
+ * Every planned sale from today on, netted against what its year holds by
+ * the end of its day: the carry-in, this year's realized gains and losses,
+ * the forecast's expected losses through that day, and the planned sales
+ * before it. The return nets the whole year whatever the order, so a sale
+ * the day doesn't cover rests on losses expected later — or is taxed. Years
+ * past the capacity view's horizon are left out. `c` is the two-year context
+ * when the caller has one.
+ */
+export function saleCoverage(db: DbLike, today: string, c: Context = twoYearContext(db, today)): SaleCoverage[] {
+  const { thisYear, sales, forecasts, years } = netted(db, today, c)
+  const { incomes } = c.out
+  const out: SaleCoverage[] = []
+  for (const s of sales) {
+    const y = yearOf(s.planned_on)
+    const row = years.find((r) => r.year === y)
+    if (!row || s.planned_on < today) continue
+    const isThis = y === thisYear
+    const base = isThis ? c.plain.thisYear : c.plain.nextYear
+    const facts = isThis ? { st: incomes.realizedStCents, lt: incomes.realizedLtCents } : { st: 0, lt: 0 }
+    const expected = (through: string) => forecasts.reduce((sum, f) => sum + lossBetween(f.windows, forecastAfter(f, y, thisYear), through), 0)
+    const byThen = expected(s.planned_on)
+    const byEnd = expected(`${y}-12-31`)
+    // In planned order (day, then id): the ones before it, and the rest of its year.
+    const mine = sales.filter((g) => yearOf(g.planned_on) === y)
+    const at = mine.findIndex((g) => g.id === s.id)
+    const total = (gs: PlannedGain[]) => ({ st: gs.reduce((t, g) => t + g.st_cents, 0), lt: gs.reduce((t, g) => t + g.lt_cents, 0) })
+    const earlier = total(mine.slice(0, at))
+    const rest = total(mine.slice(at + 1))
+    const position = (st: number, lt: number, forecast: number) => ({
+      st: facts.st + st - forecast - row.carryInStCents,
+      lt: facts.lt + lt - row.carryInLtCents,
+    })
+    const before = position(earlier.st, earlier.lt, byThen)
+    const after = position(earlier.st + s.st_cents, earlier.lt + s.lt_cents, byThen)
+    const endWithout = position(earlier.st + rest.st, earlier.lt + rest.lt, byEnd)
+    const endWith = position(earlier.st + rest.st + s.st_cents, earlier.lt + rest.lt + s.lt_cents, byEnd)
+    const net = (p: { st: number; lt: number }) => p.st + p.lt
+    const uncovered = (w: { st: number; lt: number }, wo: { st: number; lt: number }) => Math.max(0, Math.max(0, net(w)) - Math.max(0, net(wo)))
+    const tax = (p: { st: number; lt: number }) => computeTax({ ...base, stGainCents: p.st, ltGainCents: p.lt }).totalCents
+    out.push({
+      sale: s,
+      year: y,
+      carryInCents: row.carryInStCents + row.carryInLtCents,
+      realizedCents: facts.st + facts.lt,
+      forecastByCents: byThen,
+      forecastAfterCents: byEnd - byThen,
+      earlierCents: earlier.st + earlier.lt,
+      netBeforeCents: net(before),
+      uncoveredCents: uncovered(after, before),
+      uncoveredAtYearEndCents: uncovered(endWith, endWithout),
+      taxByThenCents: tax(after) - tax(before),
+      taxByYearEndCents: tax(endWith) - tax(endWithout),
+      forecasts: forecasts.filter((f) => (f.byYear.find((b) => b.year === y)?.cents ?? 0) !== 0).map((f) => ({ account: f.account, asOf: f.profile.as_of })),
+    })
+  }
+  return out
 }

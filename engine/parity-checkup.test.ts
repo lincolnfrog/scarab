@@ -5,7 +5,9 @@ import { putCheckupSettings } from './checkup-settings'
 import { getContributions } from './contributions'
 import type { DbLike } from './db'
 import { PMMS_KEY } from './digest'
+import { putHarvestProfile } from './harvest'
 import { putPeople } from './people'
+import { createPlannedSale } from './planned-sales'
 import { putTaxSettings } from './tax'
 import { seedHousehold } from './test/household'
 import { onBothEngines } from './test/parity'
@@ -51,7 +53,40 @@ function household(db: DbLike) {
   putCheckupSettings(db, { concentrationMicro: 50_000 })
 }
 
+/**
+ * The tax-timing findings' household: a California salary, 10 BTC from 2017 with two planned for next March against
+ * a managed account whose manager expects its losses next year, a short-term gain this year and a long-term loss lot.
+ */
+function timing(db: DbLike) {
+  putTaxSettings(db, { filingStatus: 'mfj', state: 'CA', wagesAnnualCents: 30_000_000, withheldFederalCents: 100_000_000, withheldStateCents: 30_000_000 })
+  const account = db.prepare('INSERT INTO invest_accounts (name, kind, tracking) VALUES (?, ?, ?)')
+  account.run('Coinbase', 'crypto', 'lots') // 1
+  account.run('Flex 250', 'brokerage', 'balance') // 2
+  account.run('Schwab', 'brokerage', 'lots') // 3
+  const asset = db.prepare('INSERT INTO assets (symbol, kind) VALUES (?, ?)')
+  asset.run('BTC', 'crypto') // 1
+  asset.run('ABC', 'stock') // 2
+  asset.run('XYZ', 'stock') // 3
+  const trade = db.prepare('INSERT INTO trades (invest_account_id, asset_id, traded_on, side, qty_micro, total_cents) VALUES (?, ?, ?, ?, ?, ?)')
+  trade.run(1, 1, '2017-06-06', 'buy', 10_000_000, 3_500_000)
+  trade.run(3, 2, '2026-01-05', 'buy', 10_000_000, 1_000_000)
+  trade.run(3, 2, '2026-06-01', 'sell', 10_000_000, 6_000_000)
+  trade.run(3, 3, '2025-03-03', 'buy', 100_000_000, 6_000_000)
+  const price = db.prepare('INSERT INTO prices (asset_id, priced_on, close_cents) VALUES (?, ?, ?)')
+  price.run(1, '2026-09-19', 8_000_000)
+  price.run(3, '2026-09-19', 20_000)
+  db.prepare("INSERT INTO balance_snapshots (invest_account_id, balanced_on, balance_cents) VALUES (2, '2026-08-31', 100000000)").run()
+  putHarvestProfile(db, 2, { asOf: '2026-08-31', year1Micro: 0, year2Micro: 0, laterMicro: 0, years: [{ taxYear: 2026, lossCents: 0 }, { taxYear: 2027, lossCents: 36_500_000 }] }, TODAY)
+  createPlannedSale(db, { investAccountId: 1, assetId: 1, plannedOn: '2027-03-01', qtyMicro: 2_000_000 }, TODAY)
+}
+
 describe('Checkup parity: better-sqlite3 vs sql.js', () => {
+  it('reads the same planned-sale and harvest-timing findings', async () => {
+    const { server, browser } = await onBothEngines(timing, (db) => getCheckup(db, TODAY, 'max@x'))
+    expect(browser).toEqual(server)
+    expect(server.findings.map((f) => f.kind)).toEqual(expect.arrayContaining(['sale-uncovered', 'timing', 'loss-harvest']))
+  })
+
   it('reads the same findings, headroom and calendar', async () => {
     const { server, browser } = await onBothEngines(household, (db) => getCheckup(db, TODAY, 'max@x'))
     expect(browser).toEqual(server)
