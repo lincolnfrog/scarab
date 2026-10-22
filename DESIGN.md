@@ -784,9 +784,10 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
    `scripts/verify-served.sh`, CSP on every response — PRIVACY.md "The trust
    root"). Live since 2026-10-20: v0.1.0 was the first attested release,
    deployed by digest and checked by `verify-served.sh` against scarab.one.
-   Still open: a proper ZK-only build target, and a browser-side check (an
-   extension in the style of Code Verify) for a response tailored to one
-   person, which the script's service-account vantage point can't see.
+   The browser-side check for a response tailored to one person, which the
+   script's service-account vantage point can't see, is `verifier/` (Scarab
+   Verify, a Chrome extension loaded unpacked; 2026-10-20). Still open: a
+   proper ZK-only build target.
 6. **ZK market data**: an anonymous-add path for off-universe symbols (today:
    a hand-entered price), and daily history through hashed symbol buckets
    once the monthly file has proved itself (see PRIVACY.md).

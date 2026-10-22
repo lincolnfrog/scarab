@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "server", "shared", "e2e"]
+  "include": ["src", "server", "shared", "e2e", "verifier/e2e", "verifier/src/*.test.ts"]
 }
