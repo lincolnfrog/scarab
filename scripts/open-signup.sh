@@ -33,8 +33,8 @@
 #
 # What the server and IAP then learn, and the rest of the honest accounting,
 # is PRIVACY.md → "Open sign-up". The terms and privacy pages the front door
-# links to (public/terms.html, public/privacy.html) carry an OPERATOR_CONTACT
-# placeholder: fill it before opening.
+# links to (public/terms.html, public/privacy.html) name the contact address
+# (help.scarab.one@gmail.com): keep it current.
 #
 # The OAuth consent screen. IAP in front of Cloud Run signs people in through
 # the project's OAuth consent screen (Google Auth Platform). When that screen's
@@ -145,7 +145,7 @@ case "$action" in
         echo "  --open will refuse while the deployed service holds plaintext: deploy vault-only first (SCARAB_ZK_ONLY=1 in .env.gcp, then"
         echo "  SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh once — export the household's data before that; README)."
       else
-        echo "  Before that: fill OPERATOR_CONTACT in public/terms.html and public/privacy.html, release and deploy, and"
+        echo "  Before that: release and deploy the terms and privacy pages, and"
         echo "  check the OAuth consent screen's publishing status (see the header of this script)."
       fi
     fi

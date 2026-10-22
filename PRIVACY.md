@@ -428,7 +428,7 @@ the operator can observe:
   step and Data & Vault → Advanced link to (`public/terms.html`,
   `public/privacy.html`) are static files of this origin — served, hashed and
   attested like the rest, no JavaScript — and say this in fewer words; they
-  carry an `OPERATOR_CONTACT` placeholder the operator fills before opening
+  name the contact address (help.scarab.one@gmail.com)
   (the egress proof opens both and holds them to the same policy).
   `scripts/open-signup.sh --open` reads the live service's environment first
   and refuses unless `SCARAB_ZK_ONLY` is set there: a household-mode server
