@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DbLike } from '../engine/db'
 import { decodeDaily, encodeDaily, type DayClose } from '../engine/prices'
 import { DAILY_BUCKETS, dailyBucket } from '../shared/buckets'
 import type { DailyBucket } from '../shared/series-api'
 import { readBudget } from './crawl-budget'
-import { appendDailyQuotes, BODY_CACHE_MAX, bucketResponse, cachedBodies, dailyPending, dailyStatus, ensureDailyBuckets, loadBucket, mergeDailyQuotes, parseSparkDaily, storeBuckets } from './daily-buckets'
+import { appendDailyQuotes, BODY_CACHE_MAX, bucketResponse, cachedBodies, dailyPending, dailyStatus, ensureDailyBuckets, isDailyBuilding, loadBucket, mergeDailyQuotes, parseSparkDaily, storeBuckets } from './daily-buckets'
 import { HISTORY_BATCH, type HistoryRunOptions } from './history-pack'
 import { openDb } from './migrations'
 
@@ -168,6 +168,10 @@ const quiet = (o: HistoryRunOptions = {}): HistoryRunOptions => ({ paceMs: 5, ga
 
 describe('ensureDailyBuckets: the crawl', () => {
   afterEach(() => vi.restoreAllMocks())
+  // Never start a case while a run from an earlier one is still going: ensureDailyBuckets would hand it back.
+  beforeEach(async () => {
+    while (isDailyBuilding()) await new Promise((r) => setTimeout(r, 1))
+  })
 
   it('needs a basket', () => {
     const db = mem()
@@ -219,7 +223,11 @@ describe('ensureDailyBuckets: the crawl', () => {
     expect(decodeDaily('2024-10-02', loadBucket(db, dailyBucket('crypto', 'BTC'))!.crypto.BTC!)!.at(-1)).toEqual({ d: '2026-10-02', c: 11_300_000 })
     // Current until a month has closed.
     expect(ensureDailyBuckets(db, f, later(DAY), quiet())).toBeNull()
-    expect(ensureDailyBuckets(db, f, new Date('2026-11-01T09:00:00Z'), quiet())).not.toBeNull()
+    // A month has closed: a new crawl is due. Await it — the crawl is one module-level run, and a run left
+    // going here would be what the next test's first call gets back (it did, on a slow CI runner).
+    const next = ensureDailyBuckets(db, f, new Date('2026-11-01T09:00:00Z'), quiet())
+    expect(next).not.toBeNull()
+    await expect(next).resolves.toMatchObject({ done: true })
   })
 
   it('stops for the day when Yahoo refuses, and resumes at the same batch tomorrow', async () => {
