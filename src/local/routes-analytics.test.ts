@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { encodeMonthly } from '../../engine/prices'
-import { addMonthsToMonth, todayLocal } from '../../shared/dates'
-import type { BasketResponse, HistoryPack } from '../../shared/series-api'
+import { encodeDaily, encodeMonthly, type DayClose } from '../../engine/prices'
+import { DAILY_BUCKETS, dailyBucket } from '../../shared/buckets'
+import { addDaysIso, addMonthsToMonth, todayLocal } from '../../shared/dates'
+import type { BasketResponse, DailyBucket, HistoryPack } from '../../shared/series-api'
 
 // The real in-tab engine (sql.js) in node, as in dispatch.test.ts.
 vi.mock('sql.js/dist/sql-wasm.wasm?url', async () => {
@@ -32,8 +33,22 @@ const packFor = (final: string): HistoryPack => ({
   crypto: {},
 })
 
-type Server = { history: 'ready' | 'building' | 'down'; final: string }
-const server: Server = { history: 'ready', final: lastMonth }
+/** The daily buckets: VTI's closes for the ten days to yesterday (the crawl is a day behind the basket) in VTI's bucket; every other bucket empty. */
+const dailyStart = addDaysIso(today, -730)
+const vtiDays: DayClose[] = Array.from({ length: 10 }, (_, i) => ({ d: addDaysIso(today, i - 10), c: 21_000 + 10 * i }))
+const bucketFor = (bucket: number): DailyBucket => ({
+  v: 1,
+  bucket,
+  of: DAILY_BUCKETS,
+  start: dailyStart,
+  asOf: addDaysIso(today, -1),
+  builtAt: new Date().toISOString(),
+  stock: bucket === dailyBucket('stock', 'VTI') ? { VTI: encodeDaily(dailyStart, vtiDays) } : {},
+  crypto: {},
+})
+
+type Server = { history: 'ready' | 'building' | 'down'; final: string; daily: 'ready' | 'building' | 'down' }
+const server: Server = { history: 'ready', final: lastMonth, daily: 'ready' }
 const asked: string[] = []
 const fakeFetch = vi.fn(async (input: string | URL | Request) => {
   const url = String(input)
@@ -61,6 +76,12 @@ const fakeFetch = vi.fn(async (input: string | URL | Request) => {
       return Response.json({ ready: false, building: true, done: 4_000, total: 12_000, reason: 'The server is still building the market history (33% done)' }, { status: 202 })
     return Response.json(packFor(server.final), { headers: { etag: `"${server.final}"` } })
   }
+  const bucket = /^\/api\/basket\/daily\/(\d+)$/.exec(url)
+  if (bucket) {
+    if (server.daily === 'down') throw new TypeError('Failed to fetch')
+    if (server.daily === 'building') return Response.json({ ready: false, building: true, done: 100, total: 12_000, reason: 'The server is still building the daily history (0% done)' }, { status: 202 })
+    return Response.json(bucketFor(Number(bucket[1])), { headers: { etag: `"d${bucket[1]}"` } })
+  }
   throw new Error(`unexpected fetch ${url}`)
 })
 vi.stubGlobal('fetch', fakeFetch)
@@ -86,10 +107,11 @@ beforeEach(async () => {
   await call('POST', '/api/trades', { investAccountId: a.id, symbol: 'VTI', assetKind: 'stock', side: 'buy', tradedOn: `${addMonthsToMonth(thisMonth, -12)}-15`, qty: '10', totalCents: 200_000 })
   local.localMode.markSaved(1)
   routes.forgetTabHistory()
-  Object.assign(server, { history: 'ready', final: lastMonth })
+  Object.assign(server, { history: 'ready', final: lastMonth, daily: 'ready' })
   asked.length = 0
   events.length = 0
 })
+const bucketFetches = () => asked.filter((u) => u.startsWith('/api/basket/daily/'))
 
 type Refresh = { updated: number; history?: { written: number; matched: number; pending: boolean; final: string | null; errors: string[] } }
 
@@ -209,5 +231,103 @@ describe('benchmarks read the file in memory', () => {
     server.history = 'down'
     const cat = (await call('GET', '/api/series/catalog')) as Catalog
     expect(cat.entries.find((e) => e.id === 'bench:SPY')).toMatchObject({ available: false, reason: 'Couldn’t reach the server for market history' })
+  })
+})
+
+describe('the daily price chart reads the hashed bucket a held symbol falls in', () => {
+  type Chart = { symbol: string; closes: DayClose[]; coverage: { source: string; dailyFrom: string | null; days: number } }
+  const vtiBucket = dailyBucket('stock', 'VTI')
+
+  it('fetches the bucket — never the symbol — once, joins it with the tab’s own quote, writes nothing, and keeps it for later charts', async () => {
+    await call('POST', '/api/prices/refresh') // today's quote lands in prices_daily, and the month ends in prices
+    local.localMode.markSaved(2)
+    events.length = 0
+    const chart = (await call('GET', '/api/charts/VTI')) as Chart
+    expect(bucketFetches()).toEqual([`/api/basket/daily/${vtiBucket}`])
+    expect(asked.some((u) => u.includes('VTI'))).toBe(false)
+    // Two years of month ends from the file (before the bucket's reach), the bucket's ten days, then today's basket quote.
+    expect(chart.closes.slice(-11)).toEqual([...vtiDays, { d: today, c: 22_500 }])
+    expect(chart.coverage).toMatchObject({ source: 'quotes', dailyFrom: vtiDays[0]!.d })
+    expect(chart.closes.filter((c) => c.d < vtiDays[0]!.d).every((c) => c.d.endsWith('-28') || c.d.endsWith('-29') || c.d.endsWith('-30') || c.d.endsWith('-31'))).toBe(true)
+    // Nothing from the bucket entered the vault.
+    expect(local.localMode.dirty).toBe(false)
+    expect(events).toEqual([])
+    const dump = await local.localDump()
+    expect(dump.tables.prices_daily).toHaveLength(1) // today's quote only
+    // The same bucket serves the next chart from memory.
+    const again = (await call('GET', '/api/charts/vti')) as Chart
+    expect(again.closes).toEqual(chart.closes)
+    expect(bucketFetches()).toHaveLength(1)
+    // Half an hour later the tab asks again (the browser cache answers 304 for an unchanged file).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 31 * 60_000)
+      await call('GET', '/api/charts/VTI')
+      expect(bucketFetches()).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a symbol the bucket doesn’t carry draws from what the tab has; its bucket is asked for, not its name', async () => {
+    await call('POST', '/api/trades', { investAccountId: 1, symbol: 'ZZZQ', assetKind: 'stock', side: 'buy', tradedOn: `${addMonthsToMonth(thisMonth, -3)}-02`, qty: '1', totalCents: 1_000 })
+    await call('POST', '/api/prices/manual', { symbol: 'ZZZQ', pricedOn: today, cents: 1_200 })
+    local.localMode.markSaved(2)
+    const chart = (await call('GET', '/api/charts/ZZZQ')) as Chart
+    expect(bucketFetches()).toEqual([`/api/basket/daily/${dailyBucket('stock', 'ZZZQ')}`])
+    expect(chart.closes).toEqual([{ d: today, c: 1_200 }])
+    expect(chart.coverage.source).toBe('quotes')
+  })
+
+  it('while the server is still building (202), or unreachable, the chart draws without it and asks again after a minute', async () => {
+    await call('POST', '/api/prices/refresh')
+    local.localMode.markSaved(2)
+    for (const state of ['building', 'down'] as const) {
+      routes.forgetTabHistory()
+      asked.length = 0
+      server.daily = state
+      const chart = (await call('GET', '/api/charts/VTI')) as Chart
+      expect(chart.closes.at(-1)).toEqual({ d: today, c: 22_500 })
+      expect(chart.closes).toHaveLength(25) // 24 month ends and today: none of the bucket's days
+      expect(chart.closes.some((c) => vtiDays.some((v) => v.d === c.d))).toBe(false)
+      expect(bucketFetches()).toHaveLength(1)
+      await call('GET', '/api/charts/VTI')
+      expect(bucketFetches()).toHaveLength(1) // remembered for a minute
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(Date.now() + 61_000)
+        server.daily = 'ready'
+        const later = (await call('GET', '/api/charts/VTI')) as Chart
+        expect(bucketFetches()).toHaveLength(2)
+        expect(later.closes.slice(-11)).toEqual([...vtiDays, { d: today, c: 22_500 }])
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+    expect(local.localMode.dirty).toBe(false)
+  })
+
+  it('an unknown symbol is a 404 before any bucket is asked for', async () => {
+    await expect(call('GET', '/api/charts/NOPE')).rejects.toThrow(/no such asset/)
+    expect(bucketFetches()).toEqual([])
+  })
+})
+
+describe('the vault remembers a sent basket ask', () => {
+  it('PUT /prices/asked dirties the tab once, rides the vault, and reads back; the same ask again writes nothing', async () => {
+    expect(await call('GET', '/api/prices/asked')).toEqual({})
+    events.length = 0
+    expect(await call('PUT', '/api/prices/asked', { symbol: 'VFIAX', k: 32 })).toEqual({ ok: true, symbol: 'VFIAX', on: today, k: 32 })
+    expect(local.localMode.dirty).toBe(true)
+    expect(events).toEqual(['scarab-mode', 'scarab-write'])
+    local.localMode.markSaved(2)
+    events.length = 0
+    await call('PUT', '/api/prices/asked', { symbol: 'VFIAX', k: 32 })
+    expect(local.localMode.dirty).toBe(false)
+    expect(events).toEqual([])
+    expect(await call('GET', '/api/prices/asked')).toEqual({ VFIAX: { on: today, k: 32 } })
+    const dump = await local.localDump()
+    expect(dump.tables.app_meta!.map((r) => r.key)).toEqual(['ui:basket-asks']) // household data: in the snapshot
+    await expect(call('PUT', '/api/prices/asked', { symbol: 'VFIAX', k: 1 })).rejects.toThrow(/k:/)
   })
 })

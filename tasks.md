@@ -489,18 +489,38 @@ reload → unlock → data restored, with the server's user tables never touched
 
 Follow-ups (not blocking):
 
-- [ ] **Anonymous add** for off-universe symbols: an identity-opaque, delayed,
-      chaffed request that widens the basket without linking a symbol to a
-      person. (Deferred by decision — the whole-universe basket already covers
-      ordinary US holdings, and since 2026-09-23 a fund or private stock can
-      take a hand-entered price.)
+- [x] **Anonymous add** for mutual funds (2026-10-20): `POST /api/basket/suggest`
+      names the wanted fund among 31 others drawn from the SEC's public-domain
+      list of fund share-class tickers (`src/invest/fund-tickers.txt`,
+      `scripts/fetch-fund-tickers.mjs`), seeded from the vault's key so a
+      repeat names the same 32 and the server can't precompute the draw; sent
+      after a random 30 s–10 min delay; the server adds all 32 to
+      `basket:extra:asks` with no identity or time, as whole asks (never a
+      symbol dropped on its own), quotes them from the next build. The draw
+      indexes the whole list with rejection, so a basket change swaps one
+      member, not the set; a sent ask is remembered in the vault
+      (`ui:basket-asks`) so no device repeats it. UI: "Ask the basket to
+      cover this fund" in the holding drawer → `#/invest/cover`. Residual,
+      stated in PRIVACY.md: the server learns one-of-32 and when; popularity
+      ranking, later bucket fetches, and the quotable subset visible in the
+      basket can narrow it. CITs and private stock
+      stay hand-priced (no public feed). Stronger alternative on the table:
+      the whole SEC list in the basket (≈3× the files and crawls).
+- [ ] Decoy daily buckets from a per-vault secret (blunts both the bucket
+      and the suggest residuals; PRIVACY.md "Daily history").
+- [ ] The whole SEC fund list in the basket, if the file sizes stop
+      mattering — then `basket/suggest` goes.
 - [x] ZK *monthly* history (2026-09-23): the shared market history file,
       ten years of month-ends for the whole basket, identical for every caller
       (`server/history-pack.ts`, `GET /api/basket/history`).
-- [ ] ZK *daily* history: hashed symbol buckets so a client fetches 1-of-N
-      buckets instead of naming the ticker (Safe-Browsing style) — only once
-      the monthly file has proved itself. A tab's daily chart is month-ends
-      plus the basket quotes it has collected.
+- [x] ZK *daily* history (2026-10-20): hashed symbol buckets — the universe
+      dealt into 64 files by SHA-1 (`shared/buckets.ts`), two years of daily
+      closes each, crawled on the budget the monthly file shares
+      (`server/daily-buckets.ts`, `server/crawl-budget.ts`), served at
+      `GET /api/basket/daily/:bucket`; a holding's chart fetches the bucket
+      its symbol falls in, in memory only. PRIVACY.md "Daily history" has the
+      numbers and the honest limit (popularity ranking inside a bucket).
+      Possible hardening left: decoy buckets from a per-vault secret.
 - [ ] Migrate household price refresh onto the basket path too (one code path);
       today `POST /api/prices/refresh` still fetches held symbols per-symbol.
 - [x] Passkey-only vault v2 (WebAuthn PRF; no passphrase; typed recovery
@@ -629,9 +649,14 @@ Decisions for the user:
       Yahoo-derived data; shipped via `.gcloudignore` + Dockerfile), stored at
       boot by `seedHistoryPack` when newer than the server's. Re-run and
       redeploy to refresh it.
-- [ ] Monthly rebuilds on Cloud Run still crawl under request-based CPU (the
-      served file stays current meanwhile via daily basket merges). If that
-      matters: `--no-cpu-throttling` or a scheduled ping; never `--max-instances`.
+- [x] Monthly rebuilds on Cloud Run crawled under request-based CPU (the
+      served file stayed current meanwhile via daily basket merges). Decided
+      2026-10-20 for a scheduled trigger over `--no-cpu-throttling`:
+      `.github/workflows/history.yml` → `POST /api/basket/crawl`
+      (`server/crawl.ts`) runs the build inside the request, four minutes at a
+      time, as the `scarab-history` service account (`scripts/history-sa.sh`,
+      one-time). `--no-cpu-throttling` bills idle minutes, still loses the
+      build at scale-to-zero, and starts nothing. Never `--max-instances`.
 - [x] Money trend charts fit the data (TimeChart default `baseline="fit"`;
       stacks keep $0) and carry a Lin/Log switch (2026-09-24).
 

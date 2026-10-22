@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { DbLike } from '../engine/db'
 import { handle } from './api'
 import { householdOf, invitesFor } from './api4'
-import { basketStatus, ensureBasket, getBasket, isBuilding } from './basket'
+import { addBasketAsk, basketStatus, ensureBasket, EXTRA_SYMBOL, getBasket, isBuilding, toYahooSymbol } from './basket'
 import { db as rawDb } from './db'
 
 const db = rawDb as unknown as DbLike
@@ -111,4 +111,43 @@ api8.post('/basket/rebuild', async (c) => {
     new Date().toISOString(),
   )
   return c.json(await rebuild())
+})
+
+/* ---------------- asking the basket to cover a fund ---------------- */
+
+/** How many symbols a suggestion names at least (the wanted one and its chaff) and at most. */
+export const SUGGEST_MIN = 2
+export const SUGGEST_MAX = 64
+/** Suggestions the server takes, from everyone together: one per this long (429 otherwise) — a brake, not a record of who asked. */
+export const SUGGEST_WINDOW_MS = 60_000
+const SUGGEST_AT = 'basket:suggest_at'
+
+/**
+ * Ask the basket to cover symbols the exchange directory doesn't list
+ * (mutual funds). The body names the wanted fund among chaff the tab drew
+ * from the same population (src/invest/chaff.ts), and the request is kept as
+ * one ask, its symbols together, for the next build to quote (./basket.ts
+ * addBasketAsk) — all of them alike, so the server has nothing to pick the
+ * real one by beyond the k it was given. It records no identity and no time
+ * with the symbols; the one thing it keeps is when the last suggestion
+ * arrived, to take one a minute at most. The answer says how many symbols
+ * were new to the list and nothing about which (PRIVACY.md "Anonymous add").
+ * On the vault-only allowlist (server/zk-routes.ts).
+ */
+api8.post('/basket/suggest', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { symbols?: unknown }
+  const raw = Array.isArray(body.symbols) ? body.symbols : []
+  const symbols = [...new Set(raw.filter((s): s is string => typeof s === 'string').map(toYahooSymbol))].filter((s) => EXTRA_SYMBOL.test(s))
+  if (symbols.length < SUGGEST_MIN || symbols.length !== raw.length)
+    return c.json({ error: `symbols: ${SUGGEST_MIN}–${SUGGEST_MAX} distinct tickers (letters, digits, a dot or dash), the wanted one among them` }, 400)
+  if (symbols.length > SUGGEST_MAX) return c.json({ error: `symbols: at most ${SUGGEST_MAX} per request` }, 400)
+  const wait = metaAt(SUGGEST_AT) + SUGGEST_WINDOW_MS - Date.now()
+  if (wait > 0) {
+    const retryAfter = Math.ceil(wait / 1000)
+    c.header('retry-after', String(retryAfter))
+    return c.json({ error: 'the basket took a suggestion less than a minute ago', retryAfter }, 429)
+  }
+  const r = addBasketAsk(db, symbols)
+  db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(SUGGEST_AT, new Date().toISOString())
+  return c.json({ ok: true, named: symbols.length, added: r.added })
 })

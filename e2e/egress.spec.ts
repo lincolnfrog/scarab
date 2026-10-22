@@ -13,8 +13,9 @@
  * canary data on every screen that takes input (a cash account and an
  * imported transaction, an investment account and a trade, a property and
  * its valuation, the Dream Home target), lets autosave run, reloads, unlocks
- * with the passkey, browses every screen plus detail views, the vault's
- * history and both backups, and opens the terms and privacy pages.
+ * with the passkey, browses every screen plus detail views, a holding's
+ * drawer (whose chart asks for a hashed symbol bucket), the vault's history
+ * and both backups, and opens the terms and privacy pages.
  *
  * What it asserts (the numbers match PRIVACY.md's "Runnable proof"):
  *   a. every request is same-origin, and its path is the shell, an asset, the
@@ -423,6 +424,15 @@ test('a zero-knowledge session sends only ciphertext, and only to PUT /api/vault
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Spending & income')
     await openScreen(page, 'Investments')
     await expect(page.getByText(C.ticker).filter({ visible: true }).first()).toBeVisible()
+    // The holding's drawer: its price chart asks the server for the hashed bucket the symbol falls in — a bucket
+    // number on the vault-only allowlist, never the symbol (PRIVACY.md "Daily history"; the canary check below
+    // would catch the ticker in a URL). This server has no daily files, so the answer is a 202 and the chart says so.
+    await page.getByRole('button', { name: `${C.ticker}: open its chart, lots and trades` }).click()
+    const drawer = page.getByRole('dialog', { name: C.ticker })
+    await expect(drawer).toBeVisible()
+    await expect(drawer.getByText(/This session never names what you hold/)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(drawer).toBeHidden()
     await openScreen(page, 'Real estate')
     await expect(page.getByRole('heading', { name: C.property })).toBeVisible()
     await page.getByRole('link', { name: /§121 exclusion/ }).click()

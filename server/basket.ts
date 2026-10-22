@@ -1,6 +1,7 @@
 import type { DbLike } from '../engine/db'
 import { addDaysIso } from '../shared/dates'
 import type { BasketQuoteRow, BasketResponse } from '../shared/series-api'
+import { appendDailyQuotes } from './daily-buckets'
 import { appendToHistory, historyStatus } from './history-pack'
 import { upstreamSignal } from './upstream'
 
@@ -114,7 +115,17 @@ export async function fetchUniverse(f: typeof fetch = fetch): Promise<{ listings
 const day = (t: unknown) => (typeof t === 'number' ? new Date(t * 1000) : new Date()).toISOString().slice(0, 10)
 const cents = (px: unknown) => (typeof px === 'number' && Number.isFinite(px) && px > 0 ? Math.round(px * 100) : null)
 
-/** Yahoo v8 spark: { spark: { result: [{ symbol, response: [{ meta: { regularMarketPrice, regularMarketTime } }] }] } } */
+/** A security's name as a quote source gives it (spark's meta, v7's row), or none. */
+const sourceName = (m: Record<string, unknown> | undefined): string | null => {
+  const n = [m?.longName, m?.shortName].find((v) => typeof v === 'string' && v.trim())
+  return typeof n === 'string' ? n.trim() : null
+}
+
+/**
+ * Yahoo v8 spark: { spark: { result: [{ symbol, response: [{ meta: { regularMarketPrice, regularMarketTime, … } }] }] } }.
+ * A name in the meta (longName/shortName) is kept for symbols the directory doesn't list — the funds the basket was asked
+ * to cover (basketExtras); a listed symbol's name comes from the directory.
+ */
 export function parseSpark(body: unknown): BasketQuote[] {
   const results = (body as { spark?: { result?: { symbol?: string; response?: { meta?: Record<string, unknown> }[] }[] } })
     ?.spark?.result
@@ -124,7 +135,8 @@ export function parseSpark(body: unknown): BasketQuote[] {
     const meta = r.response?.[0]?.meta
     const c = cents(meta?.regularMarketPrice)
     if (!r.symbol || c === null) continue
-    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(meta?.regularMarketTime), prevCents: cents(meta?.chartPreviousClose) })
+    const name = sourceName(meta)
+    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(meta?.regularMarketTime), prevCents: cents(meta?.chartPreviousClose), ...(name ? { name } : {}) })
   }
   return out
 }
@@ -137,7 +149,8 @@ export function parseV7Quotes(body: unknown): BasketQuote[] {
   for (const r of results) {
     const c = cents(r.regularMarketPrice)
     if (typeof r.symbol !== 'string' || c === null) continue
-    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(r.regularMarketTime), prevCents: cents(r.regularMarketPreviousClose) })
+    const name = sourceName(r)
+    out.push({ symbol: r.symbol, kind: 'stock', cents: c, pricedOn: day(r.regularMarketTime), prevCents: cents(r.regularMarketPreviousClose), ...(name ? { name } : {}) })
   }
   return out
 }
@@ -264,6 +277,75 @@ const meta = (db: DbLike, key: string) => (db.prepare('SELECT value FROM app_met
 const setMeta = (db: DbLike, key: string, value: string) =>
   db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
 
+/* ---------------- extras: symbols the basket was asked to cover ---------------- */
+
+/**
+ * The universe is the exchange directory; a mutual fund isn't in it. A tab
+ * may ask the basket to cover one — POST /api/basket/suggest (api8.ts),
+ * naming the wanted fund among chaff drawn from the same population
+ * (PRIVACY.md "Anonymous add") — and the request's symbols are kept
+ * together as one ask in `basket:extra:asks`: a list of asks, each a list of
+ * symbols, oldest first, with no identity and no time. Every build quotes
+ * their union with the universe. An ask's symbols stay together for as long
+ * as the ask is kept: a symbol Yahoo never quotes is NOT dropped on its own,
+ * since which of an ask's symbols survived would say which were real
+ * (quotable by construction) — the basket itself already shows that much,
+ * PRIVACY.md says so, and the server shouldn't keep a second copy of it. The
+ * list is bounded by MAX_BASKET_EXTRAS distinct symbols; past it the oldest
+ * asks go, whole. A `basket:*` key: never in a snapshot, kept by the
+ * zero-knowledge purge.
+ */
+const ASKS_KEY = 'basket:extra:asks'
+/** How many extra symbols the list holds at most (≈ 125 asks of 32); past it the oldest asks are evicted, whole. */
+export const MAX_BASKET_EXTRAS = 4_000
+/** A symbol the list can carry: a US ticker — letters, then letters or digits, a dot or dash for a class (BRK.B); never a prototype name. */
+export const EXTRA_SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/
+
+/** The asks as kept: each one list of symbols, oldest ask first. */
+export function basketAsks(db: DbLike): string[][] {
+  const raw = meta(db, ASKS_KEY)
+  if (!raw) return []
+  try {
+    const x: unknown = JSON.parse(raw)
+    if (!Array.isArray(x)) return []
+    return x
+      .filter((ask): ask is string[] => Array.isArray(ask))
+      .map((ask) => ask.filter((s): s is string => typeof s === 'string' && EXTRA_SYMBOL.test(s)))
+      .filter((ask) => ask.length > 0)
+  } catch {
+    return []
+  }
+}
+
+/** Every symbol the asks name, each once, in the order first asked. */
+export function basketExtras(db: DbLike): string[] {
+  return [...new Set(basketAsks(db).flat())]
+}
+
+const writeAsks = (db: DbLike, asks: readonly (readonly string[])[]) => setMeta(db, ASKS_KEY, JSON.stringify(asks))
+
+/**
+ * Keep one ask: its symbols (each in Yahoo spelling), together. Returns how
+ * many of them the list didn't already have (nor the basket), how many
+ * symbols the list holds now, and how many older asks had to go to make
+ * room. Records nothing else — not who asked, not when.
+ */
+export function addBasketAsk(db: DbLike, symbols: readonly string[]): { added: number; total: number; evicted: number } {
+  const ask = [...new Set(symbols.map(toYahooSymbol))].filter((s) => EXTRA_SYMBOL.test(s)).slice(0, MAX_BASKET_EXTRAS)
+  const asks = basketAsks(db)
+  const inBasket = new Set((db.prepare("SELECT symbol FROM basket_quotes WHERE kind = 'stock'").all() as { symbol: string }[]).map((r) => r.symbol))
+  const known = new Set(asks.flat())
+  const added = ask.filter((s) => !known.has(s) && !inBasket.has(s)).length
+  let kept = [...asks, ask]
+  let evicted = 0
+  while (new Set(kept.flat()).size > MAX_BASKET_EXTRAS && kept.length > 1) {
+    kept = kept.slice(1)
+    evicted++
+  }
+  writeAsks(db, kept)
+  return { added, total: new Set(kept.flat()).size, evicted }
+}
+
 export function basketStatus(db: DbLike): BasketStatus {
   const errs = meta(db, 'basket:errors')
   return {
@@ -323,11 +405,14 @@ export type BuildResult = { stocks: number; crypto: number; universe: number; er
 export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<BuildResult> {
   const t0 = Date.now()
   const { listings, errors } = await fetchUniverse(f)
+  // The universe, plus the symbols the basket was asked to cover (funds the directory doesn't list).
+  const listed = new Set(listings.map((l) => l.symbol))
+  const symbols = [...listings.map((l) => l.symbol), ...basketExtras(db).filter((s) => !listed.has(s))]
   const [stocks, crypto] = await Promise.all([
-    listings.length > 0 ? fetchStockBasket(listings.map((l) => l.symbol), f) : { quotes: [], errors: ['quotes: no universe, skipped'] },
+    symbols.length > 0 ? fetchStockBasket(symbols, f) : { quotes: [], errors: ['quotes: no universe, skipped'] },
     fetchCryptoBasket(f),
   ])
-  // Names and the ETF flag come from the directory, keyed by Yahoo spelling.
+  // Names and the ETF flag come from the directory, keyed by Yahoo spelling; an extra keeps the name the quote source gave.
   const listing = new Map(listings.map((l) => [l.symbol, l]))
   const named = stocks.quotes.map((q) => {
     const l = listing.get(q.symbol)
@@ -337,11 +422,16 @@ export async function buildBasket(db: DbLike, f: typeof fetch = fetch): Promise<
   const allErrors = [...errors, ...stocks.errors, ...crypto.errors]
   const builtAt = new Date().toISOString()
   storeBasket(db, all, allErrors, builtAt)
-  // Keep the monthly history's month in progress current. Best-effort: the basket is served either way.
+  // Keep the monthly history's month in progress, and the daily buckets' latest day, current. Best-effort: the basket is served either way.
   try {
     appendToHistory(db, all, builtAt.slice(0, 10))
   } catch (e) {
     console.error('basket: merging quotes into the market history failed', e)
+  }
+  try {
+    appendDailyQuotes(db, all, builtAt.slice(0, 10))
+  } catch (e) {
+    console.error('basket: merging quotes into the daily history failed', e)
   }
   return { stocks: stocks.quotes.length, crypto: crypto.quotes.length, universe: listings.length, errors: allErrors, ms: Date.now() - t0 }
 }

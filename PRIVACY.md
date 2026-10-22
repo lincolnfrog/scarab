@@ -258,8 +258,9 @@ Consequences, stated plainly:
   `SCARAB_ZK_ONLY=1`, the server answers exactly six things: identity, the
   mode probe, the encrypted-blob courier (with the versions it keeps), its
   membership list and invitations (emails it already knows from IAP), the
-  price basket with its monthly market history (both identical for every
-  caller), and health. Every other route returns 403 before any handler runs,
+  price basket with its market history (the monthly file and the daily
+  buckets, each identical for every caller, the scheduled trigger that
+  builds them, and the one-of-k ask that widens the basket), and health. Every other route returns 403 before any handler runs,
   and the server refuses to boot at all if its database holds plaintext (a
   one-time `SCARAB_PURGE_PLAINTEXT=1` wipes a household install's data,
   keeping the ciphertext, its membership routing and the shared price data). The
@@ -357,7 +358,8 @@ push by `.github/workflows/egress.yml`) builds the app, starts the real
 vault-only server and drives a whole session in headless Chromium with a
 virtual passkey — create a vault, enter data on every screen that takes input,
 let autosave run, reload, unlock, browse every screen plus the history and
-both backups — while recording every request the browser makes. It then
+both backups, and a holding's drawer (whose chart asks for a hashed bucket) —
+while recording every request the browser makes. It then
 asserts (a) every request was same-origin and either a static file or on the
 `server/zk-routes.ts` allowlist, imported, not copied; (b) the only writes were
 `PUT /api/vault`; (c) every upload opens with the recovery code to a snapshot
@@ -454,13 +456,14 @@ the operator can observe:
   is asked of the server for it. A session's "prices as of" line asks when the basket
   was built (`/api/basket/status`, on entry and when the tab returns to view,
   at most every 30 minutes). Monthly history comes from the shared market
-  history file (below), and a tab's daily price chart is those month-ends
-  plus the daily basket quotes it has collected since. Not yet covered:
-  holdings outside the basket (mutual funds, CITs, private stock) get no
-  quote — they take a hand-entered price, kept with the rest of the
-  household's encrypted data — and
-  there is no per-symbol daily history in ZK mode. The planned fix is an
-  anonymous-add path and hashed symbol buckets.
+  history file (below), and a holding's daily price chart from the hashed
+  symbol bucket its symbol falls in ("Daily history", below): the tab asks
+  for one of 64 shared files, never for the symbol. A mutual fund the basket
+  doesn't quote can be asked for — "Anonymous add", below: the request names
+  it among 31 other funds, so the server learns one of 32, and when. Not
+  covered, and not coverable this way: a collective investment trust, private
+  stock or a plan-specific unit has no public price feed — they take a
+  hand-entered price, kept with the rest of the household's encrypted data.
 - **Bank sync (future)**: automatic SimpleFIN-style sync is fundamentally in
   tension with zero-knowledge — a server-side job would see plaintext
   transactions. ZK mode therefore ships with manual imports (client-side
@@ -637,10 +640,34 @@ crypto), about 1.5 MB gzipped.
   (one request every 1.5 s, at most 160 per run, runs at least 20 minutes
   apart, 640 a day; the first refusal pauses it until the next day), starts
   only when someone asks for the file (or a household server's series
-  catalog), and never runs twice at once. It is rebuilt each month once a
+  catalog) or when the scheduled crawl below asks, and never runs twice at
+  once. It is rebuilt each month once a
   month has closed; in between, each daily basket build folds its quotes into
   the month in progress. Until the first build completes, the route answers
   202 with its progress, and a benchmark says why it is greyed out.
+- **Who keeps it built.** Cloud Run gives the server CPU only while a request
+  is open, so a build that outlives the request that started it crawls and
+  dies with the idle instance — and nobody browsing keeps a request open for
+  ~600 paced calls. So the build is driven by a schedule:
+  `.github/workflows/history.yml` calls **`POST /api/basket/crawl`** every six
+  hours during the first five days of a month (when a rebuild is due) and
+  once a day otherwise, and the server runs the build *inside that request*
+  for up to four minutes, saving progress, then answers with how far it got
+  and when to call again (`retryAfter`); the job repeats until the file is
+  current or the day's 640 calls are spent. The caller is a dedicated
+  service account, `scarab-history`, on the IAP allowlist like a member
+  (`scripts/history-sa.sh` creates it, once); the workflow signs in through
+  Workload Identity Federation as the release workflow's `scarab-ci` and
+  signs a ten-minute JWT as `scarab-history` — no key exists anywhere. What
+  the server learns from it: that `scarab-history` called, and when (the
+  schedule above, and a manual run of the workflow). The request carries no
+  body the server reads and the answer is the build's public progress; the
+  route is a trigger and idempotent — any member may call it, and a call
+  when nothing is due, or too soon after a run, does nothing. `basket/crawl`
+  is the pattern this adds to the vault-only allowlist. (The alternative,
+  `--no-cpu-throttling` on the service, was not taken: it bills the instance
+  for every idle minute, still loses the build when the instance scales to
+  zero, and starts nothing by itself.)
 - **Where it is kept.** In the server's `app_meta` under `basket:history:*`
   keys — shared infrastructure like the basket itself: never part of anyone's
   snapshot or export, and kept by the zero-knowledge purge.
@@ -648,3 +675,161 @@ crypto), about 1.5 MB gzipped.
   Opening-position lots still start on their as-of date by design; the file
   fills history for back-dated trades, benchmarks and price series. Symbols
   outside the basket universe get no history.
+
+### Daily history
+
+A holding's price chart wants daily closes, and one file of two years of
+daily closes for the whole universe would be about 35 MB of JSON — too much
+to download for one chart. So the daily history is dealt into **hashed
+symbol buckets**, Safe-Browsing style: the tab asks for the bucket its symbol
+falls in, never for the symbol — **`GET /api/basket/daily/:bucket`**
+(`server/daily-buckets.ts`, served since 2026-10-20).
+
+- **The deal.** `shared/buckets.ts` `dailyBucket`: the first 32 bits of
+  SHA-1 over `kind:SYMBOL` (the basket's spelling), modulo **N = 64**. The
+  same function runs on the server, which deals, and in the tab, which asks,
+  and a test pins it: changing it moves every symbol to another file. The
+  universe is the basket's — about 11,000 symbols (every US-listed stock and
+  ETF, plus the top 500 crypto) — so a bucket holds **about 170 symbols**.
+- **What a request reveals.** Opening a holding's chart asks for one bucket:
+  the server learns that this identity's holding is one of that bucket's
+  ~170 symbols. A household that opens the charts of *k* holdings reveals at
+  most *k* bucket numbers, each with ~170 candidates; buckets are fixed, so
+  asking again (a new session, another day) adds nothing. The honest limit:
+  the 170 are not equally likely — a bucket that holds a famous fund was
+  more probably asked for because of it than because of an obscure
+  micro-cap, so an operator ranking by popularity does better than 1-in-170.
+  The number is an anonymity *set*, not a probability. A symbol outside the
+  universe (a private stock) still hashes to a bucket, which then carries
+  nothing of it; the request reveals only that bucket. The sparklines and
+  the holdings table ask for nothing: they draw what the tab has.
+- **What the server learns**, then: that an identity asked for bucket *b*,
+  and when — when a holding's drawer opens, at most every 30 minutes per
+  bucket (a minute while the files aren't ready), and after that usually a
+  304. Every caller gets the identical file for a bucket, with one ETag; the
+  server does not read the caller's identity to answer. `basket/daily/[0-9]+`
+  is the pattern this adds to the vault-only allowlist.
+- **The files.** Two years of daily closes per symbol (`DAILY_YEARS`; the
+  monthly file keeps the ten-year tail), each symbol one compact array on a
+  calendar-day axis — `[offset, first, Δ, Δ, …]`, null on a day without a
+  close — so a bucket is roughly 550 KB of JSON and 180 KB gzipped, and all
+  64 about 35 MB in the server's `app_meta` under `basket:daily:*` keys:
+  shared infrastructure like the basket, never part of anyone's snapshot or
+  export, kept by the zero-knowledge purge.
+- **What the tab does with it.** The file stays in the tab's memory
+  (`src/local/routes-analytics.ts`), kept 30 minutes; the chart joins the
+  bucket's closes with the basket quotes the tab has collected (today's,
+  which the crawl hasn't seen yet) and the month-ends before the bucket's
+  reach. **Nothing from a bucket is written to the vault**: the only price
+  write from shared data remains the monthly import above, and it is
+  unchanged.
+- **Where the server gets it.** The same Yahoo spark endpoint as the monthly
+  file, `range=2y&interval=1d`, 20 symbols a call, on **one shared budget**
+  (`server/crawl-budget.ts`): one call every 1.5 s, 160 a run, runs 20
+  minutes apart, **640 a day for both files together**, the first refusal
+  pausing both until the next day. One crawl of the universe is about 600
+  calls — a day's budget — and happens once, then again each month once a
+  month has closed (a day the basket missed, split adjustments, the window
+  moving on); between crawls each daily basket build folds its quotes into
+  every bucket. The scheduled trigger (above) runs the monthly file first,
+  then the buckets; wanting a bucket also starts or resumes the crawl on a
+  server nothing schedules. Until the first crawl completes the route answers
+  202 with its progress and the chart draws what the tab has.
+- **Honest scope.** Daily closes, split-adjusted as of the crawl, no
+  dividends. Between crawls the folded basket quotes are what the market
+  printed: after a split the quotes drop to the new price while the crawled
+  history before it stays unadjusted until the next monthly crawl — a cliff
+  in the chart for up to a month, the same one the monthly file has between
+  rebuilds.
+- **Not done, and why.** Decoy buckets — a tab also fetching a few fixed
+  buckets it has no holding in, chosen from a secret so the server can't
+  tell them apart — would blur the *k* above; they need a per-vault secret
+  the tab has only once a vault exists, and are left for later.
+
+### Anonymous add
+
+The basket's universe is the exchange directory, so a mutual fund — the
+retirement-plan holding par excellence — has no quote and took a hand-entered
+price. Widening the basket on request runs into the one fact this document
+keeps returning to: **every request carries the IAP identity**, so a request
+naming one fund ties that fund to the household. Nothing on the server's side
+can undo that; the only tool is k-anonymity on the client's side, and it is
+honest only if the k are drawn from the same population as the real one —
+otherwise the real one stands out. That population exists, and is clean: the
+SEC publishes every registered fund share class's ticker
+(`company_tickers_mf.json`, EDGAR's mapping of series and classes to
+symbols — a US government work, public domain). It is bundled as
+`src/invest/fund-tickers.txt` (28,586 tickers, 166 KB, fetched 2026-10-20;
+`scripts/fetch-fund-tickers.mjs` refreshes it, and its header says so), in a
+chunk that loads only when the view opens.
+
+- **The ask.** A holding's drawer offers *Ask the basket to cover this fund*
+  only when the symbol is a registered fund's ticker that the basket doesn't
+  quote (`src/invest/suggest.ts` `canSuggest`). The view
+  (`#/invest/cover`; the symbol rides in route state, never the address)
+  says in one line what the request does, and on a click schedules
+  **`POST /api/basket/suggest`** naming the wanted fund among **31 others
+  drawn from the same list** (`k = 32`; `src/invest/chaff.ts`), sent after a
+  random wait of 30 seconds to ten minutes while the tab stays open — so
+  the request doesn't trail the vault save that recorded the fund.
+- **Which 31.** A draw seeded from the vault's data key and the symbol
+  (SHA-256 over both, with a counter; `pickChaff`). Each draw is an index
+  over the whole bundled list — never over a list filtered by what the
+  basket quotes today — and a drawn symbol that is the wanted one, one the
+  basket already quotes (no chaff: the server has it) or one drawn before is
+  rejected and the next draw taken. So a change in the basket between two
+  asks — an ETF listed or delisted, a fund someone else asked for since —
+  swaps out at most the members it touches, one for one, never the whole
+  set. Secret-seeded, so the server cannot run the draw for every fund and
+  match the set it received — a draw seeded from the symbol alone would be
+  exactly that lookup table. And asked for **once**: a sent ask is recorded
+  with the household's data (`ui:basket-asks`, through
+  `PUT /api/prices/asked` in the tab, so it rides the next save), and
+  neither this device nor the other member's offers that fund again — a
+  second request with a different list would name the fund by intersection.
+  Before a vault exists there is no secret: the draw is random, and the
+  memory is the tab's until a vault is created. A refreshed
+  `fund-tickers.txt` is a new list and a new draw, which the memory covers
+  too.
+- **What the server does.** It keeps the request as one ask, its symbols
+  together, in a plain list of asks, `basket:extra:asks` (`server/basket.ts`)
+  — no identity, no time, nothing to tell the wanted one by. Every daily
+  build quotes the asks' symbols with the universe (the fund's name comes
+  from the quote source, since no directory lists it), and the monthly file
+  and the daily buckets pick them up at their next crawls. A symbol Yahoo
+  never quotes is **not** dropped on its own: which of an ask's symbols
+  survived would be a record of which were real, so an ask stays whole until
+  the list's cap (4,000 symbols) forces the oldest asks out, whole. The route
+  refuses a request naming fewer than two or more than 64 symbols and takes
+  one request a minute from everyone together (a brake that records the time
+  of the last request and nothing else). Its answer says how many of the
+  symbols were new to the list, not which. `basket/suggest` is the pattern
+  this adds to the vault-only allowlist.
+- **What the server learns — the residual, exactly.** That this identity
+  named one of these 32 registered funds, and when. Not which: the request
+  gives it no way to tell, and nothing it stores helps later. Two honest
+  limits on the "one of 32". First, the 32 are not equally likely to an
+  operator who knows which funds are popular: a famous fund among obscure
+  share classes stands out, so the anonymity set is strongest for exactly the
+  institutional and retirement classes that need this path most (the basket
+  already quotes everything exchange-traded), and weakest for a household
+  name. Second, once the fund is quoted it is in the basket for everyone,
+  and a household's later requests — the basket, a bucket — are the same as
+  anyone's; but the operator who saw the ask can watch for *that* fund's
+  bucket being fetched by *that* identity later, which narrows 32 toward
+  one over time. (Decoy buckets, above, would blunt this too.) Third, the
+  chaff is drawn from the SEC's whole list, most of which Yahoo may not
+  quote, while the wanted fund is quotable by construction; after the next
+  build the public basket shows which of the 32 got a quote, and *that*
+  subset — not 32 — is the real set. The server keeps no second copy of it
+  (asks stay whole, above), but the basket is for everyone to read. Every
+  household that holds a fund someone already asked for pays nothing: it is
+  simply in the basket.
+- **The alternative, and why not now.** Putting the whole SEC list in the
+  basket would make the ask unnecessary and leak nothing — the strongest
+  answer. It is also about three times the basket (28,586 more symbols,
+  most of them dead or institutional classes Yahoo may not quote), three
+  times the monthly file a tab downloads for benchmarks (~4.5 MB gzipped),
+  three times the crawls (two more days of budget a month), and 150 more
+  quote calls a day. If the file sizes stop mattering, that is the path to
+  take, and the suggest route goes with it.

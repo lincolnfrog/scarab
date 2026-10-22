@@ -1,0 +1,115 @@
+name: Market history
+
+# Keeps scarab.one's shared market history built (PRIVACY.md, "Market history
+# the server serves"; DESIGN.md §6 "Cloud Run CPU").
+#
+# Cloud Run gives the container CPU only while a request is open, so the
+# monthly rebuild of the market-history file — some 600 paced calls to Yahoo,
+# spread over runs 20 minutes apart — never finished on its own: nobody keeps
+# a request open for it. This workflow does. On a schedule it calls
+# POST /api/basket/crawl, which runs the build inside that request for up to
+# four minutes and answers with its progress and when to call again; the job
+# loops on that answer until the day's budget is spent or the file is current.
+#
+# Identity: the job signs in to Google Cloud through Workload Identity
+# Federation as scarab-ci (the release workflow's identity — no key anywhere),
+# then signs a ten-minute JWT as scarab-history, a service account that
+# scripts/history-sa.sh put on the site's IAP allowlist and let scarab-ci sign
+# for. IAP's Google-managed OAuth client takes no programmatic clients, but it
+# accepts a service account's self-signed JWT (the same path as
+# scripts/verify-served.sh). The server sees that identity, the time, and
+# nothing else; the route carries no household data in either direction.
+#
+# Schedule: a rebuild is due once a month has closed, so the first five days
+# of a month get several chances a day (a dropped or late scheduled run is
+# ordinary on GitHub); the rest of the month one a day resumes a build Yahoo
+# paused and keeps the server warm for the daily basket. GitHub disables a
+# scheduled workflow after 60 days without a commit to the repository (it
+# emails the owner first); a push, or Actions → Market history → Enable
+# workflow, turns it back on — a Run workflow by hand always works.
+#
+# Repository variables (none secret; shared with release.yml):
+#   GCP_PROJECT_ID, WIF_PROVIDER, WIF_SERVICE_ACCOUNT
+#   SCARAB_ORIGIN (optional) — the site, when it isn't https://scarab.one
+# Actions are pinned to commits (the comment is the tag), as in release.yml.
+
+on:
+  schedule:
+    - cron: '17 */6 1-5 * *' # first five days of a month: every six hours
+    - cron: '17 9 6-31 * *' # otherwise once a day, 09:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: market-history
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    name: Run the market-history build through IAP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170 # four runs of ≤4 minutes, 20 minutes apart, plus slack: the day's whole budget
+    permissions:
+      id-token: write # Workload Identity Federation
+    env:
+      ORIGIN: ${{ vars.SCARAB_ORIGIN || 'https://scarab.one' }}
+      HISTORY_SA: scarab-history@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+    steps:
+      - name: The repository variables are set (Settings → Secrets and variables → Actions → Variables)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+          WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT }}
+        run: |
+          missing=""
+          for v in GCP_PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT; do
+            [[ -n "${!v}" ]] || missing="$missing $v"
+          done
+          [[ -z "$missing" ]] || { echo "::error::repository variable(s) not set:$missing (scripts/bootstrap-gcp.sh trust-chain prints them)"; exit 1; }
+          echo "Crawling $ORIGIN as $HISTORY_SA, signed in as $WIF_SERVICE_ACCOUNT"
+
+      - name: Sign in to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Call POST /api/basket/crawl until the file is current or the day's budget is spent
+        run: |
+          set -euo pipefail
+          umask 077
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          # A fresh ten-minute JWT per call (iss/sub the account, aud this origin), into a curl config file: never on a command line.
+          token() {
+            local now
+            now=$(date +%s)
+            printf '{"iss":"%s","sub":"%s","aud":"%s/*","iat":%s,"exp":%s}\n' "$HISTORY_SA" "$HISTORY_SA" "$ORIGIN" "$now" $((now + 600)) > "$work/claim.json"
+            gcloud iam service-accounts sign-jwt --iam-account "$HISTORY_SA" "$work/claim.json" "$work/token.jwt" >/dev/null
+            printf 'header = "Authorization: Bearer %s"\n' "$(cat "$work/token.jwt")" > "$work/.curlrc"
+            rm -f "$work/token.jwt" "$work/claim.json"
+          }
+          for attempt in $(seq 1 8); do
+            token
+            code=$(curl -sS --max-time 600 --config "$work/.curlrc" -X POST -o "$work/reply.json" -w '%{http_code}' "$ORIGIN/api/basket/crawl") || code="none"
+            if [[ "$code" != 200 ]]; then
+              echo "::error::POST $ORIGIN/api/basket/crawl → $code"
+              [[ "$code" == 401 || "$code" == 403 || "$code" == 302 ]] && echo "::error::IAP refused $HISTORY_SA — run scripts/history-sa.sh (it must be on the allowlist, and $WIF_SERVICE_ACCOUNT must be allowed to sign as it)"
+              head -c 2000 "$work/reply.json" 2>/dev/null || true
+              exit 1
+            fi
+            jq -c '{ran, run, building, waiting, retryAfter, history: (.history | {ready, final, asOf, done, total, reason})}' "$work/reply.json"
+            retry=$(jq -r '.retryAfter' "$work/reply.json")
+            case "$retry" in
+              null) echo "Nothing more to do: $(jq -r '.waiting' "$work/reply.json") (final $(jq -r '.history.final // "none"' "$work/reply.json"))"; exit 0 ;;
+              0) continue ;;
+            esac
+            if (( retry > 3600 )); then echo "Done for today ($(jq -r '.waiting' "$work/reply.json")): the next scheduled run continues"; exit 0; fi
+            echo "Waiting $retry s before the next run…"
+            sleep $((retry + 5))
+          done
+          echo "Stopping after $attempt calls; the next scheduled run continues"
+        env:
+          WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT }}

@@ -247,6 +247,41 @@ export type HistoryPending = { ready: false; building: boolean; done: number; to
 /** In BasketResponse: `etag` names the current file (it changes whenever the file does). */
 export type HistoryStatus = { ready: boolean; etag: string | null; final: string | null; asOf: string | null }
 
+// GET /api/basket/daily/:bucket → DailyBucket (server/daily-buckets.ts). Two
+// years of daily closes for the part of the basket universe whose symbols hash
+// into this bucket (shared/buckets.ts dailyBucket: DAILY_BUCKETS files, the
+// same bytes for every caller, gzip with an ETag; network-only like the basket).
+// A tab asks for the bucket a held symbol falls in — never for the symbol —
+// and reads its closes in memory for the price chart; nothing from it is
+// written to the vault. 202 with DailyPending until the first crawl finishes;
+// 404 for a bucket number the server doesn't have.
+//
+// Each symbol's closes are one compact array, [offset, first, Δ, Δ, …] on a
+// calendar-day axis: `offset` is the first close's day counted from `start`,
+// `first` its close in cents, each later entry the change from the previous
+// close, and null a day without one (weekends and holidays for a stock).
+// engine/prices.ts decodeDaily reads it.
+//   - Days through the last full crawl are Yahoo's daily closes (split-adjusted
+//     as of that crawl, no dividends); later days are the daily basket's quotes,
+//     folded in each day, the newest `asOf`. A split between crawls shows as a
+//     cliff — the quotes after it at the new price, the crawled days before it
+//     unadjusted — until the next monthly crawl, as with the monthly file.
+//   - Keys: Yahoo spelling for stocks (BRK-B), the bare ticker for crypto.
+export type DailySeries = (number | null)[]
+export type DailyBucket = {
+  v: 1
+  bucket: number // 0 … of-1
+  of: number // how many buckets the server deals the universe into (DAILY_BUCKETS)
+  start: string // YYYY-MM-DD, day 0 of every offset
+  asOf: string // YYYY-MM-DD, the newest close in the file
+  builtAt: string // ISO time the last full crawl finished
+  stock: Record<string, DailySeries>
+  crypto: Record<string, DailySeries>
+}
+export type DailyPending = { ready: false; building: boolean; done: number; total: number; reason: string }
+/** POST /api/basket/crawl reports it: whether the daily files exist, their newest close, and how many there are. */
+export type DailyStatus = { ready: boolean; asOf: string | null; of: number | null }
+
 // POST /api/prices/history → HistoryApplyResult. Writes the shared history's
 // month-end closes (months through `final`) into the quote table for the
 // assets this household has traded, never overwriting a close it already has.

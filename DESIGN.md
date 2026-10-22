@@ -654,6 +654,8 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
 | NASDAQ Trader SymDir | quote-basket universe (all US-listed symbols), security names, ETF flag | `nasdaqlisted.txt` + `otherlisted.txt`, pipe-delimited, keyless. Names lose the "- Common Stock" boilerplate. Datacenter IPs may 403 (as Yahoo does); the build is best-effort and keeps yesterday's rows on failure. |
 | Yahoo v8 spark (batched) | basket quotes | ~200 symbols per call; v7 quote (crumb+cookie) is the fallback when spark returns nothing. Batches fail piecemeal: a symbol a build misses keeps its last (dated) quote for 14 days before it drops out. |
 | Yahoo v8 spark, `range=10y&interval=1mo` | monthly market history (`server/history-pack.ts`, GET /api/basket/history): month-end closes for the whole basket universe, one file for every caller | **20 symbols per call at most** (more is a 400), so a full build is ~600 calls: one call per 1.5s, ≤160 per run, runs ≥20 min apart, ≤640 a day, resumable (progress saved every 10 batches), and the first 429/403/5xx/unreadable reply pauses it until the next UTC day. Runs start only when someone asks for the file (or a household's series catalog), never on a timer. v8 replies carry no exchange zone, but US listings' monthly bars open at New York midnight (04:00/05:00Z) and crypto's at 00:00Z, so the UTC month is right; the live bar for the month in progress is last and wins. An unknown symbol is simply absent from the reply. Stored delta-encoded in app_meta `basket:history:v1` (~4 MB JSON, ~1.5 MB gzipped); rebuilt once a month has closed, and each daily basket build merges its quotes into the month in progress. A fresh server doesn't crawl for its first file: `npm run seed:history` builds it locally (same builder, budgets lifted) into `seed/history-pack.json.gz` — gitignored, since it is Yahoo-derived, but uploaded by `.gcloudignore` and copied into the image — and boot stores it via `seedHistoryPack` whenever it is newer than the server's. A tab keeps the file in memory for `bench:*` and copies only its traded assets' month ends into `prices` (engine/prices.ts `applyMonthlyHistory`). |
+| Yahoo v8 spark, `range=2y&interval=1d` | daily history in hashed symbol buckets (`server/daily-buckets.ts`, GET /api/basket/daily/:bucket; `shared/buckets.ts` deals the universe into 64 by SHA-1) | Same 20-symbol calls and the same gentle crawl as the monthly file, on **one shared budget** (`server/crawl-budget.ts`: 640 calls a day for both files together, runs 20 minutes apart, a refusal pauses both). One crawl of the universe ≈ 600 calls ≈ a day; crawled again once a month has closed; each daily basket build folds its quotes into every bucket (`appendDailyQuotes`). Daily bars are stamped at the session open (New York morning for US listings, midnight UTC for crypto), so the UTC day is the trading day. Stored one file per bucket in app_meta `basket:daily:file:<b>` (~550 KB JSON, ~180 KB gzipped each; ~35 MB in all — the database grows by that, inside the 512 MiB instance, and Litestream ships the rewritten files daily), delta-encoded on a calendar-day axis (engine/prices.ts `encodeDaily`). A split between crawls is a cliff in the chart until the next monthly crawl (the folded quotes are at the new price, the crawled days before it unadjusted), as with the monthly file. A tab fetches the bucket a held symbol falls in when its chart opens, keeps it in memory 30 minutes, and writes nothing from it (PRIVACY.md "Daily history"). The server caches the JSON and gzip of the 16 most recently asked-for buckets. |
+| SEC EDGAR `company_tickers_mf.json` | the chaff population for "Ask the basket to cover this fund" (`src/invest/fund-tickers.txt`, bundled; `scripts/fetch-fund-tickers.mjs`) | Every registered fund share class's ticker (28,586 on 2026-10-20), a US government work: public domain. The SEC rate-limits and wants a User-Agent naming the caller (`SEC_USER_AGENT`), else 403. ETF tickers are in it too (they are 1940-Act funds), which is why the chaff draw rejects whatever the basket already quotes — by rejection over the whole list, never by filtering it, so a basket change swaps one member, not the set. Names aren't in this file; a fund's name comes from Yahoo's quote meta once it is quoted. A sent ask is remembered in the vault (`ui:basket-asks`) so no device repeats it. |
 | CoinGecko /coins/markets | basket crypto quotes and names | top ~500 by market cap, keyless, browser-CORS-friendly. A failed crypto source leaves yesterday's crypto rows alone (the basket is replaced per kind). |
 | SimpleFIN | (planned, household mode) | $1.50/mo, read-only tokens via MX. Fundamentally in tension with ZK mode — see PRIVACY.md. |
 
@@ -663,7 +665,9 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
 - `./scripts/deploy.sh` — gcloud run deploy from source (config in `.env.gcp`).
 - `./scripts/bootstrap-gcp.sh` — one-time project setup. Non-org projects
   must complete IAP's OAuth client once via the Cloud Run console Security
-  tab (script prints this).
+  tab (script prints this). `./scripts/history-sa.sh` — one-time: the
+  `scarab-history` identity the scheduled market-history crawl calls the
+  site as (below).
 - **Backups**: Litestream streams to GCS continuously. To restore locally for
   analysis: copy the replica dir, find the generation with the newest WAL
   (`gcloud storage ls -l …/wal/`), then
@@ -677,10 +681,18 @@ at ingestion), Monte Carlo internals (rounded at the edge), and rate solving
   waits for it (≤120s), and a tab asks for it — its Investments refresh — as
   soon as the basket it sees is from an earlier day. A day whose build was cut
   off is retried an hour later (`BASKET_RETRY_MS`). The market history build
-  resumes from saved progress, so it still finishes, but the first full build
-  (~600 Yahoo calls) can take several visits or days. Undecided:
-  `--no-cpu-throttling`, or a scheduled ping to `GET /api/basket/history`.
-  Never change `--max-instances`.
+  resumes from saved progress, but a full build (~600 Yahoo calls, paced over
+  runs 20 minutes apart) never finished on visits alone. **Decided
+  2026-10-20: a scheduled trigger, not `--no-cpu-throttling`.**
+  `.github/workflows/history.yml` calls `POST /api/basket/crawl`
+  (`server/crawl.ts`) through IAP as the `scarab-history` service account
+  (`scripts/history-sa.sh`, once) — every six hours in a month's first five
+  days, daily otherwise — and the server runs the build inside that request
+  for up to four minutes (`CRAWL_REQUEST_BUDGET_MS`, under Cloud Run's 300 s
+  request timeout), answering with progress and `retryAfter`; the job loops
+  on it. `--no-cpu-throttling` would bill the instance for every idle minute,
+  still lose the build when the instance scales to zero, and start nothing by
+  itself. Never change `--max-instances`.
 - **Request size**: Cloud Run's HTTP/1 front end refuses request bodies over
   32 MiB before they reach the container, below the app's 64 MB restore cap
   (`server/api4.ts` BODY_LIMITS). A household restore bigger than that needs a
@@ -772,9 +784,10 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
    body cap on every route, on top of the 10MB blob cap), ~~the vault-only
    cut-over~~ (done 2026-10-01: the household re-entered through the front
    door; tasks.md), ~~the daily basket build from Cloud Run~~ (it serves the
-   live vault's prices); still to do: the market history's monthly rebuild
-   under request-based CPU (the CPU-throttling decision, §6), IAP
-   `allAuthenticatedUsers`, ToS/privacy pages.
+   live vault's prices), ~~the market history's monthly rebuild under
+   request-based CPU~~ (done 2026-10-20: the scheduled crawl, §6 — decided
+   against `--no-cpu-throttling`); still to do: IAP `allAuthenticatedUsers`,
+   ToS/privacy pages.
 4. **Declare production**: the floor is rolling — v28 since 2026-10-19
    (`engine/fixtures/README.md`). It stops rising once a second household
    keeps a vault; from then on every tier-C migration ships an upgrade.
@@ -788,9 +801,16 @@ and Taxes' Loss capacity view — migration 28, `engine/capacity.ts`).
    script's service-account vantage point can't see, is `verifier/` (Scarab
    Verify, a Chrome extension loaded unpacked; 2026-10-20). Still open: a
    proper ZK-only build target.
-6. **ZK market data**: an anonymous-add path for off-universe symbols (today:
-   a hand-entered price), and daily history through hashed symbol buckets
-   once the monthly file has proved itself (see PRIVACY.md).
+6. ~~**ZK market data**~~ — done 2026-10-20: daily history through hashed
+   symbol buckets (`shared/buckets.ts`, `server/daily-buckets.ts`,
+   `GET /api/basket/daily/:bucket`; the holding drawer's chart reads the
+   bucket its symbol falls in — PRIVACY.md "Daily history" has the numbers),
+   and the anonymous add for mutual funds (`POST /api/basket/suggest`: the
+   wanted fund among 31 others from the SEC's list, chaff drawn from the
+   vault's key; `#/invest/cover` off the holding drawer — PRIVACY.md
+   "Anonymous add" states the residual: one of 32, and when). CITs and
+   private stock keep a hand-entered price; the stronger alternative, the
+   whole SEC list in the basket, is written up there with its cost.
 7. Household-mode conveniences that never made ZK controversial: SimpleFIN
    sync, nightly price refresh (Cloud Scheduler + OIDC through IAP), one price
    path (household refresh on the basket too). (The tax-rate settings page

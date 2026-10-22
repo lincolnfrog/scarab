@@ -1,11 +1,14 @@
 import { Hono } from 'hono'
 import { getChartViews, getSeries, getSeriesCatalog, parseSeriesQuery, putChartViews } from '../engine/analytics'
+import { listBasketAsks, recordBasketAsk } from '../engine/basket-asks'
 import type { DbLike } from '../engine/db'
 import { getHoldingsReturns } from '../engine/returns'
 import * as svc from '../engine/services'
 import { handle } from './api'
 import { ensureDailyHistory } from './charts'
 import { db as rawDb } from './db'
+import { runCrawl } from './crawl'
+import { bucketResponse, ensureDailyBuckets } from './daily-buckets'
 import { applyServerHistory, ensureHistoryPack, packResponse, serverMarket } from './history-pack'
 import { backfillMonthlyHistory, fetchCryptoQuotes, fetchStockQuotes } from './prices'
 
@@ -72,9 +75,30 @@ api10.get('/basket/history', (c) => {
   wantHistory()
   return packResponse(db, c.req.header('accept-encoding'), c.req.header('if-none-match'))
 })
+// Two years of daily closes for one hashed bucket of the universe
+// (./daily-buckets.ts): the same file for every caller, 304 when unchanged,
+// 202 while there are no files yet. Wanting a bucket is also what starts or
+// resumes the crawl on a server nothing schedules (throttled there).
+api10.get('/basket/daily/:bucket', (c) => {
+  ensureDailyBuckets(db)?.catch((e: unknown) => console.error('daily history crawl failed', e))
+  return bucketResponse(db, c.req.param('bucket'), c.req.header('accept-encoding'), c.req.header('if-none-match'))
+})
+// Run whichever market-history build is due inside this request, so it has
+// CPU on Cloud Run (./crawl.ts). Called on a schedule by
+// .github/workflows/history.yml as the scarab-history identity; a trigger only
+// — no body is read, the answer is the builds' progress. Vault-only servers
+// answer it (server/zk-routes.ts).
+api10.post('/basket/crawl', async (c) => c.json(await runCrawl(db, fetch, new Date())))
 // Write the history's month-end closes for this household's own assets into
 // its quote table (a tab does the same with the file it downloaded).
 api10.post('/prices/history', (c) => handle(c, () => applyServerHistory(db)))
+// The household's memory of the funds it asked the basket to cover (engine/basket-asks.ts): household data, so a
+// tab keeps it in the vault; a household server keeps it with the rest of its settings.
+api10.get('/prices/asked', (c) => handle(c, () => listBasketAsks(db)))
+api10.put('/prices/asked', async (c) => {
+  const b = (await c.req.json()) as { symbol?: unknown; k?: unknown }
+  return handle(c, () => recordBasketAsk(db, b, today()))
+})
 
 /** Start or continue the history build in the background, if one is due and allowed now. */
 function wantHistory() {

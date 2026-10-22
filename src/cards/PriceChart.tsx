@@ -92,7 +92,7 @@ function PriceBody({ data, trades, onRetry }: { data: ChartData; trades?: ChartT
         </div>
         <div className="ch-hint">
           {zk
-            ? 'This session never tells the server what you hold, so it can’t ask for this symbol’s daily history. Prices build up from the shared daily quotes each time you open Investments, and the line starts once there are two.'
+            ? 'This session never names what you hold to the server: it reads daily history from a shared file covering a hashed bucket of symbols, and this one isn’t in it yet — a fund outside the market list, or a server that hasn’t built the daily files. Prices still build up from the shared daily quotes each time you open Investments, and the line starts once there are two.'
             : n === 1
               ? 'The line starts with the second close.'
               : 'Scarab fetches daily history when this chart opens, and none came back for this symbol.'}

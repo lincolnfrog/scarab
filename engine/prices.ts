@@ -1,6 +1,7 @@
 import { addMonthsToMonth, monthEndIso } from '../shared/dates'
 import { addDaysIso } from '../shared/dates'
-import type { ChartResponse, HistoryApplyResult, HistoryPack, HistorySeries, SparksResponse } from '../shared/series-api'
+import type { MarketKind } from '../shared/buckets'
+import type { ChartResponse, DailyBucket, DailySeries, HistoryApplyResult, HistoryPack, HistorySeries, SparksResponse } from '../shared/series-api'
 import type { MarketHistory } from './analytics'
 import type { DbLike } from './db'
 import { bad, isoDay, notFound } from './errors'
@@ -139,37 +140,45 @@ const usablePrev = (v: unknown): number | null => (Number.isSafeInteger(v) && (v
 
 /* ---------- charts (reads only — fetching stays with the caller) ---------- */
 
+/** One day's close, as the chart draws it. */
+export type DayClose = { d: string; c: number }
+
 /**
- * One asset's price history for the chart: the daily table as the spine, with
- * the quote table filling in where the daily one doesn't reach — the months
- * before its first close (a tab's daily history starts the day the vault did;
- * monthly history may go back years) and any days after its last. Quote rows
- * in the daily history's first month are left out: that month is the daily
- * table's, and an old monthly row there would be dated at the month's open.
- * No daily history at all → the quote table alone.
+ * One asset's price history for the chart: a daily spine, with the quote
+ * table filling in where it doesn't reach — the months before its first close
+ * (monthly history may go back years) and any days after its last. The spine
+ * is the daily table (Yahoo's daily history on a household server; in a tab,
+ * each day's basket quote accrued), joined by `market` when the caller has
+ * it: the shared daily bucket's closes for this symbol (two years, the same
+ * for everyone — src/local/routes-analytics.ts fetches the bucket its symbol
+ * falls in). Where both have a day the bucket's close wins, so the line is
+ * Yahoo's adjusted series rather than a quote caught mid-day. Quote rows in
+ * the spine's first month are left out: that month is the spine's, and an old
+ * monthly row there would be dated at the month's open. No spine at all →
+ * the quote table alone.
  */
-export function getChartData(db: DbLike, symbolRaw: string, errors: string[] = []): ChartResponse {
+export function getChartData(db: DbLike, symbolRaw: string, errors: string[] = [], market: readonly DayClose[] | null = null): ChartResponse {
   const symbol = symbolRaw.toUpperCase()
   const asset = db.prepare('SELECT id, symbol, kind FROM assets WHERE symbol = ?').get(symbol) as
     | { id: number; symbol: string; kind: 'stock' | 'crypto' }
     | undefined
   if (!asset) notFound('no such asset')
-  type Close = { d: string; c: number }
-  const daily = db
+  const own = db
     .prepare('SELECT priced_on AS d, close_cents AS c FROM prices_daily WHERE asset_id = ? ORDER BY priced_on')
-    .all(asset.id) as Close[]
+    .all(asset.id) as DayClose[]
+  const daily = market && market.length > 0 ? joinDaily(market, own) : own
   const quotesWhere = (cond: string, bound: string) =>
     db
       .prepare(`SELECT priced_on AS d, close_cents AS c FROM prices WHERE asset_id = ? AND priced_on ${cond} ? ORDER BY priced_on`)
-      .all(asset.id, bound) as Close[]
-  let closes: Close[]
+      .all(asset.id, bound) as DayClose[]
+  let closes: DayClose[]
   let fromQuotes: boolean // does the history's start come from the quote table?
   if (daily.length === 0) {
     closes = quotesWhere('>=', '')
     fromQuotes = closes.length > 0
   } else {
     const before = quotesWhere('<', `${daily[0]!.d.slice(0, 7)}-01`)
-    // Refresh quotes newer than the last daily fetch: same density, just fresher.
+    // Refresh quotes newer than the last daily close: same density, just fresher.
     const after = quotesWhere('>', daily[daily.length - 1]!.d)
     closes = [...before, ...daily, ...after]
     fromQuotes = before.length > 0
@@ -186,6 +195,26 @@ export function getChartData(db: DbLike, symbolRaw: string, errors: string[] = [
       dailyFrom: daily[0]?.d ?? null,
     },
   }
+}
+
+/** Two ascending daily series as one, a day at a time; where both have a day, `market`'s close. */
+function joinDaily(market: readonly DayClose[], own: readonly DayClose[]): DayClose[] {
+  const out: DayClose[] = []
+  let i = 0
+  let j = 0
+  while (i < market.length || j < own.length) {
+    const m = market[i]
+    const o = own[j]
+    if (m && (!o || m.d <= o.d)) {
+      out.push(m)
+      i++
+      if (o && o.d === m.d) j++
+    } else {
+      out.push(o!)
+      j++
+    }
+  }
+  return out
 }
 
 /** How far back a holdings sparkline looks. */
@@ -435,4 +464,97 @@ export function needsMonthlyHistory(db: DbLike, today: string, hints: { covered?
     if (hints.covered && !hints.covered.has(`${a.kind}:${marketSymbol(a)}`)) return false
     return settled.get(a.id, firstMonthStart, thisMonthStart) === undefined
   })
+}
+
+/* ---------- the shared daily history (GET /api/basket/daily/:bucket) ---------- */
+
+// The daily companion of the monthly file: two years of daily closes for the
+// basket universe, dealt into buckets by a hash of the symbol
+// (shared/buckets.ts) so a tab asks for one of N files rather than for a
+// symbol (server/daily-buckets.ts; wire shape: shared/series-api.ts
+// DailyBucket). Same encoding idea as the monthly one, on a calendar-day axis:
+// null marks a day without a close (a stock's weekends and holidays).
+
+const DAY_MS = 86_400_000
+/** More days than a daily file holds (two years is ~730): a guard against a hostile offset or length. */
+const MAX_DAY_OFFSET = 4_000
+
+/** Whole days from `start` to `day`, both YYYY-MM-DD, on the UTC calendar. */
+export function dayIndex(start: string, day: string): number {
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / DAY_MS)
+}
+
+/** Day `n` counted from `start`. */
+const dayLabel = (start: string, n: number) => new Date(Date.parse(`${start}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10)
+
+/**
+ * One symbol's closes → [offset, first, Δ, …] (null for a day without a
+ * close). `closes` is oldest first, one per day, none before `start`, each a
+ * positive integer number of cents.
+ */
+export function encodeDaily(start: string, closes: readonly DayClose[]): DailySeries {
+  const out: DailySeries = []
+  let prev: DayClose | null = null
+  for (const c of closes) {
+    if (!Number.isSafeInteger(c.c) || c.c <= 0) throw new Error(`encodeDaily: bad close ${c.c} for ${c.d}`)
+    const step = prev ? dayIndex(prev.d, c.d) : dayIndex(start, c.d)
+    if (step < (prev ? 1 : 0)) throw new Error(`encodeDaily: ${c.d} is out of order`)
+    if (!prev) out.push(step, c.c)
+    else {
+      for (let gap = step - 1; gap > 0; gap--) out.push(null)
+      out.push(c.c - prev.c)
+    }
+    prev = c
+  }
+  return out
+}
+
+/** [offset, first, Δ, …] → closes, oldest first. null when the array is malformed (it crossed a network). */
+export function decodeDaily(start: string, enc: unknown): DayClose[] | null {
+  if (!Array.isArray(enc) || enc.length < 2 || !isoDay.test(start) || Number.isNaN(Date.parse(`${start}T00:00:00Z`))) return null
+  const offset: unknown = enc[0]
+  const first: unknown = enc[1]
+  if (!Number.isSafeInteger(offset) || (offset as number) < 0 || (offset as number) > MAX_DAY_OFFSET) return null
+  if (!Number.isSafeInteger(first) || (first as number) <= 0 || enc.length - 2 > MAX_DAY_OFFSET) return null
+  let n = offset as number
+  let cents = first as number
+  const out: DayClose[] = [{ d: dayLabel(start, n), c: cents }]
+  for (let i = 2; i < enc.length; i++) {
+    n++
+    const d: unknown = enc[i]
+    if (d === null) continue
+    if (!Number.isSafeInteger(d)) return null
+    cents += d as number
+    if (cents <= 0 || !Number.isSafeInteger(cents)) return null
+    out.push({ d: dayLabel(start, n), c: cents })
+  }
+  return out
+}
+
+/** A bucket file's envelope (each symbol's array is checked when it is read). */
+export function isDailyBucket(x: unknown): x is DailyBucket {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return false
+  const p = x as Record<string, unknown>
+  const book = (b: unknown) => !!b && typeof b === 'object' && !Array.isArray(b)
+  return (
+    p.v === 1 &&
+    Number.isInteger(p.of) &&
+    (p.of as number) > 0 &&
+    Number.isInteger(p.bucket) &&
+    (p.bucket as number) >= 0 &&
+    (p.bucket as number) < (p.of as number) &&
+    typeof p.start === 'string' &&
+    isoDay.test(p.start) &&
+    typeof p.asOf === 'string' &&
+    isoDay.test(p.asOf) &&
+    typeof p.builtAt === 'string' &&
+    book(p.stock) &&
+    book(p.crypto)
+  )
+}
+
+/** One symbol's closes from a bucket file (the basket's spelling), or null when the file has none. */
+export function bucketCloses(file: DailyBucket, kind: MarketKind, symbol: string): DayClose[] | null {
+  const book = file[kind]
+  return Object.hasOwn(book, symbol) ? decodeDaily(file.start, book[symbol]) : null
 }

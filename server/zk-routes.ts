@@ -2,9 +2,10 @@
  * Everything a zero-knowledge-only server will answer. Identity, health, the
  * mode probe, the encrypted-blob courier with its kept versions, its
  * membership list and invitations (emails the server already knows from IAP),
- * and the daily price basket with its monthly market history (one file,
- * identical for every caller) — nothing that carries plaintext in either
- * direction. The list is the whole
+ * and the daily price basket with its market history (one monthly file and
+ * the daily closes in hashed symbol buckets, each identical for every caller,
+ * and the scheduled trigger that builds them) —
+ * nothing that carries plaintext in either direction. The list is the whole
  * privacy claim for scarab.one, so it is deliberately short and literal.
  *
  * Each entry is a regex fragment matched against the whole path after /api/.
@@ -21,6 +22,9 @@ const PATTERNS = [
   'vault/invites/accept', 'vault/invites/[^/]+', // accepting or declining an invitation into a household: routing only (PRIVACY.md)
   // — analytics stream (A) — append below
   'basket/history', // the monthly market history: one file, identical for every caller (PRIVACY.md)
+  'basket/crawl', // POST: run the market-history builds inside the request — a trigger, called on a schedule as scarab-history (PRIVACY.md)
+  'basket/daily/[0-9]+', // two years of daily closes for one hashed bucket of the universe: the same file for every caller (PRIVACY.md "Daily history")
+  'basket/suggest', // POST: ask the basket to cover a fund, named among chaff — the server learns one-of-k, and when (PRIVACY.md "Anonymous add")
 ]
 
 export const ZK_ROUTES = new RegExp(`^/api/(${PATTERNS.join('|')})$`)
