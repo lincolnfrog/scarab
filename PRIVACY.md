@@ -407,6 +407,39 @@ the operator can observe:
   its list. The invitee sees every one waiting, with who sent each, and
   answers each on its own; a household's invitation stands until the invitee
   answers it or the household withdraws it.
+- **Open sign-up**: with `allAuthenticatedUsers` on the IAP policy
+  (`scripts/open-signup.sh --open`; `--close` takes it back), any Google
+  account can sign in to scarab.one and create a vault. The server, and
+  Google's IAP in front of it, then learn every signer's email at their first
+  sign-in — a stranger's as a member's — and from then on the identity and
+  timing above. The two-person allowlist stays in the policy as a harmless
+  subset, and the verifier service account (`scarab-verify`, PRIVACY.md "The
+  trust root") is one more identity on it: an identity the operator already
+  is, so opening adds no other. Anyone signed in can invite any email, so a
+  stranger can invite you: the invitation waits at the front door, shows who
+  sent it, and can be declined — the server deletes the row and keeps no
+  record of the decline. What the server holds per vault stays bounded
+  whoever creates one: a single blob capped at 10 MB (about 14 MB as base64;
+  larger uploads are refused before anything is stored) with its pruned
+  history (the last 20 versions, one a day for 30 days, up to 8 pinned,
+  64 MB per household). The terms and privacy pages the front door's create
+  step and Data & Vault → Advanced link to (`public/terms.html`,
+  `public/privacy.html`) are static files of this origin — served, hashed and
+  attested like the rest, no JavaScript — and say this in fewer words; they
+  carry an `OPERATOR_CONTACT` placeholder the operator fills before opening
+  (the egress proof opens both and holds them to the same policy).
+  `scripts/open-signup.sh --open` reads the live service's environment first
+  and refuses unless `SCARAB_ZK_ONLY` is set there: a household-mode server
+  has no gate of its own behind IAP, so opening IAP on one would hand every
+  Google account the household's plaintext.
+- **Request logs, and the one cookie**: the app logs no requests — only a
+  handler's failure with its method and path (`server/http.ts`), and the
+  boot lines. Google's infrastructure in front of it does: Cloud Run's
+  request log carries each request's route, size, time, status and client
+  address, and with Cloud Audit Logs on for IAP, the signed-in identity of
+  each request too — as for any site behind IAP, in the operator's project.
+  The app sets no cookies; the one cookie scarab.one leaves in a browser is
+  IAP's sign-in session cookie, which Google sets and reads.
 - **Quote symbols**: in household mode price fetches name the held symbols to
   the server (which already holds the ledger). In zero-knowledge mode the
   server instead publishes a **daily price basket** — the whole US-listed

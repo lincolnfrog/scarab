@@ -85,6 +85,7 @@ describe('Data & Vault cards', () => {
     expect(adv).toMatch(/Start empty in this tab/)
     expect(adv).not.toMatch(/Rotate key/)
     expect(adv).toMatch(/Served code Loading…/) // no /build.json answer yet
+    expect(adv).toMatch(/Terms and privacy What this server stores/)
     expect(text(renderToStaticMarkup(<ui.RecoveryCard />))).toMatch(/Unlock the vault to see the code/)
     expect(text(renderToStaticMarkup(<ui.BackupsCard />))).toMatch(/Restore from an export…/)
   })
@@ -102,6 +103,14 @@ describe('Data & Vault cards', () => {
     expect(untagged).not.toMatch(/Release/)
     const none = text(renderToStaticMarkup(<ui.AdvancedCard {...props} build={null} />))
     expect(none).toMatch(/doesn’t say which commit it was built from/)
+  })
+
+  it('terms and privacy: the two static pages of this origin, opened in a new tab, in every mode', () => {
+    const props = { open: true, info: null, members: null, refetching: false, basket: null, onToggle: () => {}, reload: () => {} }
+    const html = renderToStaticMarkup(<ui.AdvancedCard {...props} build={null} />)
+    expect(html).toContain('<a target="_blank" rel="noreferrer" class="zk-link zk-link-inline" href="/terms.html">terms</a>')
+    expect(html).toContain('<a target="_blank" rel="noreferrer" class="zk-link zk-link-inline" href="/privacy.html">privacy</a>')
+    expect(text(html)).toMatch(/The same text is in the repository \( ?PRIVACY\.md ?, ?LICENSE ?\)/)
   })
 
   it('in a session: people with their passkeys by identity, this device marked, the owner’s actions, and the add form', async () => {

@@ -73,6 +73,14 @@ Converting an existing household install is a one-time
 `SCARAB_PURGE_PLAINTEXT=1 ./scripts/deploy.sh` — export your data from Data &
 Vault first; the server refuses to boot vault-only over plaintext.
 
+**Open sign-up** (vault-only deploys): `./scripts/open-signup.sh --open` grants
+`allAuthenticatedUsers` the IAP role on the service, so any Google account can
+sign in and create its own vault; `--close` takes it back, and no argument
+shows the current policy. First fill `OPERATOR_CONTACT` in `public/terms.html`
+and `public/privacy.html` (the pages the front door links to) and release, and
+check the OAuth consent screen's publishing status — the script's header says
+where. PRIVACY.md → "Open sign-up" is what the server then learns.
+
 ## Costs
 
 Cloud Run / GCS / Cloud Build free tiers cover 2-user scale. This is just an

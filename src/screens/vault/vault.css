@@ -158,6 +158,11 @@
 /* Front door: why the last session ended on its own, or that another tab has one open. */
 .zk-door-lock { margin: 0 0 14px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--plane); line-height: 1.5; }
 
+/* Front door: the terms line under the create step — quiet (ink-3), its links one step up, never gold: it is not a call to action. */
+.zk-door-terms { margin: 14px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.zk-door-terms a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.zk-door-terms a:hover { color: var(--ink); }
+
 /* ---------- Data & Vault: one card per concern (Session · Household · Recovery · Backups · Advanced) ---------- */
 .zk-vault { align-items: start; }
 /* position: relative contains .zk-sr's absolute spans: without it they are placed against the page, below the fold of
@@ -170,6 +175,8 @@
 .zk-actions { margin-top: 12px; }
 .zk-foot { margin: 12px 0 0; line-height: 1.5; }
 .zk-h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+/* A file or path named in running text (`.num` is a table-cell style, styles.css). */
+.zk-code { font-family: var(--mono); font-size: 0.95em; color: var(--ink); }
 
 /* Whether this tab's work is in the vault. Saved is neutral ink, never green; trouble is --down. */
 .zk-state { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }

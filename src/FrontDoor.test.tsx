@@ -26,6 +26,22 @@ const inv = (household: string, at: string): Invite => ({ household, invited_by:
 const buttons = (html: string) =>
   [...html.matchAll(/<button([^>]*)><span[^>]*>([^<]*)</g)].map((m) => ({ attrs: m[1]!, label: m[2]!.replace(/&#x27;/g, "'") }))
 
+describe('the front door’s create step', () => {
+  it('names the terms: a quiet line with both static pages, opened in a new tab — on the setup and invitation steps, not on the unlock step', async () => {
+    const setup = await door(base)
+    expect(setup).toMatch(/By creating a vault you agree to the/)
+    expect(setup).toContain('<a href="/terms.html" target="_blank" rel="noreferrer">terms</a>')
+    expect(setup).toContain('<a href="/privacy.html" target="_blank" rel="noreferrer">privacy</a>')
+    // Joining signs a stranger up just the same.
+    const invited = await door({ ...base, invites: [inv('max@x.com', '2026-09-22 09:00:00')] })
+    expect(invited).toMatch(/By joining a household you agree to the/)
+    expect(invited).toContain('<a href="/terms.html" target="_blank" rel="noreferrer">terms</a>')
+    const unlock = await door({ ...base, vault: { version: 3, updated_at: '2026-09-22 09:00:00', updated_by: null } })
+    expect(unlock).toMatch(/Unlock your vault/)
+    expect(unlock).not.toMatch(/agree to the/)
+  })
+})
+
 describe('the front door’s invitation step', () => {
   it('focuses nothing for you: Join is never the default, and Decline is a full button beside it', async () => {
     const html = await door({ ...base, invites: [inv('max@x.com', '2026-09-22 09:00:00')] })

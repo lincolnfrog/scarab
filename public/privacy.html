@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0d12" />
+    <title>Scarab · Privacy</title>
+    <!-- A static page, served from dist/ as-is and listed in the attested manifest. No JavaScript; one stylesheet
+         (legal.css) rather than an inline style block, so the server's Content-Security-Policy stays unchanged. This
+         is a summary of PRIVACY.md's honesty section, which is written to be audited against the code: when the two
+         disagree, PRIVACY.md is right and this page is behind. -->
+    <link rel="stylesheet" href="/legal.css" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cmask id='m'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23fff'/%3E%3Cpath d='M24.6 19.31A7.4 5.55 0 0 1 39.4 19.31Q32 23.16 24.6 19.31ZM23.49 20.42Q32 25.6 40.51 20.42C43.1 20.42 44.58 22.64 44.58 25.6C44.58 28.19 43.84 30.04 41.62 30.04H22.38C20.16 30.04 19.42 28.19 19.42 25.6C19.42 22.64 20.9 20.42 23.49 20.42ZM31.07 31.89V50.02C25.34 50.02 20.16 47.8 20.16 41.88V34.11C20.16 32.85 21.12 31.89 22.38 31.89ZM32.92 31.89V50.02C38.66 50.02 43.84 47.8 43.84 41.88V34.11C43.84 32.85 42.88 31.89 41.62 31.89Z'/%3E%3C/mask%3E%3Crect width='64' height='64' fill='%23e3b23c' mask='url(%23m)'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <main>
+      <div class="logo">
+        <a href="/" aria-label="Back to Scarab">
+          <svg width="26" height="26" viewBox="0 0 64 64" aria-hidden="true">
+            <mask id="mark">
+              <circle cx="32" cy="32" r="30" fill="#fff" />
+              <path d="M24.6 19.31A7.4 5.55 0 0 1 39.4 19.31Q32 23.16 24.6 19.31ZM23.49 20.42Q32 25.6 40.51 20.42C43.1 20.42 44.58 22.64 44.58 25.6C44.58 28.19 43.84 30.04 41.62 30.04H22.38C20.16 30.04 19.42 28.19 19.42 25.6C19.42 22.64 20.9 20.42 23.49 20.42ZM31.07 31.89V50.02C25.34 50.02 20.16 47.8 20.16 41.88V34.11C20.16 32.85 21.12 31.89 22.38 31.89ZM32.92 31.89V50.02C38.66 50.02 43.84 47.8 43.84 41.88V34.11C43.84 32.85 42.88 31.89 41.62 31.89Z" />
+              <path d="M22.75 19.16L24.05 19.87Q32 24.38 39.95 19.87L41.25 19.16M18.68 30.96H45.32M32 30.96V51.13" fill="none" stroke="#fff" stroke-width="2.81" />
+              <path d="M20.9 24.86L16.46 24.12L11.65 17.83M20.53 31.15L14.61 32.26L12.02 36.7M20.9 39.29L16.46 42.25L15.35 48.54M43.1 24.86L47.54 24.12L52.35 17.83M43.47 31.15L49.39 32.26L51.98 36.7M43.1 39.29L47.54 42.25L48.65 48.54" fill="none" stroke="#000" stroke-width="2.66" stroke-linecap="round" stroke-linejoin="round" />
+            </mask>
+            <rect width="64" height="64" fill="#e3b23c" mask="url(#mark)" />
+          </svg>
+          <span>SCARAB</span>
+        </a>
+      </div>
+
+      <p class="eyebrow">scarab.one</p>
+      <h1>Privacy</h1>
+      <p class="lead">The server stores ciphertext. This page says what it sees anyway, who else sees it, and how to take your data out.</p>
+
+      <div class="note">
+        <p>You signed in with Google to read this: Identity-Aware Proxy sits in front of everything on scarab.one, this page included. The full statement, written to be audited against the code, is <a href="https://github.com/lincolnfrog/scarab/blob/main/PRIVACY.md" rel="noreferrer">PRIVACY.md</a> in the public repository, readable without signing in; the licence is <a href="https://github.com/lincolnfrog/scarab/blob/main/LICENSE" rel="noreferrer">LICENSE</a>.</p>
+      </div>
+
+      <h2>What the server stores</h2>
+      <ul>
+        <li><b>Your vault.</b> One blob, encrypted in your browser (AES-GCM, a 256-bit key), with its version number, the SHA-256 of the ciphertext, when it was stored and by which signed-in email. The blob's header is readable and holds nothing secret: a random vault id, and for each passkey its label, its date, the email it belongs to and the wrapped key.</li>
+        <li><b>Earlier versions.</b> The same, pruned: the last 20, one a day for 30 days, a few pinned around upgrades and restores, within 64&nbsp;MB per household. A re-key deletes them all.</li>
+        <li><b>Household routing.</b> Which emails share a vault, who invited whom and when, and the invitations still waiting. An answered or withdrawn invitation is deleted; no record is kept of a decline.</li>
+        <li><b>Public market data.</b> The daily price basket and ten years of monthly history for the whole US-listed universe plus the top crypto assets. Identical for everyone; not about you.</li>
+      </ul>
+      <p>The database is one SQLite file on Google Cloud Run, replicated continuously to a private Google Cloud Storage bucket. The ciphertext travels with it, as ciphertext. The server never holds a plaintext version of your data: it is built so that it cannot (<code>SCARAB_ZK_ONLY=1</code> refuses every plaintext route before any handler runs).</p>
+
+      <h2>What the server sees anyway</h2>
+      <p>Zero-knowledge is a statement about content, not existence. The operator can observe:</p>
+      <ul>
+        <li><b>Identity and timing.</b> Your Google account's email on every request (Identity-Aware Proxy hands it over). When you sign in. When a tab saves: autosave uploads a fresh ciphertext about 1.5 seconds after each burst of edits, so the server sees when you are working, never on what. A heartbeat every 45 seconds while a tab is open and in view, which says that it is open, not what it shows. Browsing alone uploads nothing.</li>
+        <li><b>Sizes.</b> The size of each version, rounded up to a bucket by padding (32&nbsp;KiB at least, then steps of an eighth of a power of two), and the header's length, which grows with each passkey.</li>
+        <li><b>Who saved.</b> Each version records the email that stored it, and the household sees it as “saved by …”.</li>
+        <li><b>Invitations.</b> Who invited which email, and when. Accepting makes a membership row. Declining deletes the invitation and leaves no record.</li>
+        <li><b>Basket fetches.</b> That you fetched the daily basket or the monthly history file, and when. Never which symbols: the request is the same for everyone and your tab picks its own symbols out locally. Typing a ticker sends nothing.</li>
+        <li><b>History and re-keys.</b> Opening the History card or a version is a request the server sees. A key rotation or a member's removal is visible as such: the upload asks for the history to be purged.</li>
+      </ul>
+
+      <h2>Who else sees it</h2>
+      <ul>
+        <li><b>Google.</b> Identity-Aware Proxy authenticates every request, so Google sees the same sign-ins, times and request sizes it would for any site behind it, and your Google account keeps its own sign-in history. Cloud Run hosts the server and Cloud Storage holds the replicated database. The app itself logs no requests, only a failure and its route; Google's infrastructure in front of it, Cloud Run and IAP, keeps request logs with the route, size, time, status and client address of each request and, with audit logging on for IAP, the signed-in identity. Those logs live in the operator's project.</li>
+        <li><b>Apple or Google, for passkeys.</b> Your passkey syncs through your platform account, end-to-end encrypted by the platform. The secret it yields never leaves your browser, and the account alone does not decrypt Scarab.</li>
+        <li><b>Three market-data sources</b>, public and keyless: NASDAQ Trader's symbol directory (the universe of US listings), Yahoo Finance (quotes for that universe in batches, and ten years of monthly history) and CoinGecko (the top crypto assets). The server asks each for the same fixed universe on everyone's behalf. Never your holdings, never your identity.</li>
+        <li><b>No trackers.</b> No analytics, no advertising, no tracking scripts, no third-party fonts or scripts. The server's Content-Security-Policy lets the page load from and talk to scarab.one only. The app sets no cookies; the one cookie scarab.one leaves in your browser is Identity-Aware Proxy's sign-in session cookie.</li>
+      </ul>
+
+      <h2>What stays in your browser</h2>
+      <p>Bookkeeping, not household data, with one exception named here. In <code>localStorage</code>: the last version and ciphertext hash this device saw of each vault (<code>scarab:seen</code>), the credential ids of this device's own passkeys (<code>scarab:device-creds</code>), your idle auto-lock setting (<code>scarab:idle-lock</code>), a reminder that a new recovery code is owed (<code>scarab:recovery-owed</code>) and, the exception, the email of a removed member whose re-key is still owed (<code>scarab:rotation-owed</code>), on the owner's device until the re-key happens. Per tab, in <code>sessionStorage</code>: a note of why the last session locked, a reload guard, the household-mode choice and the day prices were last refreshed. The decrypted database lives only in the tab's memory and is gone when the tab closes or locks. Scarab's addresses carry only screen names, numeric ids and months, so your browser's synced history learns no tickers, search text or amounts.</p>
+
+      <h2>Your data</h2>
+      <ul>
+        <li><b>Take it out.</b> Data &amp; Vault → Backups exports everything as one readable JSON file and makes an encrypted <code>.scarab</code> backup. Both are downloads to your device; nothing is uploaded, and there is no gatekeeping and no format lock-in.</li>
+        <li><b>Delete it.</b> The owner's <i>Start over</i> at the front door deletes the stored vault with its history, members and invitations, for good, before a new one is created. Leaving a household removes your membership. A re-key deletes every earlier version.</li>
+        <li><b>Everything, including the rows that name your email.</b> Write to <span class="placeholder">OPERATOR_CONTACT</span>. Replicated copies in the backup bucket age out with the database's replication window.</li>
+      </ul>
+
+      <h2>No reset</h2>
+      <p>The operator cannot open your vault, reset it, or recover it. Lose every passkey and the recovery code and the data is gone. In a household, the other member's passkey is the practical recovery.</p>
+
+      <h2>Checking these claims</h2>
+      <p>The repository is the audit. <code>npm run test:egress</code> builds the app, runs the real vault-only server and drives a whole session in a headless browser while recording every request, then fails if anything but ciphertext left the tab. <code>scripts/verify-served.sh</code> checks that scarab.one serves the files of the attested release it names. Both, with the exact commands, are in <a href="https://github.com/lincolnfrog/scarab/blob/main/PRIVACY.md" rel="noreferrer">PRIVACY.md</a>.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about any of this: <span class="placeholder">OPERATOR_CONTACT</span>.</p>
+
+      <footer>
+        <a href="/terms.html">Terms</a>
+        <a href="https://github.com/lincolnfrog/scarab" rel="noreferrer">Repository</a>
+        <a href="/">Back to Scarab</a>
+      </footer>
+    </main>
+  </body>
+</html>

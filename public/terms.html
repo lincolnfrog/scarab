@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0d12" />
+    <title>Scarab · Terms</title>
+    <!-- A static page, served from dist/ as-is and listed in the attested manifest. No JavaScript; one stylesheet
+         (legal.css) rather than an inline style block, so the server's Content-Security-Policy stays unchanged. The
+         text here mirrors README.md's disclaimers, PRIVACY.md and LICENSE in the repository — change those first. -->
+    <link rel="stylesheet" href="/legal.css" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cmask id='m'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23fff'/%3E%3Cpath d='M24.6 19.31A7.4 5.55 0 0 1 39.4 19.31Q32 23.16 24.6 19.31ZM23.49 20.42Q32 25.6 40.51 20.42C43.1 20.42 44.58 22.64 44.58 25.6C44.58 28.19 43.84 30.04 41.62 30.04H22.38C20.16 30.04 19.42 28.19 19.42 25.6C19.42 22.64 20.9 20.42 23.49 20.42ZM31.07 31.89V50.02C25.34 50.02 20.16 47.8 20.16 41.88V34.11C20.16 32.85 21.12 31.89 22.38 31.89ZM32.92 31.89V50.02C38.66 50.02 43.84 47.8 43.84 41.88V34.11C43.84 32.85 42.88 31.89 41.62 31.89Z'/%3E%3C/mask%3E%3Crect width='64' height='64' fill='%23e3b23c' mask='url(%23m)'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <main>
+      <div class="logo">
+        <a href="/" aria-label="Back to Scarab">
+          <svg width="26" height="26" viewBox="0 0 64 64" aria-hidden="true">
+            <mask id="mark">
+              <circle cx="32" cy="32" r="30" fill="#fff" />
+              <path d="M24.6 19.31A7.4 5.55 0 0 1 39.4 19.31Q32 23.16 24.6 19.31ZM23.49 20.42Q32 25.6 40.51 20.42C43.1 20.42 44.58 22.64 44.58 25.6C44.58 28.19 43.84 30.04 41.62 30.04H22.38C20.16 30.04 19.42 28.19 19.42 25.6C19.42 22.64 20.9 20.42 23.49 20.42ZM31.07 31.89V50.02C25.34 50.02 20.16 47.8 20.16 41.88V34.11C20.16 32.85 21.12 31.89 22.38 31.89ZM32.92 31.89V50.02C38.66 50.02 43.84 47.8 43.84 41.88V34.11C43.84 32.85 42.88 31.89 41.62 31.89Z" />
+              <path d="M22.75 19.16L24.05 19.87Q32 24.38 39.95 19.87L41.25 19.16M18.68 30.96H45.32M32 30.96V51.13" fill="none" stroke="#fff" stroke-width="2.81" />
+              <path d="M20.9 24.86L16.46 24.12L11.65 17.83M20.53 31.15L14.61 32.26L12.02 36.7M20.9 39.29L16.46 42.25L15.35 48.54M43.1 24.86L47.54 24.12L52.35 17.83M43.47 31.15L49.39 32.26L51.98 36.7M43.1 39.29L47.54 42.25L48.65 48.54" fill="none" stroke="#000" stroke-width="2.66" stroke-linecap="round" stroke-linejoin="round" />
+            </mask>
+            <rect width="64" height="64" fill="#e3b23c" mask="url(#mark)" />
+          </svg>
+          <span>SCARAB</span>
+        </a>
+      </div>
+
+      <p class="eyebrow">scarab.one</p>
+      <h1>Terms</h1>
+      <p class="lead">Scarab keeps your household's finances in a vault only you can open. The server stores ciphertext. You hold the keys, and there is no reset.</p>
+
+      <div class="note">
+        <p>You signed in with Google to read this: Identity-Aware Proxy sits in front of everything on scarab.one, this page included. The same text lives in the public repository — <a href="https://github.com/lincolnfrog/scarab/blob/main/PRIVACY.md" rel="noreferrer">PRIVACY.md</a>, <a href="https://github.com/lincolnfrog/scarab/blob/main/LICENSE" rel="noreferrer">LICENSE</a> and <a href="https://github.com/lincolnfrog/scarab/blob/main/public/terms.html" rel="noreferrer">this file</a> — for anyone who wants to read it before signing in.</p>
+      </div>
+
+      <h2>What Scarab is</h2>
+      <p>Scarab is a household finance app: cash and budget, investments and tax lots, real estate, a home-purchase plan, a Monte Carlo future. On scarab.one it runs entirely in your browser tab. You import statements, the tab parses them, and every number you see is computed there.</p>
+      <p>The server answers exactly six things: who you are, which mode it runs in, your vault (one encrypted blob it cannot read, with the earlier versions it keeps), your household's members and invitations, the daily price basket with its monthly history (the same files for everyone), and a health check. Nothing else; the complete list is one short file, <code>server/zk-routes.ts</code>.</p>
+
+      <h2>Your account and your keys</h2>
+      <p>You sign in with a Google account. Google's Identity-Aware Proxy checks it before any request reaches Scarab, so Scarab has no passwords and no sign-up form of its own. Signing in and creating a vault is the whole account.</p>
+      <p>Your vault is encrypted in your browser under a key that only your passkeys and your recovery code can unwrap. <b>There is no password reset.</b> Lose every passkey and the recovery code, and nobody can open the vault, the operator included. The data is gone. Keep the recovery code on paper. In a household, the other member's passkey is the practical recovery: they unlock and add you again.</p>
+
+      <h2>Households and invitations</h2>
+      <p>Anyone signed in can invite any email address into their household. Nobody joins without saying yes: the invitation waits at the front door, shows who sent it, and can be declined, which tells the sender only that it is gone. Joining means everyone in that household can read what you add, and it ends the vault you had of your own. A member can leave at any time. The owner can remove a member, which re-keys the vault.</p>
+
+      <h2>What the service holds, and its limits</h2>
+      <p>One vault per household, up to 10&nbsp;MB encrypted. The server keeps a bounded history of earlier versions and prunes the rest; a re-key deletes the history. Request bodies are capped. The <a href="/privacy.html">privacy page</a> says exactly what the server stores and what it can see anyway: your email and when you save, sizes, invitations, basket fetches.</p>
+
+      <h2>Not financial advice, no warranty</h2>
+      <p>Scarab is a personal project. Nothing in it is financial, tax or legal advice; it is for information only. The math, charts, prices, tax figures and forecasts may be wrong, and the author makes no guarantee about any of them. Do your own research. The software is provided as is, without warranty of any kind, as its licence says, and the author is not liable for what you decide on the strength of it. The views, code and opinions here are the author's own and do not represent any employer, past or present.</p>
+
+      <h2>Licence and source</h2>
+      <p>Scarab is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="noreferrer">GNU Affero General Public License, version 3</a>. The complete source is at <a href="https://github.com/lincolnfrog/scarab" rel="noreferrer">github.com/lincolnfrog/scarab</a>, and the code running on scarab.one is built from it. You may read it, change it and run your own copy; the repository deploys with two scripts.</p>
+
+      <h2>How to check what runs here</h2>
+      <p>Every release is tagged and attested: built by GitHub's runners from a public commit, twice, on two machines, and accepted only when both builds match byte for byte, with Sigstore attesting the image and the manifest of every served file. The operator deploys a release by its attested image digest. The one unattested path, a build from a laptop's checkout, exists for the first deploy of a fresh project; the app says so when it is running one. The server sends a Content-Security-Policy that lets the page load from and talk to this origin only. Anyone can check that scarab.one serves the files of the release it names: the commands are in <a href="https://github.com/lincolnfrog/scarab/blob/main/PRIVACY.md#the-trust-root-served-javascript" rel="noreferrer">PRIVACY.md, “The trust root”</a> and in <code>scripts/verify-served.sh</code>. The release and commit served to you are shown in the app under Data &amp; Vault → Advanced → Served code.</p>
+
+      <h2>The service may end</h2>
+      <p>scarab.one is run by one person at their own cost. It may be shut down. Notice would be given ahead of time on this site and in the repository's releases; there is no other channel, so keep a backup of your own now and then. Your data is yours to take out at any moment, not only then: Data &amp; Vault → Backups exports everything as one readable JSON file, and makes an encrypted <code>.scarab</code> backup that opens with your passkey or recovery code on any Scarab, including one you run yourself.</p>
+
+      <h2>Changes</h2>
+      <p>These pages are files in the repository, so every change to them is a public commit, and the version you read is the one in the release that runs here. There is no separate announcement channel: a change that matters arrives the same way, as a release of this site and in the repository.</p>
+
+      <h2>Contact</h2>
+      <p>Questions, a problem, or a request to have everything the server holds for your account deleted: <span class="placeholder">OPERATOR_CONTACT</span>.</p>
+
+      <footer>
+        <a href="/privacy.html">Privacy</a>
+        <a href="https://github.com/lincolnfrog/scarab" rel="noreferrer">Repository</a>
+        <a href="/">Back to Scarab</a>
+      </footer>
+    </main>
+  </body>
+</html>
