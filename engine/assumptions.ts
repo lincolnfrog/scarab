@@ -66,7 +66,7 @@ export function getAssumptions(db: DbLike): AssumptionGroup[] {
       vintage: TAX_DATA_VINTAGE,
       source: 'IRS Rev. Proc. 2025-32',
       rows: bracketRows(FEDERAL_BRACKETS_2026[filing]),
-      note: 'Taxable income after the deduction. Your filing status is set on Taxes.',
+      note: 'Taxable income after the deduction. Your filing status is set on Taxes. Later years (the two-year view, loss capacity) hold these figures until the next year’s are published and bundled.',
     },
     {
       id: 'federal-deductions',
@@ -167,7 +167,7 @@ export function getAssumptions(db: DbLike): AssumptionGroup[] {
         }),
         { label: 'HSA, self-only / family', value: `${$(LIMITS_2026.hsaSelfCents)} / ${$(LIMITS_2026.hsaFamilyCents)} (+${$(LIMITS_2026.hsaCatchUp55Cents)} from 55)` },
       ],
-      note: 'Catch-up ages go by the age reached by Dec 31 — birth years are set on Taxes.',
+      note: 'Catch-up ages go by the age reached by Dec 31 — birth years are set on Taxes. Each plan’s deferrals stop at the limit, this year and in next year’s view, which holds these figures until the next year’s are bundled.',
     },
     {
       id: 'retirement',
@@ -219,10 +219,14 @@ export function getAssumptions(db: DbLike): AssumptionGroup[] {
   groups.push({
     id: 'checkup',
     title: 'Checkup rules',
-    vintage: 'Scarab defaults · the concentration threshold is yours',
+    vintage: 'Scarab defaults · the concentration and tax-timing thresholds are yours',
     source: 'Rules of thumb, stated as rules so they can be checked',
     rows: [
       { label: 'Employer stock flagged above', value: `${pct(checkup.concentrationMicro)} of liquid assets` },
+      {
+        label: 'Tax timing flagged at',
+        value: `${$(checkup.timingThresholdCents)} of tax — a planned sale the losses expected by its day don’t cover; a harvest worth more before Dec 31 than in January, or the reverse`,
+      },
       { label: 'Cash flagged below / above', value: `${RUNWAY_LOW_MONTHS} / ${RUNWAY_IDLE_MONTHS} months of average spending` },
       { label: 'Allocation drift flagged at', value: `${DRIFT_MICRO / 10_000} percentage points over 3 months` },
       { label: 'Recurring price rise flagged at', value: '10% over the typical charge' },

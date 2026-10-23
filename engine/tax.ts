@@ -9,6 +9,7 @@ import { firstVestAfter, sharesText, validateTrade, vestOn } from './invest'
 import { deriveItemized } from './itemize'
 import { computePosition, isLongTerm, longTermOn, positionValueCents, saleRealized } from './lots'
 import { ADDL_MEDICARE_RATE_MICRO, computePayroll, listPaySources, PAYROLL_VINTAGE, type Payroll } from './paychecks'
+import { ageInYear, listPeople, personNamed } from './people'
 import { reportedTotals } from './realized-reported'
 
 /**
@@ -98,6 +99,12 @@ export const LIMITS_2026 = {
   hsaFamilyCents: 8_750_00,
   hsaCatchUp55Cents: 1_000_00,
 } as const
+/** The deferral limit for a person's age this year: the base, plus the catch-up tier they're in. */
+export function deferralLimit(age: number | null) {
+  const tier: '50+' | '60–63' | null = age === null ? null : age >= 60 && age <= 63 ? '60–63' : age >= 50 ? '50+' : null
+  const catchUp = tier === '60–63' ? LIMITS_2026.catchUp60to63Cents : tier === '50+' ? LIMITS_2026.catchUp50Cents : 0
+  return { baseCents: LIMITS_2026.deferralCents, catchUpCents: catchUp, catchUpTier: tier, limitCents: LIMITS_2026.deferralCents + catchUp }
+}
 /** §408A(c)(3) Roth IRA contribution phase-out by MAGI: [start, end] in cents. */
 export const ROTH_IRA_PHASEOUT_2026: Record<FilingStatus, [number, number]> = {
   single: [153_000_00, 168_000_00],
@@ -134,24 +141,24 @@ export type StateTable = {
 
 const dollars = (cents: number) => cents / 100
 
-// California — FTB 2025 Tax Rate Schedules X/Y/Z and 2025 standard deduction.
-// The FTB publishes each year's indexed schedule late in that year; as of
-// September 2026 the 2026 schedule is not out (the EDD's 2026 withholding
-// tables still carry these thresholds). To swap in 2026: replace the four
-// arrays and the deduction line below and bump the vintage — nothing else
-// references them.
-const CA_SINGLE = [b(11_079, 1), b(26_264, 2), b(41_452, 4), b(57_542, 6), b(72_724, 8), b(371_479, 9.3), b(445_771, 10.3), b(742_953, 11.3), b(null, 12.3)]
+// California — FTB 2026 Tax Rate Schedules X/Y/Z and 2026 standard deduction,
+// indexed 3.4% (CCPI June 2025 → June 2026): the FTB's indexing memorandum of
+// 2026-09-03, published in Tax News (October 2026). The FTB notes indexed
+// values could still change if legislation touches 2026. Each year's swap is
+// the four arrays and the deduction line below, and the vintage — nothing
+// else references them.
+const CA_SINGLE = [b(11_456, 1), b(27_157, 2), b(42_861, 4), b(59_498, 6), b(75_197, 8), b(384_109, 9.3), b(460_927, 10.3), b(768_213, 11.3), b(null, 12.3)]
 const CA_MHST_THRESHOLD = 1_000_000_00 // 1% on taxable income above $1M, every status
 const CA_MHST_RATE_MICRO = 10_000
 const CA: StateTable = {
-  vintage: 'CA 2025 (FTB; 2026 schedule not yet published)',
+  vintage: 'CA 2026 (FTB indexing, Tax News Oct 2026)',
   brackets: {
     single: CA_SINGLE,
     mfs: CA_SINGLE,
-    mfj: [b(22_158, 1), b(52_528, 2), b(82_904, 4), b(115_084, 6), b(145_448, 8), b(742_958, 9.3), b(891_542, 10.3), b(1_485_906, 11.3), b(null, 12.3)],
-    hoh: [b(22_173, 1), b(52_530, 2), b(67_716, 4), b(83_805, 6), b(98_990, 8), b(505_208, 9.3), b(606_251, 10.3), b(1_010_417, 11.3), b(null, 12.3)],
+    mfj: [b(22_912, 1), b(54_314, 2), b(85_722, 4), b(118_996, 6), b(150_394, 8), b(768_218, 9.3), b(921_854, 10.3), b(1_536_426, 11.3), b(null, 12.3)],
+    hoh: [b(22_927, 1), b(54_316, 2), b(70_018, 4), b(86_654, 6), b(102_356, 8), b(522_385, 9.3), b(626_864, 10.3), b(1_044_771, 11.3), b(null, 12.3)],
   },
-  deduction: { single: 5_706_00, mfs: 5_706_00, mfj: 11_412_00, hoh: 11_412_00 },
+  deduction: { single: 5_900_00, mfs: 5_900_00, mfj: 11_800_00, hoh: 11_800_00 },
   note: 'Includes the 1% Mental Health Services Tax above $1M taxable. Exemption credits are not modeled.',
   surtax: (taxable) =>
     taxable > CA_MHST_THRESHOLD ? Math.round(((taxable - CA_MHST_THRESHOLD) * CA_MHST_RATE_MICRO) / 1_000_000) : 0,
@@ -927,8 +934,11 @@ export function taxYear(db: DbLike, today: string) {
     rsuByAccount.set(e.account_id, (rsuByAccount.get(e.account_id) ?? 0) + (e.cents ?? 0))
     rsuProjectedByAccount.set(e.account_id, (rsuProjectedByAccount.get(e.account_id) ?? 0) + (e.cents ?? 0))
   }
+  // Each plan's pre-tax deferrals stop at the earner's limit for their age (engine/contributions.ts paces the same walk).
   const sources = listPaySources(db)
-  const payroll: Payroll = computePayroll(sources, Number(year), rsuByAccount, ADDL_MEDICARE_THRESHOLD[settings.filingStatus])
+  const people = sources.length ? listPeople(db) : []
+  const limitOf = (earner: string) => deferralLimit(ageInYear(personNamed(people, earner), Number(year))).limitCents
+  const payroll: Payroll = computePayroll(sources, Number(year), rsuByAccount, ADDL_MEDICARE_THRESHOLD[settings.filingStatus], limitOf)
   const fromPaychecks = sources.length > 0
 
   // Supplemental withholding on vests. A stub's YTD withholding already

@@ -2,6 +2,7 @@ import type { BracketHeadroom, CalendarItem, Checkup, Finding } from '../shared/
 import { getAllocation, getTarget } from './allocation'
 import { addMonthsToMonth } from '../shared/dates'
 import { formatDollars, formatQtyMicro } from '../shared/money'
+import { saleCoverage, type SaleCoverage } from './capacity'
 import { contributionFindings } from './checkup-contributions'
 import { getCheckupSettings, resolveRoles, type Roles } from './checkup-settings'
 import { computeContributions } from './contributions'
@@ -26,6 +27,7 @@ import {
   type HarvestLot,
   type TaxInputs,
 } from './tax'
+import { priceCapitalTiming, twoYearContext, type Context as TwoYearContext } from './twoyear'
 
 /**
  * The Checkup: a derived, prioritized list of findings — what is true about
@@ -84,6 +86,10 @@ type Ctx = {
   wagesEntered: boolean
   /** This year's total tax with the inputs changed by `patch`. */
   taxWith: (patch: Partial<TaxInputs>) => number
+  /** The tax-timing findings speak up at this much (a Checkup setting). */
+  timingThresholdCents: number
+  /** The two-year context (engine/twoyear.ts), built on first use from this read's year picture. */
+  two: () => TwoYearContext
 }
 
 type Draft = Omit<Finding, 'isNew'>
@@ -812,6 +818,183 @@ function mortgageRate(c: Ctx): Draft[] {
   ]
 }
 
+/* ============================ tax timing ============================ */
+
+const dayYear = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+const signed = (cents: number) => formatDollars(cents, { sign: true })
+
+/** How a planned sale's day stands: what made the room, as one sum. */
+function roomLine(v: SaleCoverage): string {
+  const on = v.sale.planned_on
+  const parts: string[] = []
+  const add = (cents: number, what: string) => {
+    if (cents === 0) return
+    parts.push(parts.length === 0 ? `${cents < 0 ? '−' : ''}${$(Math.abs(cents))} ${what}` : `${cents < 0 ? '−' : '+'} ${$(Math.abs(cents))} ${what}`)
+  }
+  add(v.carryInCents, 'carried in')
+  add(v.forecastByCents, `the forecast expects by ${on}`)
+  add(-v.realizedCents, v.realizedCents < 0 ? 'of losses realized so far' : 'of gains realized so far')
+  add(-v.earlierCents, v.earlierCents < 0 ? 'of planned losses before it' : 'of planned gains before it')
+  const room = -v.netBeforeCents
+  return `Room on ${on}: ${parts.length ? parts.join(' ') : 'nothing'} = ${room >= 0 ? $(room) : `none — gains already ${$(-room)} ahead`}`
+}
+
+/** A planned sale the losses expected by its day don't cover (engine/capacity.ts saleCoverage). */
+function saleUncovered(c: Ctx): Draft[] {
+  if (!c.db.prepare('SELECT 1 FROM planned_sales LIMIT 1').get()) return []
+  const out: Draft[] = []
+  for (const v of saleCoverage(c.db, c.today, c.two())) {
+    if (v.uncoveredCents <= 0 || v.taxByThenCents <= 0 || v.taxByThenCents < c.timingThresholdCents) continue
+    const s = v.sale
+    const on = s.planned_on
+    const gain = s.st_cents + s.lt_cents
+    const room = Math.max(0, -v.netBeforeCents)
+    const later = v.year > c.year
+    const price =
+      s.price_source === 'typed' ? 'the typed price' : s.price_source === 'quote' ? `the ${s.priced_on} quote` : 'no price on file'
+    out.push({
+      id: `sale-uncovered:${s.id}`,
+      kind: 'sale-uncovered',
+      tone: v.uncoveredAtYearEndCents > 0 ? 'risk' : 'heads-up',
+      title: `${$(v.uncoveredCents)} of the gain on the ${s.symbol} sale planned for ${dayYear(on)} isn’t covered by the losses expected by then`,
+      impactCents: v.taxByThenCents,
+      impactLabel: 'tax if no more losses come that year',
+      rule: {
+        text: 'A year’s gains and losses net on the return whatever their order. What a planned sale’s day doesn’t cover rests on losses still to come that year — a manager’s forecast is an estimate — or is taxed.',
+        cite: 'IRC §1211(b), §1212(b), §1222; your harvest forecast',
+        vintage:
+          `${TAX_DATA_VINTAGE}${later ? ` — held for ${v.year}` : ''}` +
+          (v.forecasts.length ? ` · forecast: ${v.forecasts.map((f) => `${f.account} as of ${f.asOf}`).join(', ')}` : ''),
+      },
+      inputs: [
+        { label: `Planned: ${formatQtyMicro(s.qty_micro)} ${s.symbol} from ${s.account} on ${on}`, value: `${$(s.proceeds_cents)} at ${price}` },
+        { label: 'Its gain, short / long-term (the lots as they stand)', value: `${signed(s.st_cents)} / ${signed(s.lt_cents)}` },
+        ...(v.carryInCents > 0 ? [{ label: `Loss carried into ${v.year}`, value: $(v.carryInCents) }] : []),
+        ...(v.year === c.year && v.realizedCents !== 0 ? [{ label: `Realized so far in ${v.year} (recorded sales and broker reports)`, value: signed(v.realizedCents) }] : []),
+        ...(v.forecasts.length || v.forecastByCents > 0 ? [{ label: `Losses the forecast expects through ${on}`, value: $(v.forecastByCents) }] : []),
+        ...(v.earlierCents !== 0 ? [{ label: `Planned sales before it in ${v.year}`, value: signed(v.earlierCents) }] : []),
+        ...(v.forecastAfterCents > 0 ? [{ label: `Losses the forecast expects after it, through Dec 31`, value: $(v.forecastAfterCents) }] : []),
+      ],
+      math: [
+        roomLine(v),
+        `${$(gain)} gain − ${$(room)} of room = ${$(v.uncoveredCents)} not covered on the day`,
+        `${v.year} tax with the sale, the day as it stands − without it = ${$(v.taxByThenCents)}`,
+        v.forecastAfterCents === 0
+          ? `No more losses are expected in ${v.year}: the sale costs ${$(v.taxByYearEndCents)} on the return`
+          : v.uncoveredAtYearEndCents === 0
+            ? `With the ${$(v.forecastAfterCents)} the forecast expects after it, ${v.year} covers it by Dec 31 — the sale then costs ${$(v.taxByYearEndCents)}`
+            : `Even with the ${$(v.forecastAfterCents)} the forecast expects after it, ${$(v.uncoveredAtYearEndCents)} stays uncovered by Dec 31 — the sale then costs ${$(v.taxByYearEndCents)}`,
+      ],
+      leavesOut: [
+        'The return nets the whole year: losses that come after the sale still cover it. This is how much of it rests on them.',
+        'Forecast losses are taken as short-term, as loss capacity takes them; the broker’s report settles the split.',
+        'The gain follows today’s quote unless a price is typed, and the lots as they stand today.',
+        ...(later ? [`${v.year} is priced on this year’s brackets and income.`] : []),
+      ],
+      action: { label: 'See loss capacity', to: { screen: 'tax', rest: ['capacity'] } },
+    })
+  }
+  return out
+}
+
+/**
+ * Loss lots whose harvest is worth more in one year than the other: the
+ * lots the loss-harvest finding counts, realized before Dec 31 or in January,
+ * over both years' tax with the carryforward (engine/twoyear.ts).
+ */
+function harvestTiming(c: Ctx): Draft[] {
+  if (!c.wagesEntered) return []
+  const lots = c.harvest.rows.filter((r) => r.gain_cents < 0 && !r.wash_risk && r.wash_upcoming === null)
+  if (lots.length === 0) return []
+  const next = c.year + 1
+  const jan1 = `${next}-01-01`
+  // Today's term this year; by January a lot may have turned long-term.
+  const sides = (rows: HarvestLot[]) => {
+    const now = { stCents: 0, ltCents: 0 }
+    const later = { stCents: 0, ltCents: 0 }
+    for (const r of rows) {
+      if (r.term === 'lt') now.ltCents += r.gain_cents
+      else now.stCents += r.gain_cents
+      if (r.lt_on <= jan1) later.ltCents += r.gain_cents
+      else later.stCents += r.gain_cents
+    }
+    return { now, later }
+  }
+  const two = c.two()
+  const all = sides(lots)
+  const t = priceCapitalTiming(two, all.now, all.later)
+  const diff = t.nowSavesCents
+  if (diff === 0 || Math.abs(diff) < c.timingThresholdCents) return []
+  const byHolding = new Map<string, HarvestLot[]>()
+  for (const r of lots) {
+    const k = `${r.account_id}:${r.symbol}`
+    const g = byHolding.get(k)
+    if (g) g.push(r)
+    else byHolding.set(k, [r])
+  }
+  const holdings = [...byHolding.values()]
+    .map((rs) => {
+      const h = sides(rs)
+      return { symbol: rs[0]!.symbol, account: rs[0]!.account, lots: rs.length, lossCents: -(h.now.stCents + h.now.ltCents), savesCents: priceCapitalTiming(two, h.now, h.later).nowSavesCents }
+    })
+    .sort((a, b) => Math.abs(b.savesCents) - Math.abs(a.savesCents) || b.lossCents - a.lossCents)
+  const loss = -(all.now.stCents + all.now.ltCents)
+  const nowWins = diff > 0
+  const when = nowWins ? 'before Dec 31' : 'in January'
+  const other = nowWins ? 'in January' : 'before Dec 31'
+  const one = holdings.length === 1 ? holdings[0]! : null
+  const turning = all.later.ltCents - all.now.ltCents
+  const shown = holdings.slice(0, 5)
+  const nextView = two.view.nextYear
+  return [
+    {
+      id: `timing:harvest:${nowWins ? 'now' : 'january'}`,
+      kind: 'timing',
+      tone: 'saving',
+      title: one
+        ? `Harvesting the ${$(loss)} loss in ${one.symbol} ${when} is worth ${$(Math.abs(diff))} more than ${other}`
+        : `Harvesting ${$(loss)} of losses ${when} is worth ${$(Math.abs(diff))} more than ${other}`,
+      impactCents: Math.abs(diff),
+      impactLabel: `less tax over ${c.year} and ${next}`,
+      rule: {
+        text: 'A realized loss offsets the gains of its own year first, then up to $3,000 of ordinary income, and carries the rest forward by character. The same harvest priced in each year, over both years’ tax with the carryforward, shows which year it is worth more in.',
+        cite: 'IRC §1211(b), §1212(b), §1222',
+        vintage: `${TAX_DATA_VINTAGE} — held for ${next}`,
+      },
+      inputs: [
+        { label: `Loss lots in taxable accounts (${lots.length}), short / long-term today`, value: `${$(all.now.stCents)} / ${$(all.now.ltCents)}` },
+        ...(turning !== 0 ? [{ label: 'Turning long-term by Jan 1', value: $(-turning) }] : []),
+        { label: `${c.year} gains and losses with the plan, short / long-term`, value: `${signed(two.thisInputs.stGainCents)} / ${signed(two.thisInputs.ltGainCents)}` },
+        {
+          label: `${next}: planned sales, short / long-term${nextView.forecastLossCents ? ', and the forecast’s losses' : ''}`,
+          value: `${signed(nextView.plannedStCents)} / ${signed(nextView.plannedLtCents)}${nextView.forecastLossCents ? ` · −${$(nextView.forecastLossCents)}` : ''}`,
+        },
+        ...shown.map((h) => ({
+          label: `${h.symbol} in ${h.account} (${h.lots} lot${h.lots === 1 ? '' : 's'}, ${$(h.lossCents)} loss), alone`,
+          value: h.savesCents > 0 ? `${$(h.savesCents)} more before Dec 31` : h.savesCents < 0 ? `${$(-h.savesCents)} more in January` : 'the same either way',
+        })),
+        ...(holdings.length > shown.length ? [{ label: `${holdings.length - shown.length} more holding${holdings.length - shown.length === 1 ? '' : 's'}`, value: 'in the total' }] : []),
+        { label: 'Speaks up at (your setting)', value: $(c.timingThresholdCents) },
+      ],
+      math: [
+        `Harvested before Dec 31: ${$(t.nowCents.thisYear)} in ${c.year} + ${$(t.nowCents.nextYear)} in ${next} = ${$(t.nowCents.total)}`,
+        `Harvested in January: ${$(t.laterCents.thisYear)} in ${c.year} + ${$(t.laterCents.nextYear)} in ${next} = ${$(t.laterCents.total)}`,
+        nowWins
+          ? `${$(t.laterCents.total)} − ${$(t.nowCents.total)} = ${$(diff)} less tax harvesting before Dec 31`
+          : `${$(t.nowCents.total)} − ${$(t.laterCents.total)} = ${$(-diff)} less tax waiting for January`,
+      ],
+      leavesOut: [
+        'A loss carried past next year is still worth something later; the two years here count none of it, which flatters harvesting before Dec 31 when neither year can use it all.',
+        'Lots with a wash-sale risk are left out; a buy of the same or a substantially identical security within 30 days of the sale disallows the loss either year.',
+        'The loss is today’s; prices move before either date. Each lot’s term is today’s for this year and Jan 1’s for January.',
+        `${next} is priced on this year’s brackets, with this year’s paychecks for a full year.`,
+      ],
+      action: { label: 'See next year’s tax', to: { screen: 'tax', rest: ['two-year'] } },
+    },
+  ]
+}
+
 /* ============================ the calendar ============================ */
 
 function calendar(c: Ctx): CalendarItem[] {
@@ -869,6 +1052,7 @@ function context(db: DbLike, today: string): Ctx {
   const settings = getCheckupSettings(db)
   const series = netWorthSeries(db, today)
   const base = computeTax(ty.inputs).totalCents
+  let two: TwoYearContext | null = null
   return {
     db,
     today,
@@ -880,6 +1064,8 @@ function context(db: DbLike, today: string): Ctx {
     harvest: computeHarvest(db, today, ty.out.marginal),
     wagesEntered: listPaySources(db).length > 0 || ty.out.settings.wagesAnnualCents > 0,
     taxWith: (patch) => (Object.keys(patch).length === 0 ? base : computeTax({ ...ty.inputs, ...patch }).totalCents),
+    timingThresholdCents: settings.timingThresholdCents,
+    two: () => (two ??= twoYearContext(db, today, ty)),
   }
 }
 
@@ -905,6 +1091,8 @@ export function getCheckup(db: DbLike, today: string, reader: string): Checkup {
     ...assetLocation(c),
     ...priceCreep(c),
     ...mortgageRate(c),
+    ...saleUncovered(c),
+    ...harvestTiming(c),
     ...contributionFindings(
       computeContributions(db, today, c.ty.out.settings.filingStatus, c.ty.out.incomes.totalIncomeCents),
       // Deferrals, HSA money and conversions move income tax only — never Medicare wages, so no 0.9% surtax.

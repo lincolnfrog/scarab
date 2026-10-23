@@ -4,16 +4,20 @@ import { bad } from './errors'
 
 /**
  * The Checkup's one settings blob (goal_settings 'checkup', household data,
- * rides the snapshot): the concentration threshold and which expense
- * categories play the roles the tax findings read — charitable giving,
- * property tax, gifts to people. A role left unset (null) is guessed from the
- * category names, so a household with a "Giving" category gets the itemized
- * and appreciated-shares findings without touching a setting; 0 turns a role
- * off.
+ * rides the snapshot): the concentration threshold, the tax-timing
+ * threshold, and which expense categories play the roles the tax findings
+ * read — charitable giving, property tax, gifts to people. A role left unset
+ * (null) is guessed from the category names, so a household with a "Giving"
+ * category gets the itemized and appreciated-shares findings without
+ * touching a setting; 0 turns a role off.
  */
+
+/** A timing threshold past $1,000,000 is a typo. */
+export const MAX_TIMING_THRESHOLD_CENTS = 1_000_000_00
 
 export const CHECKUP_DEFAULTS: CheckupSettings = {
   concentrationMicro: 100_000,
+  timingThresholdCents: 1_000_00,
   charityCategoryId: null,
   propertyTaxCategoryId: null,
   giftCategoryId: null,
@@ -40,6 +44,12 @@ export function putCheckupSettings(db: DbLike, body: Partial<Record<keyof Checku
     if (!Number.isSafeInteger(v) || (v as number) < 10_000 || (v as number) > 1_000_000)
       bad('concentrationMicro must be an integer from 10000 (1%) to 1000000 (100%)')
     next.concentrationMicro = v as number
+  }
+  if (body.timingThresholdCents !== undefined) {
+    const v = body.timingThresholdCents
+    if (!Number.isSafeInteger(v) || (v as number) < 0 || (v as number) > MAX_TIMING_THRESHOLD_CENTS)
+      bad(`timingThresholdCents must be a whole number of cents from 0 to ${MAX_TIMING_THRESHOLD_CENTS}`)
+    next.timingThresholdCents = v as number
   }
   for (const k of ROLE_KEYS) {
     const v = body[k]

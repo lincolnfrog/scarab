@@ -106,11 +106,15 @@ Follow-ups — **shipped 2026-09-10** except the last:
       earner through an optional `invest_account_id`; vests a stub's YTD can't
       vouch for get supplemental withholding at 22% federal / the state's
       flat rate (CA 10.23%, NY 11.70%), overridable in settings.
-- [ ] 2026 CA brackets when the FTB publishes them. As of 2026-09-10 they are
-      not out (the EDD's 2026 withholding tables still use 2025 thresholds), so
-      `CA` in `engine/tax.ts` now carries the *official 2025* Schedules X/Y/Z and
+- [x] 2026 CA brackets when the FTB publishes them. As of 2026-09-10 they were
+      not out (the EDD's 2026 withholding tables still used 2025 thresholds), so
+      `CA` in `engine/tax.ts` carried the *official 2025* Schedules X/Y/Z and
       $5,706/$11,412 deduction (the previous table was actually 2024 data). The
       swap is one entry: four arrays, one deduction line, one vintage string.
+      (2026-10-22: swapped in — the FTB's indexing memorandum of 2026-09-03,
+      published in Tax News October 2026: 3.4% CCPI, $5,900/$11,800, every
+      edge of X/Y/Z cross-checked against its cumulative amounts in
+      `engine/tax.test.ts`.)
 
 ## 2 — Digest & proactivity
 
@@ -328,9 +332,19 @@ Proc. 2025-19.
 
 Follow-ups:
 
-- [ ] Taxes still projects pre-tax deferrals per check without the limit, so a
-      stub-based year that would pass $24,500 understates taxable wages; feed
-      the pace's capped figure into `computePayroll`.
+- [x] Taxes still projected pre-tax deferrals per check without the limit, so a
+      stub-based year that would pass $24,500 understated taxable wages; feed
+      the pace's capped figure into `computePayroll`. (2026-10-22: one walk,
+      `walkDeferrals` in `engine/paychecks.ts`, stops each plan at the
+      earner's limit — Roth sharing it, a check cut short split like the
+      stub — for the pace card, this year's wages and next year's alike; what
+      two jobs together defer over the limit is wages again, pre-tax first
+      (§402(g)(1)). The paycheck row says when its plan reaches the limit.)
+- [ ] Withholding on the checks after the limit is still the stub's; with no
+      deferral those checks withhold more, so the gap reads a little high.
+- [ ] The Roth catch-up rule (§414(v)(7): prior-year FICA wages from that
+      employer over $150,000) isn't applied to wages — a 50+ high earner's
+      catch-up on a pre-tax stub line is still taken as pre-tax.
 - [ ] IRA contributions aren't read from the ledger (they're transfers or
       trades), so there's no IRA "room" finding — only the limit and Roth
       eligibility.
@@ -441,13 +455,29 @@ Follow-ups:
 
 Follow-ups:
 
-- [ ] This year's projection doesn't cap pre-tax deferrals at the limit (see
-      4b); next year's does, so two otherwise identical years can differ by
-      the tax on the excess.
+- [x] This year's projection didn't cap pre-tax deferrals at the limit (see
+      4b); next year's did, so two otherwise identical years could differ by
+      the tax on the excess. (2026-10-22: both years take the same walk now,
+      and next year's stops Roth and pre-tax together too — it used to cap
+      pre-tax alone.)
 - [ ] Next year's indexed tables when the IRS publishes them (bundle 2027 and
-      let each year use its own).
-- [ ] A Checkup finding when a timing choice is worth more than a threshold
+      let each year use its own). Checked 2026-10-22: not out — no
+      inflation-adjustment release through IR-2026-127 (last year's,
+      Rev. Proc. 2025-32, came Oct 9), so 2026's stay held and the
+      Assumptions page says so. The 2027 HSA limits are out (Rev. Proc.
+      2026-24: $4,500 / $9,000, catch-up unchanged) but nothing reads next
+      year's HSA limit yet; the deferral and IRA limits wait on the November
+      notice — bundle all three as one `LIMITS_2027` then.
+- [x] A Checkup finding when a timing choice is worth more than a threshold
       (e.g. a large loss lot whose harvest is worth far more this year).
+      (2026-10-22: `timing` — the lots the loss-harvest finding counts,
+      realized before Dec 31 or in January (a lot's term judged on Jan 1),
+      priced over both years with the carryforward by `priceCapitalTiming`
+      in `engine/twoyear.ts`; says which year wins, each holding's own
+      figure among the inputs; quiet without wages. The threshold is a
+      Checkup setting, `timingThresholdCents` (default $1,000), on the
+      Assumptions page. Planned sales, bonuses and conversions aren't
+      candidates yet — the "Now or in January?" card still prices those.)
 
 ### Gap list (after 4a–4e)
 
@@ -876,7 +906,14 @@ key, and can't be held to the engine's invariants).
 
 Follow-ups:
 
-- [ ] A Checkup finding for a planned sale the losses won't cover by then.
+- [x] A Checkup finding for a planned sale the losses won't cover by then.
+      (2026-10-22: `sale-uncovered`, from `saleCoverage` in
+      `engine/capacity.ts` — each planned sale against its year's carry-in,
+      realized gains and losses, the forecast through its day and the sales
+      before it; priced as the year's tax with it less without it if no
+      more losses came, with what Dec 31 looks like if the forecast holds;
+      a risk when even that falls short, a heads-up otherwise. Same
+      threshold as the timing finding.)
 - [ ] A money-weighted return for balance-tracked accounts now that their
       deposits are recorded (today only lots accounts have one).
 - [ ] "Plan a sale…" from the holding drawer, prefilled.

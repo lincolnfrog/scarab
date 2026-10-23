@@ -82,6 +82,18 @@ type PaySource = {
   matchCapMicro: number | null
   matchTrueUp: boolean
 }
+type DeferralPace = {
+  limitCents: number
+  perCheckCents: number
+  ytdCents: number
+  ytdPretaxCents: number
+  projectedCents: number
+  projectedPretaxCents: number
+  projectedRothCents: number
+  remainingChecks: number
+  reachedOn: string | null
+  checksAfterLimit: number
+}
 type PayProjection = PaySource & {
   stale: boolean
   ytdEstimated: boolean
@@ -89,10 +101,14 @@ type PayProjection = PaySource & {
   periodsRemaining: number
   ytd: PayAmounts
   projected: PayAmounts & { taxableWagesCents: number; ficaWagesCents: number }
+  deferral: DeferralPace
 }
 type EarnerPayroll = {
   earner: string
   wagesCents: number
+  deferralLimitCents: number
+  deferredCents: number
+  excessPretaxCents: number
   rsuCents: number
   ficaWagesCents: number
   fedWithheldCents: number
@@ -665,7 +681,16 @@ export default function Taxes() {
           <tbody>
             <tr>
               <td className="muted">
-                <Note tip={hasPaychecks ? payroll.earners.map((e) => `${e.earner}: ${formatCents(e.wagesCents)} taxable wages`) : 'From the salary in Tax settings — add paychecks to derive it'}>
+                <Note
+                  tip={
+                    hasPaychecks
+                      ? payroll.earners.map(
+                          (e) =>
+                            `${e.earner}: ${formatCents(e.wagesCents)} taxable wages${e.excessPretaxCents > 0 ? ` — incl. ${formatCents(e.excessPretaxCents)} deferred over the ${formatCents(e.deferralLimitCents)} limit across jobs, which is wages anyway` : ''}`,
+                        )
+                      : 'From the salary in Tax settings — add paychecks to derive it'
+                  }
+                >
                   Salary ({hasPaychecks ? `from ${payroll.sources.length} paycheck${payroll.sources.length > 1 ? 's' : ''}` : 'projected'})
                 </Note>
                 {payroll.stale > 0 && <> <Warn tip="A paystub is from last year — every pay date this year is projected from it" /></>}
@@ -829,7 +854,18 @@ export default function Taxes() {
                       </td>
                       <td className="r num">{formatCents(p.fedWithheldCents)}{p.stateWithheldCents > 0 && <span className="scr-cellsub">+ {formatCents(p.stateWithheldCents)}</span>}</td>
                       <td className="r num">
-                        <Note tip={`gross ${formatCents(p.projected.grossCents)} − pre-tax ${formatCents(p.projected.retirementCents + p.projected.benefitsCents)}`}>{formatDollars(p.projected.taxableWagesCents)}</Note>
+                        <Note
+                          tip={[
+                            `gross ${formatCents(p.projected.grossCents)} − pre-tax ${formatCents(p.projected.retirementCents + p.projected.benefitsCents)}`,
+                            ...(p.deferral.reachedOn
+                              ? [
+                                  `401(k) deferrals reach the ${formatCents(p.deferral.limitCents)} limit on ${p.deferral.reachedOn}${p.deferral.checksAfterLimit > 0 ? ` — ${p.deferral.checksAfterLimit} check${p.deferral.checksAfterLimit === 1 ? '' : 's'} after it defer nothing` : ''}`,
+                                ]
+                              : []),
+                          ]}
+                        >
+                          {formatDollars(p.projected.taxableWagesCents)}
+                        </Note>
                       </td>
                       <td className="r num">{formatDollars(p.projected.fedWithheldCents)}</td>
                       <td className="r num">{formatDollars(p.projected.stateWithheldCents)}</td>

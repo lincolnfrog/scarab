@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../server/migrations'
+import { getContributions } from './contributions'
 import type { DbLike } from './db'
 import { createPaySource } from './paychecks'
+import { putPeople } from './people'
 import { ApiError } from './errors'
 import { createTrade, deleteTrade, getUnvested, listTrades } from './invest'
 import { addMonths, putUnvested, vestUnvested } from './services'
@@ -97,14 +99,29 @@ describe('state tax', () => {
   it('uses the custom rate for unbundled states', () => {
     expect(stateTaxCents($(100_000), { state: 'ME', filingStatus: 'mfj', customStateRateMicro: 65_000 }).taxCents).toBe($(6_500))
   })
-  it('runs California 2025 brackets and the MHST', () => {
-    // MFJ $100k: deduction 11,412 → taxable 88,588:
-    // 1%×22,158 + 2%×30,370 + 4%×30,376 + 6%×5,684 = 221.58+607.40+1215.04+341.04
+  it('runs California 2026 brackets and the MHST', () => {
+    // MFJ $100k: deduction 11,800 → taxable 88,200, Schedule Y's "$2,113.48 plus 6% over $85,722"
     const r = stateTaxCents($(100_000), { state: 'CA', filingStatus: 'mfj', customStateRateMicro: 0 })
-    expect(r.taxCents).toBe(238506)
+    expect(r.taxCents).toBe(211_348 + Math.round((88_200 - 85_722) * 6))
     expect(r.mhstCents).toBe(0)
     const rich = stateTaxCents($(1_600_000), { state: 'CA', filingStatus: 'mfj', customStateRateMicro: 0 })
     expect(rich.mhstCents).toBeGreaterThan(0)
+  })
+  it('California 2026: every edge of Schedules X, Y and Z lands on the FTB’s published amount', () => {
+    // [taxable income at the edge, "Enter on Form 540, line 31"] from FTB Tax News, October 2026 — 2026 Indexing.
+    const edges: Record<'single' | 'mfj' | 'hoh', [number, number][]> = {
+      single: [[11_456, 114.56], [27_157, 428.58], [42_861, 1_056.74], [59_498, 2_054.96], [75_197, 3_310.88], [384_109, 32_039.7], [460_927, 39_951.95], [768_213, 74_675.27]],
+      mfj: [[22_912, 229.12], [54_314, 857.16], [85_722, 2_113.48], [118_996, 4_109.92], [150_394, 6_621.76], [768_218, 64_079.39], [921_854, 79_903.9], [1_536_426, 149_350.54]],
+      hoh: [[22_927, 229.27], [54_316, 857.05], [70_018, 1_485.13], [86_654, 2_483.29], [102_356, 3_739.45], [522_385, 42_802.15], [626_864, 53_563.49], [1_044_771, 100_786.98]],
+    }
+    const deduction = { single: 5_900, mfj: 11_800, hoh: 11_800 }
+    for (const f of ['single', 'mfj', 'hoh'] as const)
+      for (const [taxable, owed] of edges[f]) {
+        const r = stateTaxCents($(taxable + deduction[f]), { state: 'CA', filingStatus: f, customStateRateMicro: 0 })
+        // The schedule rounds its running total at each edge, the walk once at the end: a cent apart at most.
+        expect(Math.abs(r.taxCents - r.mhstCents - $(owed)), `${f} at ${taxable}`).toBeLessThanOrEqual(1)
+      }
+    expect(stateTaxCents($(27_157 + 5_900), { state: 'CA', filingStatus: 'mfs', customStateRateMicro: 0 }).taxCents).toBe($(428.58))
   })
   const st = (state: string, filingStatus: 'single' | 'mfj' | 'mfs' | 'hoh', dollars: number) =>
     stateTaxCents($(dollars), { state, filingStatus, customStateRateMicro: 0 }).taxCents
@@ -625,6 +642,90 @@ describe('paychecks in the year picture', () => {
     putTaxSettings(db, { rsuWithholdStateMicro: null })
     expect(getTaxSettings(db).rsuWithholdStateMicro).toBeNull()
     expect(() => putTaxSettings(db, { rsuWithholdFederalMicro: 1_000_001 })).toThrow()
+  })
+})
+
+describe('pre-tax deferrals stop at the limit', () => {
+  const today = '2026-10-01'
+  /** Max, $10,000 every two weeks; the stub is dated Sep 25, so six checks remain (Oct 9 … Dec 18). */
+  const stub = (db: DbLike, over: Partial<Parameters<typeof createPaySource>[1]> = {}) =>
+    createPaySource(db, { earner: 'Max', employer: 'Acme', cadence: 'biweekly', paidOn: '2026-09-25', grossCents: $(10_000), ...over })
+  const year = (db: DbLike) => computeTaxYear(db, today)
+  const fresh = () => {
+    const db = openDb(':memory:') as unknown as DbLike
+    putTaxSettings(db, { filingStatus: 'mfj', state: 'TX' })
+    return db
+  }
+
+  it('with a YTD column: the plan stops on the check that reaches $24,500, and wages keep the rest', () => {
+    const db = fresh()
+    stub(db, { retirementCents: $(1_000), ytdGrossCents: $(180_000), ytdRetirementCents: $(22_000) })
+    const y = year(db)
+    const p = y.payroll.sources[0]!
+    // $23,000 Oct 9 · $24,000 Oct 23 · $24,500 Nov 6 (only $500 fits), then three checks defer nothing — not $28,000.
+    expect(p.deferral).toMatchObject({ limitCents: $(24_500), projectedCents: $(24_500), reachedOn: '2026-11-06', checksAfterLimit: 3 })
+    expect(p.projected.retirementCents).toBe($(24_500))
+    expect(y.incomes.wagesCents).toBe($(240_000) - $(24_500))
+    // The pace card walks the same plan to the same figure.
+    expect(getContributions(db, today).people[0]!.sources[0]!.projectedPretaxCents).toBe(p.deferral.projectedPretaxCents)
+  })
+
+  it('without one: the estimated checks so far stop at the limit too', () => {
+    const db = fresh()
+    // $2,000 a check × 20 pay dates through Sep 25 would be $40,000: the plan stopped on Jun 19, the 13th.
+    stub(db, { retirementCents: $(2_000) })
+    const y = year(db)
+    const p = y.payroll.sources[0]!
+    expect(p.ytd.retirementCents).toBe($(24_500))
+    expect(p.deferral).toMatchObject({ ytdCents: $(24_500), projectedCents: $(24_500), reachedOn: '2026-06-19', checksAfterLimit: 13 })
+    expect(y.incomes.wagesCents).toBe($(260_000) - $(24_500)) // not $260,000 − $52,000
+    expect(y.payroll.earners[0]).toMatchObject({ deferralLimitCents: $(24_500), deferredCents: $(24_500), excessPretaxCents: 0 })
+  })
+
+  it('raises the limit by the catch-up for the age reached this year', () => {
+    const db = fresh()
+    stub(db, { retirementCents: $(1_000), ytdGrossCents: $(180_000), ytdRetirementCents: $(22_000) })
+    putPeople(db, { people: [{ name: 'Max', birthYear: 1972 }] }, today) // 54: $32,500, so all six checks go in
+    expect(year(db).payroll.sources[0]!.deferral).toMatchObject({ limitCents: $(32_500), projectedCents: $(28_000), reachedOn: null })
+    expect(year(db).incomes.wagesCents).toBe($(240_000) - $(28_000))
+    const db2 = fresh()
+    stub(db2, { retirementCents: $(1_500), ytdGrossCents: $(180_000), ytdRetirementCents: $(30_000) })
+    putPeople(db2, { people: [{ name: 'Max', birthYear: 1964 }] }, today) // 62: $35,750 — $31,500, $33,000, $34,500, then Nov 20 fills it
+    const y2 = year(db2)
+    expect(y2.payroll.sources[0]!.deferral).toMatchObject({ limitCents: $(35_750), projectedCents: $(35_750), reachedOn: '2026-11-20', checksAfterLimit: 2 })
+    expect(y2.incomes.wagesCents).toBe($(240_000) - $(35_750))
+  })
+
+  it('holds each earner to their own limit', () => {
+    const db = fresh()
+    stub(db, { retirementCents: $(2_000) })
+    stub(db, { earner: 'Nicole', employer: 'Beta', retirementCents: $(1_000), ytdGrossCents: $(180_000), ytdRetirementCents: $(30_000) })
+    putPeople(db, { people: [{ name: 'Nicole', birthYear: 1970 }] }, today)
+    const y = year(db)
+    const by = (name: string) => y.payroll.earners.find((e) => e.earner === name)!
+    expect(by('Max')).toMatchObject({ deferralLimitCents: $(24_500), deferredCents: $(24_500), wagesCents: $(260_000) - $(24_500) })
+    expect(by('Nicole')).toMatchObject({ deferralLimitCents: $(32_500), deferredCents: $(32_500), wagesCents: $(240_000) - $(32_500) })
+    expect(y.incomes.wagesCents).toBe(by('Max').wagesCents + by('Nicole').wagesCents)
+  })
+
+  it('counts Roth deferrals against the limit, and only the pre-tax part out of wages', () => {
+    const db = fresh()
+    stub(db, { retirementCents: $(1_000), rothCents: $(1_000), ytdGrossCents: $(180_000), ytdRetirementCents: $(11_000), ytdRothCents: $(11_000) })
+    const p = year(db).payroll.sources[0]!
+    // Oct 9 takes $2,000 ($1,000 pre-tax); Oct 23 the last $500, split like the stub ($250 pre-tax); four checks defer nothing.
+    expect(p.deferral).toMatchObject({ projectedCents: $(24_500), projectedPretaxCents: $(12_250), projectedRothCents: $(12_250), reachedOn: '2026-10-23', checksAfterLimit: 4 })
+    expect(year(db).incomes.wagesCents).toBe($(240_000) - $(12_250))
+  })
+
+  it('counts what two jobs together defer over the limit as wages (§402(g)(1))', () => {
+    const db = fresh()
+    stub(db, { retirementCents: $(1_000), ytdGrossCents: $(180_000), ytdRetirementCents: $(16_000) })
+    stub(db, { employer: 'Side gig', retirementCents: $(500), ytdGrossCents: $(90_000), ytdRetirementCents: $(4_000) })
+    const y = year(db)
+    // Each plan stays under its own stop — $22,000 and $7,000 — but together they are $4,500 over.
+    expect(y.payroll.sources.map((s) => s.deferral.projectedCents)).toEqual([$(22_000), $(7_000)])
+    expect(y.payroll.earners[0]).toMatchObject({ deferredCents: $(29_000), excessPretaxCents: $(4_500) })
+    expect(y.incomes.wagesCents).toBe($(240_000) + $(150_000) - $(29_000) + $(4_500))
   })
 })
 
