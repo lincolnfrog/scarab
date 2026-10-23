@@ -56,6 +56,9 @@ import './screens/vault/vault.css'
  * stored vault — after a typed confirmation that names it, and only once the
  * new passkey exists. A member never sees Start over: the vault isn't theirs.
  *
+ * Before anything is created, a stranger can look around a sample household
+ * instead: a made-up one, built in the tab and never saved (src/sample.ts).
+ *
  * A backup file (.scarab) opens here too, with a passkey that was on the
  * vault or its recovery code. If that key also opens the stored vault, the
  * vault is unlocked with it and the backup is offered for restore inside the
@@ -182,6 +185,15 @@ export default function FrontDoor({ mode: booted, onEnter, onHousehold }: { mode
       onEnter()
     },
     { errorPrefix: 'Couldn’t start a session' },
+  )
+  /** The sample household, opened on its Dashboard: loaded only now (src/sample.ts), never saved. */
+  const lookAround = useAction(
+    async () => {
+      const { openSample } = await import('./sample')
+      await openSample()
+      onEnter()
+    },
+    { errorPrefix: 'Couldn’t open the sample household' },
   )
   /** Owner only: name what would be deleted — as stored now, not as it was at page load — and ask for REPLACE. */
   const startOver = useAction(
@@ -411,6 +423,7 @@ export default function FrontDoor({ mode: booted, onEnter, onHousehold }: { mode
     recover.busy ||
     create.busy ||
     explore.busy ||
+    lookAround.busy ||
     startOver.busy ||
     pickBackup.busy ||
     openFile.busy ||
@@ -651,6 +664,14 @@ export default function FrontDoor({ mode: booted, onEnter, onHousehold }: { mode
               </div>
             </form>
             {waiting && <PasskeyWait />}
+            {!mode.vault && !replacing && (
+              <div className="zk-door-sample topline">
+                <Button busy={lookAround.busy} disabled={busy && !lookAround.busy} onClick={() => void lookAround.run()}>
+                  Look around with a sample household
+                </Button>
+                <span className="sub2 muted">Made-up people and numbers, in this tab only — nothing is saved or uploaded.</span>
+              </div>
+            )}
             {noPrf && (
               <div className="formrow" style={{ marginTop: 10 }}>
                 <Button size="mini" variant="ghost" busy={explore.busy} disabled={busy && !explore.busy} onClick={() => void explore.run()}>

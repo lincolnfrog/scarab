@@ -61,7 +61,7 @@ function SessionNote() {
       )}
       <span className="muted">
         Your data is intact — it lives in this tab, not in this screen.
-        {!localMode.vault && ' Create a vault from Data & Vault to keep it.'}
+        {!localMode.vault && !localMode.sample && ' Create a vault from Data & Vault to keep it.'}
       </span>
     </>
   )

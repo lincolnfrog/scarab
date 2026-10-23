@@ -174,6 +174,7 @@ export const COMMANDS: readonly Command[] = [
   section('tax', ['contributions'], 'Contribution pace', '401k 403b ira hsa roth backdoor match catch-up limits birth year'),
   section('dash', ['news'], 'Since you were last here', 'digest changes what moved new'),
   section('dash', ['balance'], 'Balance sheet', 'owe owed debts loans cards assets liabilities'),
+  section('dash', ['setup'], 'Setting up — the first steps', 'getting started checklist onboarding import paycheck birth year filing status state'),
   section('invest', ['holdings'], 'All holdings', 'positions stocks table sort set price'),
   section('invest', ['accounts'], 'Investment accounts', 'brokerage 401k ira check in balances'),
   section('invest', ['activity'], 'Investment activity', 'buys sells vests history lots'),

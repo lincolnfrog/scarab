@@ -1,0 +1,49 @@
+/* The setup checklist (src/cards/Setup.tsx): one row per step — a numbered disc (a check once done), what to
+   do and why, and the way to do it. The next step's action is the one gold call to action; done steps go quiet.
+   No status colours: a done step isn't a gain, so the check is ink on a lifted tone. */
+
+.su-progress { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 6px; }
+.su-figure { font-family: var(--disp); font-size: 42px; line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.su-figure-label { color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.card p.su-lead { color: var(--ink-2); font-size: 13.5px; max-width: 64ch; margin-bottom: 4px; }
+
+.su-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.su-step {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.su-step:first-child { border-top: 0; }
+.su-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.su-step[data-done] .su-mark { background: var(--card-top); box-shadow: var(--edge); color: var(--ink-2); }
+.su-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.su-title { color: var(--ink); font-size: 14px; font-weight: 600; }
+.su-step[data-done] .su-title { color: var(--ink-2); font-weight: 500; }
+.su-note { color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.su-step[data-done] .su-note { color: var(--ink-3); }
+.su-act { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.su-act .btn { text-decoration: none; white-space: nowrap; }
+
+.su-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+
+/* A phone (or a narrow card): the action moves under the words it belongs to. */
+@container card (width < 520px) {
+  .su-step { grid-template-columns: 26px minmax(0, 1fr); align-items: start; }
+  .su-mark { margin-top: 1px; }
+  .su-act { grid-column: 2; justify-content: flex-start; margin-top: 6px; }
+  .su-figure { font-size: 36px; }
+}

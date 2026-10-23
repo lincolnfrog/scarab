@@ -32,6 +32,8 @@
 @keyframes zk-ring-turn { to { transform: rotate(360deg); } }
 @keyframes zk-ring-breathe { 50% { stroke-dasharray: 62 38; } }
 .zk-door-note { margin-top: 10px; }
+/* The way in before a vault: the sample household, a quieter call than creating one. */
+.zk-door-sample { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .zk-door-field { margin-top: 12px; max-width: 320px; }
 
 /* Front door: an invitation into a household, waiting for a yes or a no. */
@@ -70,6 +72,11 @@
 .zk-sync[data-state='newer']:hover,
 .zk-sync[data-state='newer'][aria-expanded='true'] { border-color: var(--gold); color: var(--gold); }
 .zk-sync[data-state='conflict'] { border-color: rgba(229, 96, 92, 0.45); }
+/* The sample household, badged plainly: an ink ring for a dot, ink on a lifted tone — not gold (nothing to act on)
+   and not --down (nothing is wrong); the banner under the topbar says what it is in words. */
+:is(.zk-sync, .zk-sidestat, .zk-syncpop-head)[data-state='sample'] > .ui-sync-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--ink); }
+.zk-sync[data-state='sample'] { color: var(--ink); background: var(--card-top); }
+.zk-syncpop-sample { margin: 0 0 12px; line-height: 1.5; }
 /* The chip carries margin-left: auto in the topbar; with avatars (or the sheet) after it, who's-signed-in must not. */
 .topbar:has(.zk-sync) .who { margin-left: 0; }
 .zk-syncpop-foot { display: flex; align-items: center; gap: 8px; }

@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { Setup } from '../../engine/setup'
 import { formatDollars } from '../../shared/money'
 import type { Debt, GoalDerived } from '../../shared/types'
 import { get } from '../api'
 import ActivityCard, { type ActivityRow } from '../cards/ActivityCard'
 import CheckupCard from '../cards/CheckupCard'
 import DreamHomeTile from '../cards/DreamHomeTile'
+import { SetupCard, SetupDetail, SetupHero, setupOpen } from '../cards/Setup'
 import { cashNet, tileGroups, tileSpan, type NetWorthPoint } from '../cards/cardModel'
 import StatTile, { ChangeText } from '../cards/StatTile'
 import { CountUp } from '../chart/CountUpText'
@@ -30,8 +32,8 @@ const SPARK_MONTHS = 12
 
 type NwView = 'total' | 'parts'
 
-/** The Dashboard's detail views: the whole digest, and the balance sheet behind the allocation ring. */
-const DETAILS = ['news', 'balance'] as const
+/** The Dashboard's detail views: the whole digest, the balance sheet behind the allocation ring, and the setup checklist. */
+const DETAILS = ['news', 'balance', 'setup'] as const
 
 /** Everything owed today, one row per loan and card, each linking to where it's kept. */
 function OwedList({ debts }: { debts: readonly Debt[] }) {
@@ -112,12 +114,19 @@ function DashboardSkeleton() {
  * one tile per slice with its 12-month trend, recent activity, and the dream
  * home fund. Every figure is derived from the ledger on request. Revisiting
  * the screen refetches quietly; the last numbers stay up meanwhile.
+ *
+ * A household with nothing to add up yet gets the setup checklist in the
+ * hero's place; one with some of it gets a card for what's left.
  */
 export default function Dashboard() {
   const [nw, setNw] = useState<NetWorth | null>(null)
   const [nwError, setNwError] = useState<string | null>(null)
   const [activity, setActivity] = useState<ActivityRow[] | null>(null)
   const [goal, setGoal] = useState<GoalResponse | null>(null)
+  /** undefined while loading; null when it couldn't be read (the checklist is optional, like the goal tile). */
+  const [setup, setSetup] = useState<Setup | null | undefined>(undefined)
+  const [setupRev, setSetupRev] = useState(0)
+  const reloadSetup = useCallback(() => setSetupRev((n) => n + 1), [])
   const [attempt, setAttempt] = useState(0)
   const [view, setView] = useRouteState<NwView>('nwView', 'total')
   const nwSeries = useMemo(() => (nw ? netWorthSeries(nw.series) : null), [nw])
@@ -144,7 +153,44 @@ export default function Dashboard() {
     }
   }, [attempt])
 
+  useEffect(() => {
+    let live = true
+    get<Setup>('/api/setup')
+      .then((r) => live && setSetup(r))
+      .catch(() => live && setSetup((s) => s ?? null))
+    return () => {
+      live = false
+    }
+  }, [attempt, setupRev])
+
   const header = <HeaderSlot sub="Everything you own, minus everything you owe" />
+
+  // The checklist's own view works whatever net worth is doing — an empty household included.
+  if (detail === 'setup')
+    return (
+      <>
+        {header}
+        <DetailView
+          title="Setting up"
+          lead="Each step is read from what's in Scarab: it's done once the thing is there, and comes back if it goes away."
+        >
+          {setup ? (
+            <SetupDetail setup={setup} onChanged={reloadSetup} />
+          ) : setup === null ? (
+            <div className="card c12" role="alert">
+              <h2>First steps</h2>
+              <p className="sub2">Couldn't read the checklist.</p>
+              <Button onClick={reloadSetup}>Retry</Button>
+            </div>
+          ) : (
+            <div className="card c12" aria-busy="true">
+              <Skeleton h={12} w={120} />
+              <Skeleton h={180} style={{ marginTop: 14 }} radius={8} />
+            </div>
+          )}
+        </DetailView>
+      </>
+    )
 
   if (!nw) {
     if (nwError)
@@ -167,7 +213,24 @@ export default function Dashboard() {
   }
 
   const { series, current, prev } = nw
-  if (!current)
+  if (!current) {
+    // Nothing to add up: the checklist is the hero, once it has loaded (unless this person hid it).
+    if (setup === undefined)
+      return (
+        <>
+          {header}
+          <DashboardSkeleton />
+        </>
+      )
+    if (setupOpen(setup))
+      return (
+        <>
+          {header}
+          <div className="grid12">
+            <SetupHero setup={setup} onChanged={reloadSetup} />
+          </div>
+        </>
+      )
     return (
       <>
         {header}
@@ -177,11 +240,13 @@ export default function Dashboard() {
             Net worth assembles itself from the other screens: import bank files on{' '}
             <Link to={{ screen: 'cash' }} className="ch-a">Cash &amp; budget</Link>, record trades or balances on{' '}
             <Link to={{ screen: 'invest' }} className="ch-a">Investments</Link>, add your house on{' '}
-            <Link to={{ screen: 're' }} className="ch-a">Real estate</Link>. Each one lights up a slice here.
+            <Link to={{ screen: 're' }} className="ch-a">Real estate</Link>. Each one lights up a slice here — the{' '}
+            <Link to={{ screen: 'dash', rest: ['setup'] }} className="ch-a">setup checklist</Link> walks through them.
           </p>
         </div>
       </>
     )
+  }
 
   const recent = series.slice(-SPARK_MONTHS)
   const groups = tileGroups(recent)
@@ -344,6 +409,7 @@ export default function Dashboard() {
 
         {/* What wants attention, one card each; the detail is a click down. */}
         <div className="scr-pair">
+          {setupOpen(setup) && <SetupCard setup={setup} />}
           <DigestSummary to="news" />
           <CheckupCard />
         </div>

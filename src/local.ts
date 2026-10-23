@@ -18,6 +18,11 @@ import { matchRoute, policyOf, type LocalCtx } from './local/table'
  * State is per-tab and in-memory — leaving is a page reload; durable saves go
  * through the encrypted vault.
  *
+ * The sample household (the front door's "Look around") is a session too, on
+ * a database built in the tab (enterSampleMode), but one that never gets a
+ * vault: setVault refuses it, so nothing in it can be sealed, queued or
+ * uploaded, and leaving it loses nothing worth a prompt.
+ *
  * Events, all on `window`:
  *   'scarab-mode'     a state transition — entered, turned dirty, saved, vault or identity changed
  *   'scarab-write'    every write that changed the database, once it is applied (autosave debounces on it)
@@ -51,6 +56,8 @@ type LocalState = {
   identity: string | null
   /** Bumped whenever the tab's data is replaced in place, so screens keyed on it remount. */
   dataEpoch: number
+  /** The tab holds the sample household: made-up data that is never saved anywhere. */
+  sample: boolean
   /** The schema this tab's engine writes (migrations.length), once the engine is up. */
   engineSchema: number | null
   /**
@@ -67,7 +74,7 @@ type LocalState = {
    */
   dataRevision: number
 }
-const state: LocalState = { db: null, vault: null, dirty: false, writes: 0, identity: null, dataEpoch: 0, dataRevision: 0, engineSchema: null, savedSchema: null }
+const state: LocalState = { db: null, vault: null, dirty: false, writes: 0, identity: null, dataEpoch: 0, dataRevision: 0, sample: false, engineSchema: null, savedSchema: null }
 
 const announce = (event: 'scarab-mode' | 'scarab-write' | 'scarab-data' | 'scarab-revision') => window.dispatchEvent(new Event(event))
 
@@ -97,6 +104,10 @@ export const localMode = {
   get vault() {
     return state.vault
   },
+  /** The session is the sample household: no vault, ever. */
+  get sample() {
+    return state.db !== null && state.sample
+  },
   get writes() {
     return state.writes
   },
@@ -124,6 +135,8 @@ export const localMode = {
     return state.savedSchema
   },
   setVault(v: VaultSession | null) {
+    // The one way a key reaches the tab: the sample must never take one, or its made-up data could be sealed and uploaded.
+    if (v && state.sample) throw new Error('the sample household is never saved — leave it to set up a vault of your own')
     state.vault = v
     announce('scarab-mode')
   },
@@ -154,9 +167,25 @@ export const localMode = {
  * null it starts from an empty, freshly migrated database — a session that
  * begins with no plaintext anywhere but this tab.
  */
-export async function enterLocalMode(
+export function enterLocalMode(dump: Dump | null, vault: VaultSession | null = null): Promise<SnapshotLoad | null> {
+  return boot(dump, vault, null)
+}
+
+/**
+ * Boot the in-tab engine on the sample household: a fresh database that
+ * `build` fills (engine/sample.ts, through the engine's own write paths) for
+ * the household's day. It is a session without a vault, and stays one —
+ * setVault refuses it — so nothing in it is ever saved: no save queue, no
+ * autosave, no upload. It starts clean, and leaving it (a reload) asks nothing.
+ */
+export async function enterSampleMode(build: (db: DbLike, today: string) => void): Promise<void> {
+  await boot(null, null, build)
+}
+
+async function boot(
   dump: Dump | null,
-  vault: VaultSession | null = null,
+  vault: VaultSession | null,
+  sample: ((db: DbLike, today: string) => void) | null,
 ): Promise<SnapshotLoad | null> {
   const [{ openBrowserDb }, { migrate, migrations }, { loadDump }, wasmUrl] = await Promise.all([
     import('../engine/sqljs-db'),
@@ -167,17 +196,27 @@ export async function enterLocalMode(
   const db = await openBrowserDb({ wasmUrl })
   migrate(db)
   const loaded = dump ? loadDump(db, dump) : null
+  if (sample) {
+    try {
+      sample(db, todayLocal())
+    } catch (e) {
+      db.close()
+      throw e
+    }
+  }
   // Entering again replaces the tab's database (an unlock after a Create vault
   // that failed once the engine was up): free the old one, or sql.js keeps it.
   const prev = state.db
   state.db = db
   state.vault = vault
+  state.sample = sample !== null
   state.engineSchema = migrations.length
   state.savedSchema = dump ? dump.schemaVersion : null
   // An empty start has nothing saved yet; so does a snapshot an earlier version
   // wrote — the stored copy is still the older one until a save reseals it at
   // the current version (which is what lets the floor rise: engine/fixtures/README.md).
-  state.dirty = dump === null || (loaded !== null && loaded.older)
+  // The sample has nothing to save, and never will.
+  state.dirty = !sample && (dump === null || (loaded !== null && loaded.older))
   state.writes = 0
   state.dataRevision++
   if (prev && prev !== db) {
@@ -209,8 +248,19 @@ export async function loadLocalDump(dump: Dump): Promise<SnapshotLoad> {
 export function exitLocalMode(): void {
   state.db = null
   state.vault = null
+  state.sample = false
   state.dirty = false
   window.location.reload()
+}
+
+/**
+ * Leave the sample household for the front door: the page reloads, which
+ * drops it, and the address bar and the history entry are cleared first so
+ * nothing the sample showed (a screen, a search) carries into what comes next.
+ */
+export function leaveSample(): void {
+  history.replaceState(null, '', `${location.pathname}${location.search}`)
+  exitLocalMode()
 }
 
 const HOUSEHOLD_CHOICE_KEY = 'scarab:chose-household'
@@ -245,10 +295,10 @@ export function takeHouseholdChoice(): boolean {
   return householdChoice
 }
 
-// Leaving the page discards the tab's database; warn if there's unsaved work.
+// Leaving the page discards the tab's database; warn if there's unsaved work (the sample's edits aren't work to lose).
 if (typeof window !== 'undefined')
   window.addEventListener('beforeunload', (e) => {
-    if (state.db && state.dirty) {
+    if (state.db && state.dirty && !state.sample) {
       e.preventDefault()
       e.returnValue = ''
     }

@@ -1,4 +1,8 @@
+import type { FilingStatus } from '../../engine/tax'
 import { formatCents } from '../../shared/money'
+
+/** A filing status as a sentence names it ('Filed as married filing jointly'). */
+export const FILING_LABEL: Record<FilingStatus, string> = { mfj: 'married filing jointly', single: 'single', mfs: 'married filing separately', hoh: 'head of household' }
 
 /**
  * The Taxes headline's gap line: tax still to pay beyond withholding and

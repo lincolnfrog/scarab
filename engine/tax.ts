@@ -508,6 +508,11 @@ export function getTaxSettings(db: DbLike): TaxSettings {
   }
 }
 
+/** Whether the household has saved its tax settings at all — until then Taxes runs on TAX_DEFAULTS. */
+export function hasTaxSettings(db: DbLike): boolean {
+  return db.prepare('SELECT 1 FROM goal_settings WHERE key = ?').get(SETTINGS_KEY) !== undefined
+}
+
 export function putTaxSettings(db: DbLike, body: Partial<TaxSettings>) {
   const cur = getTaxSettings(db)
   const next: TaxSettings = { ...cur }

@@ -5,7 +5,7 @@ import { Link, navigate } from '../router'
 import CapacityCard, { useCapacity, yearLine } from '../tax/CapacityCard'
 import ContributionsCard, { useContributions } from '../tax/ContributionsCard'
 import HarvestCard from '../tax/HarvestCard'
-import { gapLine, scheduleNote } from '../tax/copy'
+import { FILING_LABEL, gapLine, scheduleNote } from '../tax/copy'
 import RealizedCard, { useRealized } from '../tax/RealizedCard'
 import TwoYearCard, { useTwoYear } from '../tax/TwoYearCard'
 import type { TaxResponse } from '../tax/types'
@@ -212,7 +212,6 @@ type Tax = {
 const pct = (micro: number) => `${(micro / 10_000).toFixed(1)}%`
 const pct2 = (micro: number) => `${(micro / 10_000).toFixed(2).replace(/\.?0+$/, '')}%`
 const CADENCE_LABEL: Record<PayCadence, string> = { weekly: 'weekly', biweekly: 'every 2 weeks', semimonthly: 'twice a month', monthly: 'monthly' }
-const FILING_LABEL: Record<FilingStatus, string> = { mfj: 'married filing jointly', single: 'single', mfs: 'married filing separately', hoh: 'head of household' }
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 const signedDollars = (c: number) => formatDollars(c, { sign: c > 0 })
 

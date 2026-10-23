@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ConflictSheet, onReview, openReview } from '../ConflictSheet'
-import { exitLocalMode, localMode } from '../local'
+import { exitLocalMode, leaveSample, localMode } from '../local'
 import { navigate } from '../router'
 import { confirmOpenOlder } from '../screens/vault/confirmOlder'
 import { SnapshotPreviewHost } from '../screens/vault/Preview'
@@ -22,6 +22,7 @@ const LABEL: Record<Exclude<SyncStatus['state'], 'off'>, string> = {
   retrying: 'Offline — retrying',
   unsaved: 'Unsaved',
   novault: 'No vault',
+  sample: 'Sample household',
   newer: 'Newer version available',
   conflict: 'Conflict — review',
   failed: 'Save failed',
@@ -39,6 +40,8 @@ function headline(s: SyncStatus): string {
       return `${unsavedText(s.pending)} — saving shortly`
     case 'novault':
       return 'No vault — nothing in this tab is saved'
+    case 'sample':
+      return 'Sample household — nothing here is saved'
     case 'newer':
       return s.attention?.version != null ? `v${s.attention.version} is newer than this tab’s v${s.version}` : 'A newer version is in the vault'
     case 'conflict':
@@ -65,6 +68,10 @@ const needsReview = (s: SyncStatus) => s.state === 'newer' || s.state === 'confl
  * under the topbar, the conflict sheet, the preview of an earlier version or
  * a backup (with its restore), and the toast when the tab follows the other
  * member's save on its own.
+ *
+ * The sample household gets the same chip, saying so, and a banner that
+ * stays: made-up data must never pass for the person's own, and the way back
+ * to the front door is always one click away.
  */
 export function SyncChip() {
   const s = useSyncStatus()
@@ -156,73 +163,89 @@ export function SyncChip() {
           <span className="ui-sync-dot" aria-hidden="true" />
           {headline(s)}
         </div>
-        <dl className="ui-syncpop-kv">
-          <dt>Vault</dt>
-          <dd>
-            {s.version !== null ? `v${s.version}` : 'none yet'}
-            {s.storedBytes !== null && <span className="muted"> · {sizeText(s.storedBytes)}</span>}
-          </dd>
-          <dt>Last saved</dt>
-          <dd>
-            {s.savedAt !== null ? (
-              <>
-                {s.savedBy && <>by {whoLabel(s.savedBy, s.identity)} · </>}
-                {relTime(s.savedAt, now)} <span className="muted">· {clock(s.savedAt)}</span>
-              </>
-            ) : s.version !== null ? (
-              'before this session'
-            ) : (
-              'never'
-            )}
-          </dd>
-          {s.unlockedWith && (
-            <>
-              <dt>Unlocked with</dt>
-              <dd>{s.unlockedWith.kind === 'recovery' ? 'the recovery code' : `“${s.unlockedWith.label || 'a passkey'}”`}</dd>
-            </>
-          )}
-          <dt>Signed in</dt>
-          <dd>{s.identity ?? 'unknown'}</dd>
-        </dl>
-        {(s.state === 'failed' || s.state === 'retrying' || s.state === 'conflict') && s.error && <div className="ui-syncpop-err">{s.error}</div>}
-        <div className="ui-syncpop-actions">
-          {needsReview(s) && (
-            <Button size="mini" variant="gold" onClick={review}>
-              Review…
-            </Button>
-          )}
-          {s.version !== null &&
-            (() => {
-              const canSave = s.dirty || s.state === 'failed' || s.state === 'retrying'
-              return (
-                // Gold only when there is something to save (and nothing to review first): a disabled gold button reads as a call to action.
-                <Button size="mini" variant={canSave && !needsReview(s) ? 'gold' : 'default'} busy={save.busy} disabled={!canSave} onClick={() => void save.run()}>
-                  Save now
-                </Button>
-              )
-            })()}
-          <Button
-            size="mini"
-            onClick={() => {
-              setOpen(false)
-              navigate({ screen: 'vault' })
-            }}
-          >
-            Data &amp; Vault →
-          </Button>
-        </div>
-        <div className="ui-syncpop-foot zk-syncpop-foot">
-          {s.version !== null && (
-            <Tooltip content={s.dirty ? 'Saves the unsaved changes first; locks only if that works' : 'Opening it again takes your passkey or the recovery code'}>
-              <Button size="mini" busy={lock.busy} onClick={() => void lock.run()}>
-                Lock
+        {s.state === 'sample' ? (
+          <>
+            <p className="sub2 zk-syncpop-sample">
+              Made-up people and numbers, built in this tab when you opened it. Change anything you like: it all goes when you leave, and
+              none of it is uploaded.
+            </p>
+            <div className="ui-syncpop-actions">
+              <Button size="mini" variant="gold" onClick={leaveSample}>
+                Leave the sample
               </Button>
-            </Tooltip>
-          )}
-          <Button size="mini" variant="ghost" onClick={() => void endSession()}>
-            End session…
-          </Button>
-        </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <dl className="ui-syncpop-kv">
+              <dt>Vault</dt>
+              <dd>
+                {s.version !== null ? `v${s.version}` : 'none yet'}
+                {s.storedBytes !== null && <span className="muted"> · {sizeText(s.storedBytes)}</span>}
+              </dd>
+              <dt>Last saved</dt>
+              <dd>
+                {s.savedAt !== null ? (
+                  <>
+                    {s.savedBy && <>by {whoLabel(s.savedBy, s.identity)} · </>}
+                    {relTime(s.savedAt, now)} <span className="muted">· {clock(s.savedAt)}</span>
+                  </>
+                ) : s.version !== null ? (
+                  'before this session'
+                ) : (
+                  'never'
+                )}
+              </dd>
+              {s.unlockedWith && (
+                <>
+                  <dt>Unlocked with</dt>
+                  <dd>{s.unlockedWith.kind === 'recovery' ? 'the recovery code' : `“${s.unlockedWith.label || 'a passkey'}”`}</dd>
+                </>
+              )}
+              <dt>Signed in</dt>
+              <dd>{s.identity ?? 'unknown'}</dd>
+            </dl>
+            {(s.state === 'failed' || s.state === 'retrying' || s.state === 'conflict') && s.error && <div className="ui-syncpop-err">{s.error}</div>}
+            <div className="ui-syncpop-actions">
+              {needsReview(s) && (
+                <Button size="mini" variant="gold" onClick={review}>
+                  Review…
+                </Button>
+              )}
+              {s.version !== null &&
+                (() => {
+                  const canSave = s.dirty || s.state === 'failed' || s.state === 'retrying'
+                  return (
+                    // Gold only when there is something to save (and nothing to review first): a disabled gold button reads as a call to action.
+                    <Button size="mini" variant={canSave && !needsReview(s) ? 'gold' : 'default'} busy={save.busy} disabled={!canSave} onClick={() => void save.run()}>
+                      Save now
+                    </Button>
+                  )
+                })()}
+              <Button
+                size="mini"
+                onClick={() => {
+                  setOpen(false)
+                  navigate({ screen: 'vault' })
+                }}
+              >
+                Data &amp; Vault →
+              </Button>
+            </div>
+            <div className="ui-syncpop-foot zk-syncpop-foot">
+              {s.version !== null && (
+                <Tooltip content={s.dirty ? 'Saves the unsaved changes first; locks only if that works' : 'Opening it again takes your passkey or the recovery code'}>
+                  <Button size="mini" busy={lock.busy} onClick={() => void lock.run()}>
+                    Lock
+                  </Button>
+                </Tooltip>
+              )}
+              <Button size="mini" variant="ghost" onClick={() => void endSession()}>
+                End session…
+              </Button>
+            </div>
+          </>
+        )}
       </Popover>
       {host && createPortal(<Banner s={s} />, host)}
       <ConflictSheet open={sheet} onClose={() => setSheet(false)} />
@@ -301,7 +324,11 @@ function Banner({ s }: { s: SyncStatus }) {
   let tone: 'down' | 'gold' | 'ink'
   let text: string
   let action: { label: string; run: () => void; busy?: boolean }
-  if (s.idleBlocked) {
+  if (s.state === 'sample') {
+    tone = 'ink'
+    text = 'A made-up sample household — nothing you change is saved.'
+    action = { label: 'Leave the sample', run: leaveSample }
+  } else if (s.idleBlocked) {
     // The idle lock came due and didn't happen: say so first — the rest of the story (a conflict, offline) follows from the action.
     tone = 'down'
     text = s.idleBlocked

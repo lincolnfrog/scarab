@@ -922,6 +922,53 @@ Follow-ups:
 - [ ] The forecast treats a withdrawal as not reducing it; a pro-rata
       reduction of the standing book would be the next refinement.
 
+## A stranger's way in (2026-10-22)
+
+Before open sign-up is switched on, a new household needs a way in: a vault
+used to land on an empty Dashboard, and there was no way to see what Scarab
+does before typing in real numbers.
+
+- [x] **Setup checklist** (`engine/setup.ts`, `GET`/`PUT /api/setup`,
+      `src/cards/Setup.tsx`): six steps read from the ledger at read time —
+      a bank or card account with transactions, an investment account with
+      holdings or a balance, a property, a paycheck, birth years for everyone
+      the ledger names, filing status and state saved on Taxes (the defaults
+      are an assumption until then; "That's right" saves them). Each links
+      into the existing flow (`#/cash/import?d=add-account` or `?d=import`,
+      `#/invest?d=add-account`, `#/re?d=add-property`, `#/tax?d=add-paycheck`,
+      `#/tax/contributions`, `#/tax/settings`). The hero of an empty
+      Dashboard; then a card in the attention row over `#/dash/setup`; gone
+      when complete or hidden (a per-person app_meta mark, reversible from the
+      detail view and ⌘K "Setting up").
+- [x] **Sample household** (`engine/sample.ts`, `src/sample.ts`, "Look around
+      with a sample household" on the front door's setup step): two earners
+      (biweekly and semimonthly stubs, one with RSUs in a stock plan priced by
+      hand), a house with a mortgage, a joint brokerage with long-held lots and
+      monthly buys, a 401(k) and a 403(b) by statement balance, checking,
+      savings and a card, two years of transactions filed by the seed rules
+      plus a pasted few, a budget, a Dream Home goal, an allocation target —
+      so every screen and nine Checkup findings have something to say. Built
+      in the tab through the engine's write paths, deterministic per day;
+      index funds take real month-end closes from the shared market history
+      when the tab has it. A session `setVault` refuses: no save queue, no
+      autosave, no upload, no "Leave site?"; badged in the topbar chip,
+      sidebar and a banner; Data & Vault shows one card; "Leave the sample"
+      reloads to the front door with the address bar cleared. The entry
+      bundle grew 1.75 kB (badge, guards); the builder is its own chunk.
+- [x] **Proof** (`e2e/sample.spec.ts`, `npm run test:egress` beside the
+      egress proof, sharing `e2e/harness.ts`): open, browse, edit, background,
+      leave — only GETs, only allowlisted paths, no vault stored, none of the
+      sample's data in a request or in browser storage.
+
+Follow-ups:
+
+- [ ] "Connect your bank" as step one once in-tab SimpleFIN sync lands (only
+      the bank step's action in `src/cards/Setup.tsx` changes).
+- [ ] Cash's first-run account form overflows its card at 375px (the
+      select runs past the edge) — seen while checking the checklist's link.
+- [ ] The design mockup has no empty-household state or sample badge; add
+      them when it is next re-cut.
+
 ## Backlog: smaller, high leverage
 
 - [x] Performance attribution on Invest — shipped 2026-09-23 (above): a
