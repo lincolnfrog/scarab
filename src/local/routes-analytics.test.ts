@@ -289,7 +289,8 @@ describe('the daily price chart reads the hashed bucket a held symbol falls in',
       const chart = (await call('GET', '/api/charts/VTI')) as Chart
       expect(chart.closes.at(-1)).toEqual({ d: today, c: 22_500 })
       expect(chart.closes).toHaveLength(25) // 24 month ends and today: none of the bucket's days
-      expect(chart.closes.some((c) => vtiDays.some((v) => v.d === c.d))).toBe(false)
+      // By date and close: early in a month the bucket's ten days reach back over last month's end, which the file has too.
+      expect(chart.closes.some((c) => vtiDays.some((v) => v.d === c.d && v.c === c.c))).toBe(false)
       expect(bucketFetches()).toHaveLength(1)
       await call('GET', '/api/charts/VTI')
       expect(bucketFetches()).toHaveLength(1) // remembered for a minute
